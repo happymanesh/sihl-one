@@ -22,8 +22,11 @@ RUN npm ci --ignore-scripts
 FROM node:22-alpine AS build
 WORKDIR /app
 
+# npm workspaces hoists every dependency to the root node_modules and symlinks
+# the workspace packages into it. A nested packages/contracts/node_modules only
+# appears when a version conflict forces one, so copying it unconditionally
+# fails the build on a clean install.
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/contracts/node_modules ./packages/contracts/node_modules
 COPY . .
 
 RUN npm run build -w @sihl-one/contracts \

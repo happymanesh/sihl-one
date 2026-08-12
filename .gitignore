@@ -26,7 +26,11 @@ Thumbs.db
 # Generated
 apps/api/src/generated/
 apps/api/prisma/generated/
-storage/
+# Uploaded files (STORAGE_LOCAL_ROOT). Anchored with a leading slash: a bare
+# "storage/" also matched apps/api/src/modules/storage/, which silently kept six
+# source files out of the repo until a clean Docker build failed to compile.
+/storage/
+/apps/api/storage/
 .tmp/
 
 # Production secrets — never committed.
