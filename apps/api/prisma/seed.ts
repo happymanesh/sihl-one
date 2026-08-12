@@ -221,6 +221,12 @@ async function seedUsers(
       update: {
         designationId: person.designation ? (designations.get(person.designation) ?? null) : null,
         employeeCode: person.employeeCode ?? null,
+        // The password re-syncs too. Without this, SEED_PASSWORD only takes
+        // effect on a database that has never been seeded — so a demo password
+        // that has leaked cannot be rotated by re-running the seed, which is
+        // exactly the moment someone reaches for it.
+        passwordHash,
+        passwordChangedAt: new Date(),
       },
       create: {
         reference,
