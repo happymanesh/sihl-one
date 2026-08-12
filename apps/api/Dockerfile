@@ -52,6 +52,10 @@ COPY --from=build --chown=nodejs:nodejs /app/packages/contracts/dist ./packages/
 COPY --from=build --chown=nodejs:nodejs /app/packages/contracts/package.json ./packages/contracts/
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/dist ./apps/api/dist
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/prisma ./apps/api/prisma
+# The seed and bootstrap scripts import the generated client from src/, not from
+# dist/. Prisma 7 emits TypeScript rather than a prebuilt package, so the source
+# has to be present for those one-off tasks to resolve it.
+COPY --from=build --chown=nodejs:nodejs /app/apps/api/src/generated ./apps/api/src/generated
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/package.json ./apps/api/
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/prisma.config.production.mjs ./apps/api/
 COPY --chmod=755 apps/api/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
