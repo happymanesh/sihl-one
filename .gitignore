@@ -31,3 +31,5 @@ storage/
 
 # Production secrets — never committed.
 .secrets.production.local
+
+.vercel
