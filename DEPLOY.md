@@ -29,124 +29,99 @@ node -e "const c=require('crypto');console.log(c.randomBytes(48).toString('base6
 
 ---
 
-## 1. Push the code
+## What is actually deployed
 
-The repository was initialised locally but has no remote.
+Everything runs on Railway, in project `sihl-one`: the API, the web app and
+Postgres. Vercel was the original plan for the web app and is not used — its
+deploy step fails with *"Cannot patch preview comments when immutable static
+file upload is enabled"*. That reproduces on CLI 53 and 58, on preview and
+production, on a fresh project, and on a newer Next canary. The build succeeds
+every time; only the upload fails. If Vercel fix it, `vercel.json` is still
+correct and the web app can move back.
 
-```bash
-git remote add origin https://github.com/<you>/sihl-one.git
-git branch -M main
-git push -u origin main
-```
+| Piece | URL |
+| ----- | --- |
+| Web | https://web-production-97dc7.up.railway.app |
+| API | https://api-production-c405d.up.railway.app |
+| Health | `/health/live`, `/health/ready` (excluded from the `/api` prefix) |
 
-Make it **private**. It carries the full data model and every access rule.
+`render.yaml` is kept for reference but has never been run, and its environment
+block is wrong — see below.
 
 ---
 
-## 2. Database — Neon
+## Environment
 
-Create a project, copy the pooled connection string. That is `DATABASE_URL`.
+The API validates its environment at boot with a Zod schema in
+`apps/api/src/config/configuration.ts` and refuses to start if anything is
+missing. **That schema is the source of truth**, not this file. An earlier
+version of this document listed a single `JWT_SECRET`, which does not exist.
 
----
-
-## 3. API — Render
-
-`render.yaml` in the repo root is a blueprint: New → Blueprint → pick the repo.
-It builds `apps/api/Dockerfile` and provisions Postgres alongside, so skip step 2
-if you use it.
-
-Set these in the dashboard (the blueprint marks them `sync: false` so they never
-live in the repo):
-
-| Variable | Value |
+| Variable | Notes |
 | -------- | ----- |
-| `JWT_SECRET` | from above |
-| `PASSWORD_PEPPER` | from above |
-| `PUBLIC_WEB_URL` | your Vercel URL — you will not have it yet, see step 5 |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` — wired by Railway |
+| `JWT_ISSUER`, `JWT_AUDIENCE` | `sihl-one`, `sihl-one-web` |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | ≥32 chars, **must differ** — the schema rejects reuse, since a shared secret lets a stolen access token be replayed as a refresh token |
+| `PASSWORD_PEPPER` | Set before the first user exists and never changed |
+| `CORS_ORIGINS` | The web URL. No wildcard — rejected in production |
+| `PUBLIC_WEB_URL` | Builds partner referral links and event QR codes |
+| `STORAGE_LOCAL_ROOT` | `/data/storage`, on the mounted volume |
+| `STORAGE_LOCAL_DURABLE` | `true`. Only honest at one replica — a volume is not shared |
+| `SEED_PASSWORD` | Set this **before** the first seed, or the demo accounts get the default written in `seed.ts` |
 
-`NODE_ENV=production` and `DATABASE_URL` are set by the blueprint. Production
-mode turns Swagger off and suppresses verbose errors.
-
-Health check: `https://<api>.onrender.com/health/live` should return
-`{"status":"ok"}`.
-
----
-
-## 4. Web — Vercel
-
-Import the repo. `vercel.json` sets the build; Vercel detects Next.js.
-
-| Variable | Value |
-| -------- | ----- |
-| `NEXT_PUBLIC_API_BASE_URL` | `https://<api>.onrender.com/api/v1` |
-| `API_INTERNAL_BASE_URL` | the same |
-
-Vercel sets `NODE_ENV=production` itself, which is what hides the demo-account
-block on the login page.
+Live values are in `.secrets.production.local`, which is gitignored. They are
+not written down here: an earlier revision of this file carried them in
+plaintext and pushed them.
 
 ---
 
-## 5. Close the loop
+## One-off data tasks
 
-The two services need each other's URLs, so one of them has to go second: set
-`PUBLIC_WEB_URL` on Render to the Vercel URL now and redeploy the API. It is used
-to build partner referral links and event QR codes — wrong, and those links point
-nowhere.
-
----
-
-## 6. Load the database
-
-Run these locally with `DATABASE_URL` pointing at the deployed database.
+The seed and the team bootstrap run inside the container, gated on flags that
+default to false:
 
 ```bash
-DATABASE_URL="<neon-url>" npm run db:deploy -w @sihl-one/api
-DATABASE_URL="<neon-url>" NODE_ENV=development npm run db:seed -w @sihl-one/api
+railway variables -s api --set "SEED_ON_BOOT=true"          # or BOOTSTRAP_TEAM_ON_BOOT
+# let one boot happen, watch `railway logs -s api`, then:
+railway variables -s api --set "SEED_ON_BOOT=false"
 ```
 
-`NODE_ENV=development` on the **seed** is deliberate and is the one
-counter-intuitive step. The seed skips demo data under `NODE_ENV=production`, and
-you want the demo book — 66 leads across every pipeline stage — so testers have
-something to react to in week one. It does not affect how the API runs; that
-stays `production`.
+They run there rather than from a laptop so the database never has to be
+exposed on a public TCP proxy for an afternoon of setup. Both are safe to
+repeat; a flag left on re-runs them on every restart.
 
-Every demo mobile is `90000xxxxx`, sequential and unmistakably synthetic. That is
-deliberate: India has no reserved fictional-number range, so the protection is
-that no human mistakes them for real. Give six salespeople a CRM full of leads
-and one of them will press call.
+The bootstrap prints temporary passwords **once**, into the Railway logs. Treat
+those logs as sensitive and hand the passwords over individually.
 
 ---
 
-## 7. Create the real users
+## Gotchas that cost real time
 
-Edit the block marked `EDIT THIS` in `apps/api/prisma/bootstrap-team.ts` with
-real names, emails and mobiles first.
-
-```bash
-DATABASE_URL="<neon-url>" PASSWORD_PEPPER="<pepper>" npm run bootstrap:team -w @sihl-one/api
-DATABASE_URL="<neon-url>" PASSWORD_PEPPER="<pepper>" npm run bootstrap:team -w @sihl-one/api -- --apply
-```
-
-Run it without `--apply` first: it prints exactly who it would create, with roles,
-scopes and reporting lines, and writes nothing. With `--apply` it prints temporary
-passwords **once**.
-
-The reporting lines are the part worth checking. A sales manager's `TEAM` scope
-resolves to their own direct reports, so a manager whose executives are not linked
-to them sees nothing, and one linked to the wrong executives sees the wrong book.
-
-Hand the passwords over individually, not in a group chat. Every account is
-flagged `mustChangePassword`.
+- **`npm prune --omit=dev` strips anything the container needs at runtime.**
+  The Prisma CLI, `tsx` and `dotenv` are dependencies, not devDependencies, for
+  exactly this reason.
+- **Prisma 7 will not migrate without a config file supplying `datasource.url`.**
+  `prisma.config.ts` is TypeScript and imports `dotenv`, so the image carries
+  `prisma.config.production.mjs` instead.
+- **Migrations run from `apps/api/docker-entrypoint.sh`**, not from a platform
+  command field. The image entrypoint is tini, which execs its arguments
+  directly — a `migrate && start` string is passed through verbatim and dies
+  before writing a log line.
+- **Git Bash rewrites arguments that look like Unix paths.** Setting
+  `STORAGE_LOCAL_ROOT=/data/storage` stored `C:/Program Files/Git/data/storage`.
+  Prefix with `MSYS_NO_PATHCONV=1`.
+- **`railway logs` defaults to the last *successful* deployment**, so a failing
+  deploy shows stale output. Pass the deployment id.
 
 ---
 
-## Before you send the link
+## Before you widen access
 
-- [ ] `https://<vercel-url>/login` shows **no** demo accounts block
-- [ ] Sign in as your admin and load `/leads` — the demo book is there
+- [ ] `/login` shows **no** demo accounts block (it does not — `NODE_ENV=production`)
 - [ ] Sign in as one sales manager and confirm they cannot see the other team's leads
-- [ ] Tell everyone to leave two-step verification alone for now, or make sure
-      they know an admin can reset it from `/admin/users`
+- [ ] Rotate `SEED_PASSWORD` if the demo accounts are staying reachable
+- [ ] Tell everyone to leave two-step verification alone, or make sure they know
+      an admin can reset it from `/admin/users`
 
 ---
 
@@ -154,5 +129,14 @@ flagged `mustChangePassword`.
 
 Recorded in [release readiness](docs/release-readiness.md): no penetration test,
 no load testing, no DPDP retention policy, and six React components that sync
-state in an effect. None of these block an internal test on synthetic data; all
-of them precede real customer records.
+state in an effect. None block an internal test on synthetic data; all precede
+real customer records.
+
+Two more, added by this deployment:
+
+- **Hosting region.** Railway's region decides where Indian customer records
+  physically sit, which SEBI and DPDP care about. Irrelevant for synthetic data,
+  not irrelevant for the first real one.
+- **`tsx` ships in the production image** so the one-off tasks can run. Once the
+  team exists and the book is loaded, move `tsx` and `dotenv` back to
+  devDependencies and drop the two flags from the entrypoint.
