@@ -1,0 +1,71 @@
+# Local development dependencies.
+#
+# The apps themselves run on the host (`npm run dev`) rather than in containers:
+# hot reload through a bind mount on Windows is slow and unreliable, and the
+# feedback loop matters more than environment parity during development. Parity
+# is enforced where it counts — in CI and in the production images.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sihl-one-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sihl_one
+      # Collation matters for ORDER BY on Indian names; pinned so every
+      # developer and every environment sorts identically.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d sihl_one']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    # Not used in Phase 1. Present so the queue and cache work in Phase 2 does
+    # not begin with an infrastructure change.
+    image: redis:7-alpine
+    container_name: sihl-one-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    # S3-compatible object storage for visit selfies and uploaded documents.
+    # Those files must never live in Postgres — see ADR-0006.
+    image: minio/minio:latest
+    container_name: sihl-one-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sihlone
+      MINIO_ROOT_PASSWORD: sihlone-dev-secret
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

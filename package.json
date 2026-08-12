@@ -1,0 +1,30 @@
+{
+  "name": "sihl-one",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SIHL ONE \u2014 unified digital engagement platform for Shah Investors Home Ltd.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @sihl-one/api\" \"npm run dev -w @sihl-one/web\"",
+    "dev:api": "npm run dev -w @sihl-one/api",
+    "dev:web": "npm run dev -w @sihl-one/web",
+    "build": "npm run build -w @sihl-one/contracts && npm run build -w @sihl-one/api && npm run build -w @sihl-one/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @sihl-one/api",
+    "db:migrate": "npm run db:migrate -w @sihl-one/api",
+    "db:seed": "npm run db:seed -w @sihl-one/api",
+    "db:reset": "npm run db:reset -w @sihl-one/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}

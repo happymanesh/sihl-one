@@ -1,0 +1,5 @@
+{
+  "// why": "Lint-only project. The build tsconfig deliberately excludes tests so they are not emitted into dist; type-aware lint rules still need them in a program, so they get their own.",
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "test/**/*.ts", "*.mjs"]
+}

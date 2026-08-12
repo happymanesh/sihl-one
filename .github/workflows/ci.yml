@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  # A new push supersedes an in-flight run on the same ref. Without this, a busy
+  # branch queues builds that nobody will read.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  quality:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # The contracts package must be built first: both apps import its compiled
+      # output, and a stale build here produces confusing type errors downstream.
+      - name: Build shared contracts
+        run: npm run build -w @sihl-one/contracts
+
+      - name: Generate Prisma client
+        run: npm run db:generate -w @sihl-one/api
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Lint
+        run: npm run lint --workspaces --if-present
+
+      - name: Unit tests
+        run: |
+          npm test -w @sihl-one/contracts
+          npm test -w @sihl-one/api
+
+  integration:
+    name: Migrations, seed and end-to-end
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sihl_one_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sihl_one_test?schema=public
+      API_PORT: 4000
+      API_GLOBAL_PREFIX: api
+      CORS_ORIGINS: http://localhost:3000
+      IDENTITY_PROVIDER: local
+      JWT_ISSUER: https://one.sihl.in
+      JWT_AUDIENCE: sihl-one
+      JWT_ACCESS_SECRET: ci-only-access-secret-0123456789abcdef0123456789abcdef
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-fedcba9876543210fedcba9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 2592000
+      PASSWORD_PEPPER: ci-only-pepper
+      AUTH_MAX_FAILED_ATTEMPTS: 5
+      AUTH_LOCKOUT_MINUTES: 15
+      # The e2e suite makes far more than 120 requests a minute. The *login*
+      # throttle stays at its production value — the suite backs off around it —
+      # but the global limit is raised so throughput does not mask real failures.
+      RATE_LIMIT_TTL: 60
+      RATE_LIMIT_LIMIT: 5000
+      SEED_PASSWORD: Sihl@One2026!
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build -w @sihl-one/contracts
+
+      - name: Apply migrations
+        working-directory: apps/api
+        # `migrate deploy`, never `migrate dev`: deploy applies committed
+        # migrations and nothing else. `dev` can generate a new migration or
+        # reset the database, neither of which belongs in an automated pipeline.
+        run: npx prisma migrate deploy
+
+      - name: Verify the schema matches the migrations
+        working-directory: apps/api
+        # Catches a schema.prisma edited without a matching migration — which
+        # would otherwise only surface as a production deploy that does nothing.
+        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$DATABASE_URL" --exit-code
+
+      - name: Seed
+        working-directory: apps/api
+        run: npx tsx prisma/seed.ts
+
+      - name: Build API
+        run: npm run build -w @sihl-one/api
+
+      - name: Start API
+        run: |
+          node apps/api/dist/main.js &
+          echo $! > /tmp/api.pid
+          npx wait-on http://localhost:4000/health/ready --timeout 60000
+
+      - name: End-to-end tests
+        run: npm run test:e2e -w @sihl-one/api
+
+      - name: Stop API
+        if: always()
+        run: kill "$(cat /tmp/api.pid)" || true
+
+  build-web:
+    name: Production build (web)
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @sihl-one/contracts
+      - run: npm run db:generate -w @sihl-one/api
+      - run: npm run build -w @sihl-one/web
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # High and critical only. Failing on every low-severity transitive advisory
+      # trains people to ignore the job, which is worse than not having it.
+      - run: npm audit --audit-level=high

@@ -1,0 +1,5 @@
+{
+  "// why": "Lint-only project: the build tsconfig excludes prisma scripts and tests, which the type-aware rules still need in a program.",
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts"]
+}

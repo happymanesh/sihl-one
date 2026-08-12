@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "incremental": true,
+    // Keep the incremental cache inside `dist`. `nest build` sets
+    // deleteOutDir, so with the default cache location (next to tsconfig) the
+    // compiler still believes already-emitted files are current after the
+    // output directory has been wiped — and silently skips emitting them,
+    // producing a dist that is missing modules but exits 0.
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  // `src/generated` is compiled with the app on purpose: Prisma 7's client
+  // generator emits TypeScript source rather than a prebuilt package, so
+  // excluding it would leave `dist` without a client at runtime.
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

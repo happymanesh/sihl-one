@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1.7
+#
+# Production image for the SIHL ONE API.
+#
+# Multi-stage so the runtime image carries no compiler, no dev dependencies and
+# no source. Smaller image, faster pulls, and materially less to exploit.
+
+# --- Stage 1: install -------------------------------------------------------
+FROM node:22-alpine AS deps
+WORKDIR /app
+
+# Copy only manifests first. This layer is cached until a dependency actually
+# changes, so ordinary code edits skip a full npm install.
+COPY package.json package-lock.json ./
+COPY packages/contracts/package.json ./packages/contracts/
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+
+RUN npm ci --ignore-scripts
+
+# --- Stage 2: build ---------------------------------------------------------
+FROM node:22-alpine AS build
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/contracts/node_modules ./packages/contracts/node_modules
+COPY . .
+
+RUN npm run build -w @sihl-one/contracts \
+ && npm run db:generate -w @sihl-one/api \
+ && npm run build -w @sihl-one/api \
+ && npm prune --omit=dev
+
+# --- Stage 3: runtime -------------------------------------------------------
+FROM node:22-alpine AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# tini reaps zombies and forwards SIGTERM, so Nest's shutdown hooks actually run
+# and in-flight requests drain instead of being cut off mid-transaction.
+RUN apk add --no-cache tini
+
+# Never run as root. A container escape should not start from uid 0.
+RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S nodejs -G nodejs
+
+COPY --from=build --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=build --chown=nodejs:nodejs /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=build --chown=nodejs:nodejs /app/packages/contracts/package.json ./packages/contracts/
+COPY --from=build --chown=nodejs:nodejs /app/apps/api/dist ./apps/api/dist
+COPY --from=build --chown=nodejs:nodejs /app/apps/api/prisma ./apps/api/prisma
+COPY --from=build --chown=nodejs:nodejs /app/apps/api/package.json ./apps/api/
+
+USER nodejs
+EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:4000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "apps/api/dist/main.js"]

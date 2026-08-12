@@ -1,0 +1,1466 @@
+// ---------------------------------------------------------------------------
+// SIHL ONE — data model
+//
+// Scope rule (ADR-0002): SIHL ONE is a System of Engagement, not a System of
+// Record. It owns the relationship — leads, interactions, tasks, visits,
+// attribution, consent. It does NOT own regulated books: holdings, ledgers,
+// contract notes and KYC artefacts stay in the back office and eKYC systems and
+// are mirrored here read-only, with `sourceSystem` / `externalRef` / `syncedAt`
+// stamped on anything mirrored. Nothing in this schema is a golden copy of a
+// SEBI record.
+//
+// Conventions
+//  - `reference`  human-readable business id (LD-2026-000123). Shown in the UI
+//                 and quoted on calls; the cuid primary key never is.
+//  - `deletedAt`  soft delete. Nothing a regulator may ask about is hard-deleted
+//                 by the application.
+//  - Money        Decimal(18,2). Never Float — binary floating point cannot
+//                 represent rupee amounts exactly.
+//  - Timestamps   every table carries createdAt/updatedAt; audit-relevant tables
+//                 also carry createdById/updatedById.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+// Prisma 7 removed `url` from the schema. Migrate/introspect read the URL from
+// prisma.config.ts; the runtime client gets a driver adapter (see prisma.service.ts).
+datasource db {
+  provider = "postgresql"
+}
+
+// ===========================================================================
+// Identity, organisation and access control
+// ===========================================================================
+
+enum UserType {
+  INTERNAL
+  PARTNER
+  CUSTOMER
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  LOCKED
+  DISABLED
+}
+
+enum DataScope {
+  ALL
+  ZONE
+  REGION
+  BRANCH
+  TEAM
+  SELF
+}
+
+enum OrgUnitType {
+  COMPANY
+  ZONE
+  REGION
+  BRANCH
+  TEAM
+}
+
+/// Organisational hierarchy. Mirrors the levels SIHL already uses in the back
+/// office so "branch" means the same thing in every system.
+///
+/// `path` is a materialised path of ancestor ids (`/root/zone/region/branch/`).
+/// ABAC subtree filtering becomes a single indexed `startsWith` instead of a
+/// recursive CTE per request — the hierarchy changes a few times a year and is
+/// read on literally every list query, so the denormalisation pays for itself.
+model OrgUnit {
+  id        String      @id @default(cuid())
+  code      String      @unique @db.VarChar(40)
+  name      String      @db.VarChar(120)
+  type      OrgUnitType
+  parentId  String?
+  parent    OrgUnit?    @relation("OrgUnitTree", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children  OrgUnit[]   @relation("OrgUnitTree")
+  path      String      @db.VarChar(1000)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  users           User[]
+  leads           Lead[]
+  customers       Customer[]
+  partners        Partner[]
+  assignmentRules AssignmentRule[]
+
+  @@index([parentId])
+  @@index([path])
+  @@map("org_unit")
+  events Event[]
+}
+
+/// Sales hierarchy levels.
+///
+/// Data rather than an enum, because the business needs to skip levels
+/// (Regional and Zonal are optional) and to add new ones — Area Manager,
+/// Cluster Head — without a deployment. `level` is a rank where a higher
+/// number is more senior, seeded with gaps so a new level can be slotted
+/// between two existing ones without renumbering anyone.
+model Designation {
+  id           String    @id @default(cuid())
+  code         String    @unique @db.VarChar(40)
+  name         String    @db.VarChar(80)
+  level        Int
+  /// Starting data scope for anyone at this level. A user record may narrow
+  /// it, never widen it.
+  defaultScope DataScope
+  isActive     Boolean   @default(true)
+  /// Seeded levels cannot be deleted, only deactivated.
+  isSystem     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  users User[]
+
+  @@index([isActive, level])
+  @@map("designation")
+}
+
+/// Roles are data, not code.
+///
+/// `permissions` is seeded from the ROLE_PERMISSIONS matrix in
+/// @sihl-one/contracts, then owned by the database. The code matrix is the
+/// default and the thing tests assert against; the DB row is what the guard
+/// reads at runtime. That lets compliance re-cut who-can-do-what without a
+/// deployment, while still giving developers one readable place to see intent.
+model Role {
+  code        String   @id @db.VarChar(40)
+  name        String   @db.VarChar(80)
+  description String?  @db.VarChar(300)
+  permissions String[]
+  /// System roles cannot be deleted or renamed through the admin UI.
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users UserRole[]
+
+  @@map("role")
+}
+
+model User {
+  id        String     @id @default(cuid())
+  reference String     @unique @db.VarChar(24)
+  firstName String     @db.VarChar(60)
+  lastName  String     @db.VarChar(60)
+  email     String     @unique @db.VarChar(160)
+  mobile    String?    @unique @db.VarChar(15)
+  /// Argon2id. Null for users who authenticate only through an external IdP.
+  passwordHash String? @db.VarChar(255)
+  userType  UserType
+  status    UserStatus @default(INVITED)
+
+  /// Requested scope. The effective scope is min(role default, this) — see
+  /// effectiveScope() in @sihl-one/contracts. Never widens a role's ceiling.
+  dataScope DataScope?
+
+  orgUnitId String?
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// Reporting line. Drives the TEAM data scope for sales managers.
+  managerId String?
+  manager   User?   @relation("UserReportsTo", fields: [managerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  reports   User[]  @relation("UserReportsTo")
+
+  /// Where this person sits in the sales hierarchy. Separate from Role
+  /// (what they may do) and DataScope (which rows) — see hierarchy.ts.
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// Join key for the future HR feed. Optional until that feed exists, and
+  /// deliberately loose in format so it can match whatever HR already uses.
+  employeeCode String? @db.VarChar(24)
+
+  /// True once a record is owned by the HR sync. Without this the first sync
+  /// would clobber every user created by hand in the admin screen.
+  isHrManaged Boolean @default(false)
+
+  /// Set when userType = PARTNER: the partner org this login belongs to.
+  partnerId String?
+  partner   Partner? @relation("PartnerUsers", fields: [partnerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  avatarUrl           String?   @db.VarChar(500)
+  mustChangePassword  Boolean   @default(false)
+  passwordChangedAt   DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  mfaEnabled          Boolean   @default(false)
+  /// Base32 TOTP secret. Written only once the first code has been verified —
+  /// a secret stored at setup time locks out anyone who abandons enrolment.
+  mfaSecret           String?   @db.VarChar(255)
+  mfaEnrolledAt       DateTime?
+
+  /// Set when someone resigns or is served notice. Bulk exports and large reads
+  /// by a user in notice are audited at an elevated level — a departing
+  /// salesperson walking out with the book is the single most common data-loss
+  /// event in a broking business.
+  noticePeriodFrom DateTime?
+  offboardedAt     DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  roles          UserRole[]
+  mfaRecoveryCodes MfaRecoveryCode[]
+  sessions       Session[]
+  ownedLeads     Lead[]     @relation("LeadOwner")
+  ownedEvents    Event[]    @relation("EventOwner")
+  managedCustomers Customer[] @relation("CustomerRM")
+  activities     Activity[] @relation("ActivityActor")
+  assignedTasks  Task[]     @relation("TaskAssignee")
+  createdTasks   Task[]     @relation("TaskCreator")
+  visits         Visit[]
+  auditLogs      AuditLog[]
+  importBatches  LeadImportBatch[]
+  salesTargets   SalesTarget[]
+
+  @@index([orgUnitId])
+  @@index([managerId])
+  @@index([partnerId])
+  @@index([status])
+  @@index([designationId])
+  @@map("app_user")
+}
+
+model UserRole {
+  userId     String
+  roleCode   String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  role       Role     @relation(fields: [roleCode], references: [code], onDelete: Restrict, onUpdate: Cascade)
+  assignedAt DateTime @default(now())
+  assignedBy String?
+
+  @@id([userId, roleCode])
+  @@index([roleCode])
+  @@map("user_role")
+}
+
+/// One row per logged-in device.
+///
+/// Only the SHA-256 of the refresh token is stored. A database leak therefore
+/// does not hand the attacker usable refresh tokens, and revoking one device
+/// does not log the user out everywhere — which is the behaviour a salesperson
+/// with a phone and a desktop actually needs.
+/// Single-use MFA recovery codes.
+///
+/// A row each rather than an array on the user, because a *used* code must stay
+/// on the record. "Somebody signed in with a recovery code at 3am" is the signal
+/// worth having, and an array that shrinks silently destroys it.
+model MfaRecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  /// SHA-256 of the code. Not Argon2: these are 80 bits of real entropy, so
+  /// they need no stretching, and ten Argon2 verifications per sign-in attempt
+  /// would be a denial-of-service surface of our own making.
+  codeHash String    @unique @db.VarChar(64)
+  usedAt   DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("mfa_recovery_code")
+}
+
+/// Editable master for lead sources.
+///
+/// Replaces a Postgres enum. An enum cannot be extended from an admin screen —
+/// `ALTER TYPE` is DDL — so "add a source" meant a developer and a deploy.
+///
+/// `isSystem` marks the ten the product shipped with. They can be relabelled,
+/// reweighted and deactivated, but never deleted or re-coded: scoring,
+/// assignment rules and every historical lead point at those codes, and a
+/// rename would quietly detach a year of reporting from its own history.
+model LeadSourceMaster {
+  id    String @id @default(cuid())
+  code  String @unique @db.VarChar(40)
+  label String @db.VarChar(80)
+  description String? @db.VarChar(300)
+
+  /// Points this source contributes to the lead score, 0–25.
+  ///
+  /// Required when adding one. The engine has a fallback, but letting a new
+  /// source land on it silently means nobody ever decides what a lead from that
+  /// channel is actually worth.
+  scoringWeight Int @default(4)
+
+  isActive  Boolean @default(true)
+  isSystem  Boolean @default(false)
+  sortOrder Int     @default(100)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  leads Lead[]
+
+  @@index([isActive, sortOrder])
+  @@map("lead_source")
+}
+
+/// Editable master for products.
+///
+/// Two jobs in one table. It is the list of things a lead can express interest
+/// in, and it is the catalogue a salesperson opens in front of a client — which
+/// is why it carries description, benefits, charges and eligibility rather than
+/// just a code and a label.
+model Product {
+  id    String @id @default(cuid())
+  code  String @unique @db.VarChar(40)
+  name  String @db.VarChar(80)
+
+  /// One line, for the dropdown and the card.
+  summary String? @db.VarChar(300)
+  /// What the salesperson actually reads out. Markdown.
+  description String? @db.Text
+
+  /// Bullet points, in order. Kept as an array rather than prose so the
+  /// screen can lay them out and a rep can scan them mid-call.
+  keyBenefits String[]
+  /// Plain-language brokerage and charges. Indicative, never a tariff sheet —
+  /// the back office owns actual pricing (ADR-0002).
+  chargesSummary String? @db.VarChar(600)
+  eligibility    String? @db.VarChar(600)
+  /// SEBI-style risk wording where it applies, e.g. derivatives.
+  riskNote       String? @db.VarChar(600)
+  /// Object key for a brochure in the document store.
+  brochureKey    String? @db.VarChar(300)
+
+  isActive  Boolean @default(true)
+  isSystem  Boolean @default(false)
+  sortOrder Int     @default(100)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("product")
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum MessagePurpose {
+  TRANSACTIONAL
+  SERVICE
+  PROMOTIONAL
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  SUPPRESSED
+}
+
+/// An approved piece of outbound copy.
+///
+/// `purpose` is the field the send gate turns on, which is why it is fixed at
+/// creation and not editable: relabelling a promotion as transactional to dodge
+/// DND and quiet hours is precisely the abuse TRAI exists to stop, and it must
+/// not be a one-click edit.
+model MessageTemplate {
+  id      String         @id @default(cuid())
+  code    String         @unique @db.VarChar(40)
+  name    String         @db.VarChar(120)
+  channel MessageChannel
+  purpose MessagePurpose
+
+  /// Email only.
+  subject String? @db.VarChar(200)
+  body    String  @db.Text
+  /// Meta's approved-template id, required for business-initiated WhatsApp.
+  providerTemplateId String? @db.VarChar(120)
+
+  isActive    Boolean @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages MessageLog[]
+
+  @@index([channel, isActive])
+  @@map("message_template")
+}
+
+/// Every outbound message, including the ones that were refused.
+///
+/// A suppressed message is recorded with its reason rather than dropped. "I
+/// sent it and they never got it" is the hardest support call there is, and it
+/// is unanswerable if a refusal leaves no trace.
+model MessageLog {
+  id String @id @default(cuid())
+
+  templateId String?
+  template   MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  templateCode String         @db.VarChar(40)
+
+  channel MessageChannel
+  purpose MessagePurpose
+
+  leadId     String?
+  lead       Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// The address actually used, kept for dispute resolution.
+  destination String @db.VarChar(200)
+  subject     String? @db.VarChar(200)
+  /// Rendered at send time. A template edited later must not rewrite history.
+  body        String @db.Text
+
+  status       MessageStatus @default(QUEUED)
+  /// Why the gate allowed or refused it — see `canSend` in contracts.
+  decisionCode String        @db.VarChar(40)
+  failureReason String?      @db.VarChar(400)
+  providerMessageId String?  @db.VarChar(160)
+
+  requestedById String?
+  sentAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([leadId])
+  @@index([customerId])
+  @@map("message_log")
+}
+
+/// A standing refusal on one channel.
+///
+/// Outranks every purpose including transactional. Kept as its own table rather
+/// than a flag so the date and channel survive, which is what an opt-out
+/// complaint turns on.
+model MessageOptOut {
+  id         String         @id @default(cuid())
+  entityType EntityType
+  entityId   String         @db.VarChar(64)
+  channel    MessageChannel
+  reason     String?        @db.VarChar(300)
+  createdAt  DateTime       @default(now())
+
+  @@unique([entityType, entityId, channel])
+  @@map("message_opt_out")
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  refreshTokenHash String    @unique @db.VarChar(64)
+  deviceId         String?   @db.VarChar(120)
+  deviceLabel      String?   @db.VarChar(120)
+  userAgent        String?   @db.VarChar(400)
+  ipAddress        String?   @db.VarChar(45)
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  revokedReason    String?   @db.VarChar(120)
+  lastSeenAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("session")
+}
+
+/// Every authentication attempt, successful or not. Separate from AuditLog
+/// because it is written on the unauthenticated path and is queried by the
+/// security team on a different cadence.
+model LoginAttempt {
+  id         String   @id @default(cuid())
+  identifier String   @db.VarChar(160)
+  userId     String?
+  successful Boolean
+  failReason String?  @db.VarChar(80)
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.VarChar(400)
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, createdAt])
+  @@index([userId, createdAt])
+  @@map("login_attempt")
+}
+
+// ===========================================================================
+// CRM — leads
+// ===========================================================================
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  CONVERTED
+  LOST
+  DISQUALIFIED
+}
+
+enum LeadLostReason {
+  PRICE
+  COMPETITOR
+  NOT_INTERESTED
+  UNREACHABLE
+  INELIGIBLE
+  DUPLICATE
+  OTHER
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Lead {
+  id        String     @id @default(cuid())
+  reference String     @unique @db.VarChar(24)
+
+  firstName String  @db.VarChar(60)
+  lastName  String? @db.VarChar(60)
+  /// Stored as 10 digits, no country code. Normalised at the API boundary.
+  mobile    String  @db.VarChar(15)
+  email     String? @db.VarChar(160)
+  pan       String? @db.VarChar(10)
+
+  city    String? @db.VarChar(80)
+  state   String? @db.VarChar(80)
+  pincode String? @db.VarChar(6)
+
+  status          LeadStatus        @default(NEW)
+  /// Code into `lead_source`. A string rather than an enum so the master can
+  /// grow without a deploy; the foreign key keeps it honest.
+  source          String            @db.VarChar(40)
+  sourceMaster    LeadSourceMaster? @relation(fields: [source], references: [code], onDelete: Restrict, onUpdate: Cascade)
+  priority        Priority          @default(MEDIUM)
+  /// Codes into `product`. Postgres cannot put a foreign key on array
+  /// elements, so these are validated against the master on write.
+  productInterest String[]          @db.VarChar(40)
+
+  estimatedValue Decimal? @db.Decimal(18, 2)
+
+  /// Materialised score + the factor breakdown that produced it. Persisted
+  /// rather than computed per request so the pipeline can be sorted and
+  /// filtered by score in the database, and so a score can be explained
+  /// after the fact even once the model changes.
+  score        Int      @default(0)
+  scoreFactors Json?
+  scoredAt     DateTime?
+
+  ownerId String?
+  owner   User?   @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  orgUnitId String?
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  partnerId String?
+  partner   Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  eventId String?
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// On the TRAI Do Not Disturb registry. Populated by a registry check; false
+  /// means "not known to be registered", not "confirmed contactable".
+  dndRegistered Boolean @default(false)
+
+  messages MessageLog[]
+
+  // --- Marketing attribution, captured once at creation and never rewritten --
+  utmSource   String? @db.VarChar(120)
+  utmMedium   String? @db.VarChar(120)
+  utmCampaign String? @db.VarChar(160)
+  utmTerm     String? @db.VarChar(160)
+  utmContent  String? @db.VarChar(160)
+  referrerUrl String? @db.VarChar(500)
+  landingPath String? @db.VarChar(500)
+  gclid       String? @db.VarChar(200)
+  fbclid      String? @db.VarChar(200)
+
+  nextFollowUpAt DateTime?
+  lastActivityAt DateTime?
+  contactedAt    DateTime?
+  qualifiedAt    DateTime?
+  convertedAt    DateTime?
+  closedAt       DateTime?
+
+  lostReason LeadLostReason?
+  lostNote   String?         @db.VarChar(500)
+
+  /// Set when this lead was merged into another as a duplicate.
+  mergedIntoId String?
+  mergedInto   Lead?   @relation("LeadMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  mergedFrom   Lead[]  @relation("LeadMerge")
+
+  customerId String?   @unique
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// Marketing-contact consent state.
+  ///
+  /// Web capture sets GRANTED because the visitor ticked an explicit box.
+  /// Imported leads start PENDING: SIHL becomes the Data Fiduciary on ingest
+  /// for people who never agreed to hear from it, so they may be called (the
+  /// call is how consent gets obtained) but receive no marketing SMS, WhatsApp
+  /// or email until someone records agreement. The ledger in `consent_record`
+  /// remains the evidence; this column exists so the rule is queryable.
+  consentStatus ConsentStatus @default(PENDING)
+
+  /// Which bulk import produced this lead, if any. Retained permanently so a
+  /// provenance question years later is one join, not an investigation.
+  importBatchId String?
+  importBatch   LeadImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  statusHistory LeadStatusHistory[]
+  consents      ConsentRecord[]
+  importRows    LeadImportRow[]
+
+  /// Duplicate guard. A person is one lead per mobile number in the active
+  /// pipeline; re-enquiries attach activities to the existing lead instead of
+  /// spawning a second one, which is what stops two RMs calling the same
+  /// person. Enforced as a partial unique index in migration SQL because the
+  /// rule only applies to rows where deletedAt IS NULL.
+  @@index([mobile])
+  @@index([email])
+  @@index([status, createdAt])
+  @@index([ownerId, status])
+  @@index([orgUnitId])
+  @@index([partnerId])
+  @@index([campaignId])
+  @@index([eventId])
+  @@index([nextFollowUpAt])
+  @@index([score])
+  @@index([importBatchId])
+  @@index([consentStatus])
+  @@map("lead")
+}
+
+model LeadStatusHistory {
+  id         String      @id @default(cuid())
+  leadId     String
+  lead       Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  fromStatus LeadStatus?
+  toStatus   LeadStatus
+  note       String?     @db.VarChar(1000)
+  changedById String?
+  changedAt   DateTime   @default(now())
+  /// Seconds spent in `fromStatus`. Powers stage-duration and drop-off reports
+  /// without a window function over the whole history table.
+  durationSeconds Int?
+
+  @@index([leadId, changedAt])
+  @@map("lead_status_history")
+}
+
+// ===========================================================================
+// CRM — customers
+// ===========================================================================
+
+enum CustomerStatus {
+  PROSPECT
+  ONBOARDING
+  ACTIVE
+  DORMANT
+  CLOSED
+}
+
+enum KycStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  PENDING_VERIFICATION
+  ON_HOLD
+  REJECTED
+  COMPLETED
+}
+
+enum OnboardingStage {
+  LEAD
+  KYC_STARTED
+  PAN_VERIFIED
+  BANK_VERIFIED
+  ESIGN_PENDING
+  ESIGN_DONE
+  UNDER_REVIEW
+  ACCOUNT_OPENED
+  ACTIVATED
+}
+
+model Customer {
+  id        String @id @default(cuid())
+  reference String @unique @db.VarChar(24)
+
+  /// Client code in the back office. The join key for every mirrored record.
+  /// Null until the account is actually opened downstream.
+  clientCode String? @unique @db.VarChar(30)
+
+  firstName   String    @db.VarChar(60)
+  lastName    String?   @db.VarChar(60)
+  email       String    @db.VarChar(160)
+  mobile      String    @db.VarChar(15)
+  /// PAN is the regulated identity key; unique across active customers.
+  pan         String    @unique @db.VarChar(10)
+  dateOfBirth DateTime? @db.Date
+
+  addressLine1 String? @db.VarChar(160)
+  addressLine2 String? @db.VarChar(160)
+  city         String? @db.VarChar(80)
+  state        String? @db.VarChar(80)
+  pincode      String? @db.VarChar(6)
+
+  status          CustomerStatus  @default(PROSPECT)
+  kycStatus       KycStatus       @default(NOT_STARTED)
+  onboardingStage OnboardingStage @default(LEAD)
+  stageUpdatedAt  DateTime?
+  accountOpenedAt DateTime?
+  activatedAt     DateTime?
+  firstTradeAt    DateTime?
+
+  /// Codes into `product`; validated on write, see the note on `lead`.
+  productInterest String[] @db.VarChar(40)
+
+  relationshipManagerId String?
+  relationshipManager   User?   @relation("CustomerRM", fields: [relationshipManagerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  orgUnitId String?
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  partnerId String?
+  partner   Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  lastActivityAt DateTime?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  lead     Lead?
+  holdings CustomerProduct[]
+  consents ConsentRecord[]
+
+  @@index([status])
+  @@index([kycStatus])
+  @@index([onboardingStage])
+  @@index([relationshipManagerId])
+  @@index([orgUnitId])
+  @@index([partnerId])
+  @@index([mobile])
+  @@map("customer")
+  dndRegistered Boolean @default(false)
+  messages      MessageLog[]
+}
+
+/// Read-only mirror of product holdings owned by the back office.
+/// `sourceSystem` + `externalRef` + `syncedAt` make it obvious to anyone
+/// reading a row that this is a copy and where the truth lives.
+model CustomerProduct {
+  id           String          @id @default(cuid())
+  customerId   String
+  customer     Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  /// Code into `product`.
+  product      String          @db.VarChar(40)
+  status       String          @db.VarChar(40)
+  openedAt     DateTime?
+  currentValue Decimal?        @db.Decimal(18, 2)
+  sourceSystem String          @default("BACKOFFICE") @db.VarChar(40)
+  externalRef  String?         @db.VarChar(80)
+  syncedAt     DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([customerId, product])
+  @@index([customerId])
+  @@map("customer_product")
+}
+
+// ===========================================================================
+// Partners
+// ===========================================================================
+
+enum PartnerType {
+  AUTHORISED_PERSON
+  REMISIER
+  REFERRAL
+  IFA
+  CORPORATE
+}
+
+enum PartnerStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+model Partner {
+  id        String @id @default(cuid())
+  reference String @unique @db.VarChar(24)
+  name      String @db.VarChar(160)
+
+  type   PartnerType
+  status PartnerStatus @default(PENDING)
+
+  contactPerson String? @db.VarChar(120)
+  email         String  @db.VarChar(160)
+  mobile        String  @db.VarChar(15)
+  pan           String? @db.VarChar(10)
+  gstin         String? @db.VarChar(15)
+  /// SEBI registration for an Authorised Person, where applicable.
+  sebiRegNo     String? @db.VarChar(40)
+
+  city    String? @db.VarChar(80)
+  state   String? @db.VarChar(80)
+  pincode String? @db.VarChar(6)
+
+  /// Revenue share as a percentage, 0–100 with two decimals.
+  commissionRate Decimal? @db.Decimal(5, 2)
+
+  /// Public referral code, embedded in the partner's own onboarding links.
+  ///
+  /// Deliberately separate from `reference`: that is sequential (PT-2026-000001)
+  /// and therefore enumerable, so publishing it would let anyone walk the
+  /// partner book. This is random, opaque, and rotatable if a link leaks.
+  referralCode String? @unique @db.VarChar(24)
+
+  orgUnitId String?
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  onboardedAt DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  users     User[]     @relation("PartnerUsers")
+  leads     Lead[]
+  customers Customer[]
+
+  @@index([status])
+  @@index([type])
+  @@index([orgUnitId])
+  @@index([referralCode])
+  @@map("partner")
+}
+
+// ===========================================================================
+// Marketing
+// ===========================================================================
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CampaignChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+  SOCIAL
+  SEARCH
+  DISPLAY
+  OFFLINE
+  REFERRAL
+}
+
+model Campaign {
+  id        String @id @default(cuid())
+  reference String @unique @db.VarChar(24)
+  name      String @db.VarChar(160)
+  code      String @unique @db.VarChar(60)
+
+  status   CampaignStatus    @default(DRAFT)
+  channels CampaignChannel[]
+
+  objective   String?   @db.VarChar(200)
+  budget      Decimal?  @db.Decimal(18, 2)
+  actualSpend Decimal?  @db.Decimal(18, 2)
+  startsAt    DateTime?
+  endsAt      DateTime?
+
+  ownerId     String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  leads  Lead[]
+  events Event[]
+
+  @@index([status])
+  @@index([code])
+  @@map("campaign")
+}
+
+enum EventStatus {
+  PLANNED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+/// A physical or virtual event that captures leads through its own QR code.
+///
+/// Separate from Campaign because the questions differ: a campaign asks "did
+/// that spend produce anything", an event asks "who did we meet on Saturday and
+/// has anyone called them yet". An event may sit under a campaign, and the
+/// leads it captures roll up to both.
+model Event {
+  id        String @id @default(cuid())
+  reference String @unique @db.VarChar(24)
+  name      String @db.VarChar(160)
+  /// URL-safe, appears in the QR link. Immutable once printed on a banner.
+  code      String @unique @db.VarChar(60)
+
+  status EventStatus @default(PLANNED)
+
+  venue   String?   @db.VarChar(200)
+  city    String?   @db.VarChar(80)
+  startsAt DateTime
+  endsAt   DateTime?
+
+  expectedFootfall Int?
+
+  /// Leads captured here are routed to this person when set; otherwise the
+  /// assignment rules engine decides, exactly as it does for any other source.
+  ownerId String?
+  owner   User?   @relation("EventOwner", fields: [ownerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  orgUnitId String?
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  leads Lead[]
+
+  @@index([status])
+  @@index([code])
+  @@index([startsAt])
+  @@map("event")
+}
+
+// ===========================================================================
+// Activities, tasks, visits, documents
+// ===========================================================================
+
+enum EntityType {
+  LEAD
+  CUSTOMER
+  PARTNER
+  OPPORTUNITY
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  SMS
+  WHATSAPP
+  MEETING
+  VISIT
+  NOTE
+  STATUS_CHANGE
+  ASSIGNMENT
+  DOCUMENT
+  SYSTEM
+}
+
+enum ActivityDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL
+}
+
+/// The unified interaction timeline. Polymorphic by (entityType, entityId)
+/// rather than one nullable FK per parent: the timeline is always queried by
+/// parent, never joined across parents, and the alternative is four columns
+/// of which three are always null.
+model Activity {
+  id         String            @id @default(cuid())
+  entityType EntityType
+  entityId   String
+  type       ActivityType
+  direction  ActivityDirection @default(OUTBOUND)
+
+  subject String  @db.VarChar(160)
+  body    String? @db.VarChar(4000)
+  outcome String? @db.VarChar(120)
+
+  occurredAt      DateTime @default(now())
+  durationMinutes Int?
+
+  actorId String?
+  actor   User?   @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// True for rows the system wrote (status changes, assignments) rather than a
+  /// human. Lets the UI show "activity" and "history" as one stream but style
+  /// them differently, and keeps engagement counts honest.
+  isSystemGenerated Boolean @default(false)
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([type])
+  @@map("activity")
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+model Task {
+  id          String      @id @default(cuid())
+  reference   String      @unique @db.VarChar(24)
+  entityType  EntityType?
+  entityId    String?
+  title       String      @db.VarChar(160)
+  description String?     @db.VarChar(2000)
+
+  status   TaskStatus @default(OPEN)
+  priority Priority   @default(MEDIUM)
+  dueAt    DateTime
+
+  assigneeId String?
+  assignee   User?   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  completedAt    DateTime?
+  completionNote String?   @db.VarChar(1000)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([assigneeId, status, dueAt])
+  @@index([entityType, entityId])
+  @@map("task")
+}
+
+enum VisitStatus {
+  PLANNED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  MISSED
+}
+
+/// Geo-tagged field visit.
+///
+/// Privacy position (ADR-0007): this records two discrete events — a check-in
+/// and a check-out — and nothing between them. There is no background location
+/// collection, no periodic ping, no route history. That is a deliberate design
+/// constraint, not an unimplemented feature: continuous tracking of employees
+/// is disproportionate under the DPDP Act's purpose-limitation principle, and
+/// the business question ("did the meeting happen, where, for how long") is
+/// fully answered by two points.
+model Visit {
+  id        String @id @default(cuid())
+  reference String @unique @db.VarChar(24)
+
+  entityType EntityType
+  entityId   String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  status  VisitStatus @default(PLANNED)
+  purpose String      @db.VarChar(200)
+
+  plannedAt DateTime?
+
+  checkInAt        DateTime?
+  checkInLatitude  Decimal?  @db.Decimal(10, 7)
+  checkInLongitude Decimal?  @db.Decimal(10, 7)
+  checkInAccuracy  Decimal?  @db.Decimal(8, 2)
+  checkInAddress   String?   @db.VarChar(400)
+  /// Object-storage key for the check-in selfie. The image itself never lives
+  /// in Postgres; only an authenticated, expiring URL is ever handed out.
+  checkInPhotoKey  String?   @db.VarChar(300)
+
+  checkOutAt        DateTime?
+  checkOutLatitude  Decimal?  @db.Decimal(10, 7)
+  checkOutLongitude Decimal?  @db.Decimal(10, 7)
+  checkOutAccuracy  Decimal?  @db.Decimal(8, 2)
+
+  durationMinutes Int?
+  meetingNotes    String? @db.VarChar(4000)
+  voiceNoteKey    String? @db.VarChar(300)
+  outcome         String? @db.VarChar(200)
+  nextFollowUpAt  DateTime?
+
+  deviceId  String? @db.VarChar(120)
+  deviceInfo Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, checkInAt])
+  @@index([entityType, entityId])
+  @@index([status])
+  @@map("visit")
+}
+
+model Document {
+  id         String     @id @default(cuid())
+  entityType EntityType
+  entityId   String
+
+  fileName    String  @db.VarChar(255)
+  contentType String  @db.VarChar(120)
+  sizeBytes   Int
+  storageKey  String  @unique @db.VarChar(300)
+  /// SHA-256 of the file. Deduplicates re-uploads and proves the stored bytes
+  /// are the bytes that were scanned.
+  checksum    String  @db.VarChar(64)
+  category    String? @db.VarChar(60)
+
+  scanStatus String  @default("PENDING") @db.VarChar(20)
+  scanResult String? @db.VarChar(200)
+
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  @@index([entityType, entityId])
+  @@map("document")
+}
+
+// ===========================================================================
+// Compliance: consent, audit, outbox
+// ===========================================================================
+
+/// DPDP Act 2023 consent ledger. Append-only: a withdrawal is a new row with
+/// `granted = false`, never an update, so the history of what a person agreed
+/// to and when is reconstructable years later.
+model ConsentRecord {
+  id         String  @id @default(cuid())
+  entityType EntityType
+  entityId   String
+
+  leadId     String?
+  lead       Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  purpose   String   @db.VarChar(80)
+  granted   Boolean
+  channel   String?  @db.VarChar(40)
+  /// Verbatim text the person was shown. Paraphrasing it later is not evidence.
+  consentText String? @db.VarChar(2000)
+  ipAddress String?  @db.VarChar(45)
+  userAgent String?  @db.VarChar(400)
+  capturedAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([leadId])
+  @@index([customerId])
+  @@map("consent_record")
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGIN_FAILED
+  LOGOUT
+  ASSIGN
+  EXPORT
+  STATUS_CHANGE
+  PERMISSION_DENIED
+}
+
+/// Append-only audit trail. No update or delete path exists in the application,
+/// and the runtime database role is granted INSERT and SELECT only on this
+/// table (see migration `9999_grants`), so a compromised application cannot
+/// rewrite its own tracks.
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?
+  actor      User?       @relation(fields: [actorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  actorLabel String?     @db.VarChar(160)
+  action     AuditAction
+  resource   String      @db.VarChar(60)
+  resourceId String?     @db.VarChar(64)
+  /// Field-level before/after, PII already masked by the audit interceptor.
+  changes    Json?
+  reason     String?     @db.VarChar(300)
+  ipAddress  String?     @db.VarChar(45)
+  userAgent  String?     @db.VarChar(400)
+  traceId    String?     @db.VarChar(64)
+  createdAt  DateTime    @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([resource, resourceId])
+  @@index([action, createdAt])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+/// Transactional outbox.
+///
+/// Integration events (lead.created, customer.converted, visit.completed) are
+/// written in the same transaction as the state change, then relayed to the
+/// event bus by a separate worker. Without this, a crash between "commit" and
+/// "publish" silently loses the event — which in this system means a lead that
+/// never reaches the dialer or a KYC that never starts.
+model OutboxEvent {
+  id            String    @id @default(cuid())
+  aggregateType String    @db.VarChar(60)
+  aggregateId   String    @db.VarChar(64)
+  eventType     String    @db.VarChar(80)
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  publishedAt   DateTime?
+  attempts      Int       @default(0)
+  lastError     String?   @db.VarChar(500)
+
+  /// Backoff gate. The relay only claims rows whose time has come, so a failing
+  /// consumer is retried with widening gaps rather than hammered every tick.
+  nextAttemptAt DateTime  @default(now())
+
+  /// Terminal failure. Set once `attempts` passes the configured maximum, so a
+  /// single poisoned event cannot block the queue forever. Dead-lettered rows
+  /// are kept, never deleted — they are the evidence for the incident.
+  deadLetteredAt DateTime?
+
+  @@index([publishedAt, occurredAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_event")
+}
+
+enum ConsentStatus {
+  PENDING
+  GRANTED
+  WITHDRAWN
+}
+
+enum ImportBatchStatus {
+  PARSED
+  VALIDATED
+  COMMITTED
+  CANCELLED
+}
+
+enum ImportRowStatus {
+  VALID
+  INVALID
+  DUPLICATE
+  IMPORTED
+  SKIPPED
+}
+
+/// A bulk lead import, and the declaration that justifies it.
+///
+/// The declaration fields are not paperwork. A salesperson arriving with a
+/// spreadsheet has very likely obtained it from a previous employer, and the
+/// moment SIHL ingests it SIHL is answerable for that personal data. Recording
+/// who supplied it, where it came from and on what basis turns the import into
+/// a documented process rather than an undiscoverable liability.
+model LeadImportBatch {
+  id        String            @id @default(cuid())
+  reference String            @unique @db.VarChar(24)
+  fileName  String            @db.VarChar(255)
+  status    ImportBatchStatus @default(PARSED)
+
+  /// Provenance, captured before any row is committed.
+  sourceOrigin       String  @db.VarChar(40)
+  suppliedBy         String  @db.VarChar(160)
+  sourceDescription  String  @db.VarChar(500)
+  lawfulBasisConfirmedAt DateTime
+
+  /// The confirmed column mapping and batch-level defaults.
+  mapping Json?
+
+  totalRows     Int @default(0)
+  validRows     Int @default(0)
+  invalidRows   Int @default(0)
+  duplicateRows Int @default(0)
+  importedRows  Int @default(0)
+  skippedRows   Int @default(0)
+
+  importedById String?
+  importedBy   User?   @relation(fields: [importedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdAt   DateTime  @default(now())
+  committedAt DateTime?
+
+  rows  LeadImportRow[]
+  leads Lead[]
+
+  @@index([status, createdAt])
+  @@index([importedById])
+  @@map("lead_import_batch")
+}
+
+/// One staged row. Kept after commit so an import can be explained, audited and
+/// — if it went wrong — traced back row by row.
+model LeadImportRow {
+  id        String          @id @default(cuid())
+  batchId   String
+  batch     LeadImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  rowNumber Int
+  status    ImportRowStatus @default(VALID)
+
+  /// Exactly what was in the file, before mapping. The audit answer to "what
+  /// did the spreadsheet actually say".
+  raw    Json
+  /// After mapping and coercion.
+  mapped Json?
+  errors Json?
+
+  /// The existing lead this row was found to duplicate, with the reasoning.
+  duplicateOfLeadId String?
+  matchScore        Int?
+  matchReasons      Json?
+
+  /// The lead this row produced, when it was imported.
+  createdLeadId String?
+  createdLead   Lead?   @relation(fields: [createdLeadId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, status])
+  @@map("lead_import_row")
+}
+
+enum AssignmentStrategy {
+  ROUND_ROBIN
+  LOAD_BALANCED
+  FIXED_OWNER
+  LEAVE_UNASSIGNED
+}
+
+/// Lead routing rules, evaluated lowest `priority` first; the first match wins.
+///
+/// One engine serves import commit, event capture, public web capture and
+/// offboarding handover. Assignment logic duplicated per entry point drifts,
+/// and the drift shows up as leads landing with the wrong person in exactly
+/// one of them.
+model AssignmentRule {
+  id       String             @id @default(cuid())
+  name     String             @db.VarChar(120)
+  priority Int                @default(100)
+  isActive Boolean            @default(true)
+  strategy AssignmentStrategy
+
+  /// Optional filters, all ANDed. An empty object is the catch-all rule.
+  criteria Json @default("{}")
+
+  /// Candidate owners; exactly one for FIXED_OWNER, empty for LEAVE_UNASSIGNED.
+  targetUserIds String[]
+
+  orgUnitId String?
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// Round-robin position, held in the database rather than in process memory
+  /// so distribution stays even across API instances. An in-memory counter
+  /// gives every pod its own rotation and quietly favours the first person in
+  /// the list.
+  roundRobinCursor Int @default(0)
+
+  /// Operational visibility: a rule nobody can see firing is a rule nobody
+  /// trusts.
+  assignmentCount Int       @default(0)
+  lastAppliedAt   DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, priority])
+  @@map("assignment_rule")
+}
+
+enum TargetPeriod {
+  MONTH
+  QUARTER
+  YEAR
+}
+
+/// A sales target for one person over one period.
+///
+/// A prerequisite for the scorecard rather than a feature in its own right:
+/// "how far am I from target" cannot be answered without somewhere to put the
+/// target. Both measures are optional because branches set them differently —
+/// some on conversions, some on business value, some on both.
+model SalesTarget {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  period      TargetPeriod
+  periodStart DateTime     @db.Date
+
+  conversionTarget Int?
+  valueTarget      Decimal? @db.Decimal(18, 2)
+
+  setById   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One target per person per period start — re-setting updates rather than
+  /// stacking a second, which would make attainment ambiguous.
+  @@unique([userId, period, periodStart])
+  @@index([periodStart])
+  @@map("sales_target")
+}
+
+/// Human-readable reference generator (LD-2026-000123).
+///
+/// Incremented with `UPDATE ... SET value = value + 1 RETURNING value`, which
+/// Postgres executes atomically under row lock — two concurrent lead creations
+/// cannot receive the same reference. A native sequence would be marginally
+/// faster but cannot be reset per-year per-prefix without DDL.
+model Counter {
+  key       String   @id @db.VarChar(40)
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("counter")
+}

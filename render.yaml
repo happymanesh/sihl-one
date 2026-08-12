@@ -1,0 +1,33 @@
+# Render blueprint for the API.
+#
+# The web app goes to Vercel; this is the long-running NestJS server, which does
+# not belong on a serverless platform. Postgres is provisioned here too so the
+# whole back end comes up from one file.
+services:
+  - type: web
+    name: sihl-one-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sihl-one-db
+          property: connectionString
+      # Set these in the Render dashboard — never in this file.
+      - key: JWT_SECRET
+        sync: false
+      - key: PASSWORD_PEPPER
+        sync: false
+      - key: PUBLIC_WEB_URL
+        sync: false
+
+databases:
+  - name: sihl-one-db
+    databaseName: sihl_one
+    plan: basic-256mb

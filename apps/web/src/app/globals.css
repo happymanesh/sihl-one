@@ -1,0 +1,296 @@
+@import 'tailwindcss';
+
+/* ==========================================================================
+   SIHL ONE — design tokens
+   ==========================================================================
+
+   The palette is SIHL's real brand, not an invented one: navy #0A5281,
+   teal #1D8F6A and green #66BB46 are taken from the live sihl.in site so the
+   platform reads as the same company. Montserrat is the brand typeface.
+
+   Dark mode is a genuine second palette rather than an inverted first one.
+   The site itself is light-only, so the dark surfaces are derived from the
+   site's own dark hero-gradient navy stops — which keeps it recognisably SIHL
+   instead of "generic dark theme".
+
+   Everything is expressed as a semantic token (`--color-surface`,
+   `--color-border`) rather than a raw colour, so a component never has to know
+   which theme is active.
+   ========================================================================== */
+
+@theme {
+  /* Brand — navy */
+  --color-navy-50: #eef5fa;
+  --color-navy-100: #d3e5f1;
+  --color-navy-200: #a7cbe3;
+  --color-navy-300: #6ba7ce;
+  --color-navy-400: #3a80b3;
+  --color-navy-500: #0a5281;
+  --color-navy-600: #094a74;
+  --color-navy-700: #073d60;
+  --color-navy-800: #06304c;
+  --color-navy-900: #042236;
+  --color-navy-950: #02121d;
+
+  /* Brand — teal */
+  --color-teal-50: #eaf7f2;
+  --color-teal-100: #cbebdf;
+  --color-teal-200: #98d7bf;
+  --color-teal-300: #5ec09b;
+  --color-teal-400: #2fa47c;
+  --color-teal-500: #1d8f6a;
+  --color-teal-600: #197a5b;
+  --color-teal-700: #14624a;
+  --color-teal-800: #104e3b;
+  --color-teal-900: #0b382a;
+
+  /* Brand — green (accent) */
+  --color-brand-green-50: #f1faec;
+  --color-brand-green-100: #ddf2d0;
+  --color-brand-green-200: #bde5a5;
+  --color-brand-green-300: #98d576;
+  --color-brand-green-400: #7bc855;
+  --color-brand-green-500: #66bb46;
+  --color-brand-green-600: #55a038;
+  --color-brand-green-700: #43802c;
+  --color-brand-green-800: #356522;
+
+  /* Status colours. Amber/red/blue are functional, not brand — they must not
+     be mistaken for SIHL green, which is why "success" uses teal. */
+  --color-warn-50: #fff8eb;
+  --color-warn-100: #fdecc8;
+  --color-warn-500: #d97706;
+  --color-warn-600: #b45309;
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-500: #dc2626;
+  --color-danger-600: #b91c1c;
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-500: #2563eb;
+
+  --font-sans: 'Montserrat', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* A tighter radius scale than Tailwind's default: this is a dense data
+     application, and large radii waste horizontal space in tables. */
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+
+  --shadow-card: 0 1px 2px 0 rgb(4 34 54 / 0.06), 0 1px 3px 0 rgb(4 34 54 / 0.08);
+  --shadow-raised: 0 4px 6px -1px rgb(4 34 54 / 0.08), 0 2px 4px -2px rgb(4 34 54 / 0.06);
+  --shadow-overlay: 0 20px 25px -5px rgb(4 34 54 / 0.14), 0 8px 10px -6px rgb(4 34 54 / 0.1);
+}
+
+/* --- Semantic surface tokens ------------------------------------------- */
+
+:root {
+  --color-canvas: #f5f9fc;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f1f6fa;
+  --color-surface-inset: #e9f1f7;
+  --color-border: #dbe7f0;
+  --color-border-strong: #bed2e2;
+  --color-text: #10243a;
+  --color-text-muted: #55708a;
+  --color-text-subtle: #7d94a9;
+  --color-chrome: #ffffff;
+  --color-chrome-text: #10243a;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'],
+html.dark {
+  /* Derived from the site's dark hero-gradient navy stops. */
+  --color-canvas: #04182b;
+  --color-surface: #08243c;
+  --color-surface-muted: #0b2c48;
+  --color-surface-inset: #0e3454;
+  --color-border: #14415f;
+  --color-border-strong: #1d5479;
+  --color-text: #e8f2f9;
+  --color-text-muted: #9fbcd2;
+  --color-text-subtle: #7595ae;
+  --color-chrome: #04182b;
+  --color-chrome-text: #e8f2f9;
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    /* Data-dense screens read better slightly tighter than 16px, and it lets a
+       lead table show two more rows per viewport. */
+    font-size: 15px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    letter-spacing: -0.015em;
+    font-weight: 700;
+  }
+
+  /* Focus is never removed, only restyled. Keyboard operation is a hard
+     requirement for an internal tool people use eight hours a day. */
+  :focus-visible {
+    outline: 2px solid var(--color-teal-500);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  ::selection {
+    background: var(--color-teal-200);
+    color: var(--color-navy-900);
+  }
+
+  /* Tabular figures everywhere a number is compared vertically. Proportional
+     digits make a column of currency impossible to scan. */
+  .tnum, table td, table th {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-control);
+    font-weight: 600;
+    font-size: 0.875rem;
+    padding: 0.5rem 1rem;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background-color: var(--color-navy-500);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--color-navy-600);
+  }
+
+  .btn-accent {
+    background-color: var(--color-teal-500);
+    color: #fff;
+  }
+  .btn-accent:hover:not(:disabled) {
+    background-color: var(--color-teal-600);
+  }
+
+  .btn-outline {
+    background-color: transparent;
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+  }
+  .btn-outline:hover:not(:disabled) {
+    background-color: var(--color-surface-muted);
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--color-text-muted);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--color-surface-muted);
+    color: var(--color-text);
+  }
+
+  .input {
+    width: 100%;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-control);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-text);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .input::placeholder {
+    color: var(--color-text-subtle);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-teal-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-teal-500) 18%, transparent);
+  }
+  .input[aria-invalid='true'] {
+    border-color: var(--color-danger-500);
+  }
+  .input[aria-invalid='true']:focus {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger-500) 18%, transparent);
+  }
+
+  .label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    margin-bottom: 0.375rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-muted) 25%,
+      var(--color-surface-inset) 50%,
+      var(--color-surface-muted) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: var(--radius-control);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Respect the user's motion preference. Some of the people using this all day
+   are on low-end Android hardware where animation is also a performance cost. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
