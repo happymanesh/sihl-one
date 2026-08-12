@@ -11,7 +11,11 @@
 set -e
 
 echo "[entrypoint] Applying database migrations…"
-node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma
+# Run from apps/api: the config's schema and migrations paths are relative to
+# the working directory.
+cd apps/api
+../../node_modules/.bin/prisma migrate deploy --config prisma.config.production.mjs
+cd /app
 echo "[entrypoint] Migrations applied. Starting API…"
 
 # exec so the API becomes PID 1's direct child: tini forwards SIGTERM to it and

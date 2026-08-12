@@ -53,6 +53,7 @@ COPY --from=build --chown=nodejs:nodejs /app/packages/contracts/package.json ./p
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/dist ./apps/api/dist
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/package.json ./apps/api/
+COPY --from=build --chown=nodejs:nodejs /app/apps/api/prisma.config.production.mjs ./apps/api/
 COPY --chmod=755 apps/api/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER nodejs
