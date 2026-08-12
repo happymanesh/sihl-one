@@ -35,6 +35,13 @@ const envSchema = z
 
     STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
     STORAGE_LOCAL_ROOT: z.string().default('storage'),
+    // Opt-in acknowledgement that STORAGE_LOCAL_ROOT points at a persistent
+    // mount rather than the container filesystem. Defaults to false so the
+    // production guard below still catches the mistake it was written for.
+    STORAGE_LOCAL_DURABLE: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     FILE_SCANNER_MODE: z.enum(['noop', 'permissive', 'clamav']).default('noop'),
 
     OUTBOX_RELAY_ENABLED: z
@@ -86,13 +93,24 @@ const envSchema = z
         path: ['FILE_SCANNER_MODE'],
       });
     }
-    if (env.STORAGE_DRIVER === 'local') {
+    if (env.STORAGE_DRIVER === 'local' && !env.STORAGE_LOCAL_DURABLE) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
           'STORAGE_DRIVER=local writes uploads to the container filesystem, which is lost on ' +
-          'restart and not shared between instances. Use s3 in production.',
+          'restart and not shared between instances. Use s3 in production, or set ' +
+          'STORAGE_LOCAL_DURABLE=true if STORAGE_LOCAL_ROOT is a persistent volume — that is ' +
+          'only safe on a single instance, since a volume is not shared across replicas.',
         path: ['STORAGE_DRIVER'],
+      });
+    }
+    if (env.STORAGE_LOCAL_DURABLE && !env.STORAGE_LOCAL_ROOT.startsWith('/')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'STORAGE_LOCAL_DURABLE=true but STORAGE_LOCAL_ROOT is a relative path, which resolves ' +
+          'inside the container rather than to the mounted volume.',
+        path: ['STORAGE_LOCAL_ROOT'],
       });
     }
   });
@@ -134,6 +152,7 @@ export interface AppConfig {
   storage: {
     driver: Env['STORAGE_DRIVER'];
     localRoot: string;
+    localDurable: boolean;
     scannerMode: Env['FILE_SCANNER_MODE'];
   };
   outbox: {
@@ -170,6 +189,7 @@ export function buildAppConfig(env: Env): AppConfig {
     storage: {
       driver: env.STORAGE_DRIVER,
       localRoot: env.STORAGE_LOCAL_ROOT,
+      localDurable: env.STORAGE_LOCAL_DURABLE,
       scannerMode: env.FILE_SCANNER_MODE,
     },
     outbox: {
