@@ -48,6 +48,7 @@ import { APP_CONFIG, buildAppConfig, validateEnv, type AppConfig, type Env } fro
           RATE_LIMIT_LIMIT: read('RATE_LIMIT_LIMIT'),
           STORAGE_DRIVER: read('STORAGE_DRIVER'),
           STORAGE_LOCAL_ROOT: read('STORAGE_LOCAL_ROOT'),
+          STORAGE_LOCAL_DURABLE: read('STORAGE_LOCAL_DURABLE'),
           FILE_SCANNER_MODE: read('FILE_SCANNER_MODE'),
           OUTBOX_RELAY_ENABLED: read('OUTBOX_RELAY_ENABLED'),
           OUTBOX_RELAY_INTERVAL_MS: read('OUTBOX_RELAY_INTERVAL_MS'),
