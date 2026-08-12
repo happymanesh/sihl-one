@@ -5,7 +5,7 @@
     "dockerfilePath": "apps/api/Dockerfile"
   },
   "deploy": {
-    "preDeployCommand": "npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma",
+    "startCommand": "npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma && node apps/api/dist/main.js",
     "healthcheckPath": "/health/ready",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
