@@ -14,13 +14,14 @@ Generate them once and keep them somewhere safe. **`PASSWORD_PEPPER` must be set
 before the first user is created and never changed** — every password hash is
 written with it, so changing it later locks out everyone at once.
 
-```
-JWT_SECRET      = JqDJVtN22vAc-pGlwRPOCUX2TiUclemTL8Nw8f1Hz14GbxfPIE56zZwO_BxDYG5i
-PASSWORD_PEPPER = LuO6wfdbNX0nCa_HxTQ-YIwyoBNAat9H-Hwinsl4lG4
-```
+The live values are in **`.secrets.production.local`** in the repo root, which is
+gitignored. They are deliberately not written down here: an earlier revision of
+this file carried them in plaintext, which put them in git history the moment it
+was pushed. Those first values were burnt and replaced before any database
+existed, so nothing was ever hashed with them — but the lesson stands, and this
+file is the wrong home for a secret.
 
-Those two were generated for this deployment. If they have appeared in a chat
-log, a ticket, or an email, treat them as burnt and mint new ones:
+Mint replacements with: 
 
 ```bash
 node -e "const c=require('crypto');console.log(c.randomBytes(48).toString('base64url'));console.log(c.randomBytes(32).toString('base64url'))"
