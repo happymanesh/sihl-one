@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import { LEAD_LOST_REASONS } from '@sihl-one/contracts';
 
@@ -87,7 +87,13 @@ export function LeadActions(props: Props) {
       </div>
 
       <div className="p-5">
-        {active === 'log' ? <LogInteractionForm leadId={props.leadId} /> : null}
+        {active === 'log' ? (
+          <LogInteractionForm
+            leadId={props.leadId}
+            allowedTransitions={props.allowedTransitions}
+            canUpdate={props.canUpdate}
+          />
+        ) : null}
         {active === 'status' ? (
           <StatusForm leadId={props.leadId} allowed={props.allowedTransitions} />
         ) : null}
@@ -133,11 +139,57 @@ function Feedback({ state }: { state: ActionState }) {
   );
 }
 
-function LogInteractionForm({ leadId }: { leadId: string }) {
+/**
+ * Logging an interaction, with the status change folded in.
+ *
+ * The submit button is never disabled. A disabled button gives no reason, is
+ * not focusable, and on a form this long usually sits nowhere near the field
+ * that is missing — the rep clicks, nothing happens, and they hunt. Validation
+ * runs on submit instead, marks the offending field and moves focus to it.
+ */
+function LogInteractionForm({
+  leadId,
+  allowedTransitions,
+  canUpdate,
+}: {
+  leadId: string;
+  allowedTransitions: string[];
+  canUpdate: boolean;
+}) {
   const [state, action] = useActionState(logActivity, INITIAL);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [missing, setMissing] = useState<string[]>([]);
+  const [nextStatus, setNextStatus] = useState('');
+
+  // Statuses a rep may move to from here. CONVERTED is deliberately absent:
+  // conversion needs PAN and its own confirmation, so it keeps its own tab.
+  const transitions = allowedTransitions.filter((value) => value !== 'CONVERTED');
+
+  const validate = (event: React.FormEvent<HTMLFormElement>) => {
+    const form = event.currentTarget;
+    const required = ['subject'];
+    const empty = required.filter((name) => {
+      const field = form.elements.namedItem(name) as HTMLInputElement | null;
+      return !field?.value.trim();
+    });
+
+    setMissing(empty);
+    if (empty.length > 0) {
+      event.preventDefault();
+      const first = form.elements.namedItem(empty[0]!) as HTMLInputElement | null;
+      first?.focus();
+    }
+  };
 
   return (
-    <form action={action} className="space-y-3" key={state.status === 'success' ? 'reset' : 'form'}>
+    <form
+      ref={formRef}
+      action={action}
+      onSubmit={validate}
+      noValidate
+      className="space-y-3"
+      key={state.status === 'success' ? 'reset' : 'form'}
+    >
       <input type="hidden" name="entityType" value="LEAD" />
       <input type="hidden" name="entityId" value={leadId} />
       <Feedback state={state} />
@@ -170,15 +222,26 @@ function LogInteractionForm({ leadId }: { leadId: string }) {
           id="subject"
           name="subject"
           className="input"
-          required
           placeholder="Discussed brokerage plan and margin funding"
-          aria-invalid={Boolean(state.errors?.subject)}
+          aria-invalid={missing.includes('subject') || Boolean(state.errors?.subject)}
+          aria-describedby={missing.includes('subject') ? 'subject-error' : undefined}
         />
+        {missing.includes('subject') ? (
+          <p id="subject-error" role="alert" className="mt-1 text-xs font-medium text-danger-500">
+            A one-line summary is needed — it is what the next person reads.
+          </p>
+        ) : null}
       </div>
 
       <div>
-        <label className="label" htmlFor="body">Notes</label>
-        <textarea id="body" name="body" rows={3} className="input resize-none" />
+        <label className="label" htmlFor="body">Remarks</label>
+        <textarea
+          id="body"
+          name="body"
+          rows={3}
+          className="input resize-none"
+          placeholder="Anything the next person needs to know."
+        />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -194,7 +257,32 @@ function LogInteractionForm({ leadId }: { leadId: string }) {
         </div>
       </div>
 
-      <Submit label="Log interaction" pendingLabel="Saving…" variant="accent" />
+      {canUpdate && transitions.length > 0 ? (
+        <div className="border-t border-[var(--color-border)] pt-3">
+          <label className="label" htmlFor="nextStatus">Move the lead to</label>
+          <select
+            id="nextStatus"
+            name="nextStatus"
+            className="input"
+            value={nextStatus}
+            onChange={(event) => setNextStatus(event.target.value)}
+          >
+            <option value="">Leave the status unchanged</option>
+            {transitions.map((value) => (
+              <option key={value} value={value}>{humanise(value)}</option>
+            ))}
+          </select>
+
+          {nextStatus === 'LOST' ? (
+            <div className="mt-2">
+              <label className="label" htmlFor="lostReason">Why was it lost?</label>
+              <input id="lostReason" name="lostReason" className="input" />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <Submit label="Save interaction" pendingLabel="Saving…" variant="accent" />
     </form>
   );
 }

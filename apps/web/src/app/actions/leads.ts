@@ -159,8 +159,40 @@ export async function logActivity(
     return toErrorState(error, 'The interaction could not be logged.');
   }
 
+  // The status change rides along with the interaction, because "what happened"
+  // and "where it now stands" are one thought for a rep — and a status left
+  // behind as a separate step is a status that goes stale.
+  //
+  // Deliberately after the activity, and deliberately not fatal: the interaction
+  // is the record worth keeping. If the transition is refused, the note is
+  // already saved and the message says exactly what did and did not happen,
+  // rather than discarding what the rep typed.
+  const nextStatus = formData.get('nextStatus');
+  if (entityType === 'LEAD' && nextStatus) {
+    try {
+      await apiFetch(`/leads/${entityId}/status`, {
+        method: 'POST',
+        body: {
+          status: String(nextStatus),
+          lostReason: formData.get('lostReason') || undefined,
+          nextFollowUpAt: parsed.data.nextFollowUpAt?.toISOString(),
+        },
+      });
+    } catch (error) {
+      const failed = toErrorState(error, 'The status could not be changed.');
+      revalidatePath(`/leads/${entityId}`);
+      return {
+        ...failed,
+        message: `Interaction saved, but the status did not change. ${failed.message ?? ''}`.trim(),
+      };
+    }
+  }
+
   revalidatePath(`/${entityType === 'LEAD' ? 'leads' : 'customers'}/${entityId}`);
-  return { status: 'success', message: 'Interaction logged.' };
+  return {
+    status: 'success',
+    message: nextStatus ? 'Interaction saved and status updated.' : 'Interaction saved.',
+  };
 }
 
 export async function assignLead(_previous: ActionState, formData: FormData): Promise<ActionState> {
