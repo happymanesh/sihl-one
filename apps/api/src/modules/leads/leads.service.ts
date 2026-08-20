@@ -1030,6 +1030,12 @@ export class LeadsService {
 
     if (query.status?.length) and.push({ status: { in: query.status } });
     if (query.source?.length) and.push({ source: { in: query.source } });
+    // `hasSome` is array overlap — the OR semantics the filter advertises.
+    // Served by the GIN index on lead.productInterest; without it this is a
+    // sequential scan, which is invisible at pilot size and not at scale.
+    if (query.productInterest?.length) {
+      and.push({ productInterest: { hasSome: query.productInterest } });
+    }
     if (query.priority) and.push({ priority: query.priority });
     if (query.ownerId) and.push({ ownerId: query.ownerId });
     if (query.partnerId) and.push({ partnerId: query.partnerId });

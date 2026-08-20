@@ -6,7 +6,7 @@ import { Icon } from '@/components/shell/Icon';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { LeadTable } from '@/components/leads/LeadTable';
 import { Pagination } from '@/components/ui/Pagination';
-import type { LeadSourceItem } from '@sihl-one/contracts';
+import type { LeadSourceItem, ProductItem } from '@sihl-one/contracts';
 import { apiFetch, toQuery } from '@/lib/api';
 import { can, requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
@@ -45,6 +45,7 @@ export default async function LeadsPage({
     q: first('q'),
     status: params.status as string | string[] | undefined,
     source: params.source as string | string[] | undefined,
+    productInterest: params.productInterest as string | string[] | undefined,
     priority: first('priority'),
     ownerId: first('ownerId'),
     overdueOnly: first('overdueOnly'),
@@ -55,13 +56,17 @@ export default async function LeadsPage({
     pageSize: '20',
   });
 
-  const sources = await apiFetch<LeadSourceItem[]>('/masters/lead-sources').catch(
-    () => [] as LeadSourceItem[],
-  );
+  const [sources, products] = await Promise.all([
+    apiFetch<LeadSourceItem[]>('/masters/lead-sources').catch(() => [] as LeadSourceItem[]),
+    apiFetch<ProductItem[]>('/masters/products').catch(() => [] as ProductItem[]),
+  ]);
 
   const data = await apiFetch<Paginated>(`/leads${query}`);
+  // Chips show the master's name rather than a title-cased code, so NRI does
+  // not render as "Nri" and MUTUAL_FUNDS reads however the business named it.
+  const productLabels = Object.fromEntries(products.map((p) => [p.code, p.name]));
   const hasFilters = Boolean(
-    first('q') || params.status || params.source || first('priority') || first('overdueOnly') || first('minScore'),
+    first('q') || params.status || params.source || params.productInterest || first('priority') || first('overdueOnly') || first('minScore'),
   );
 
   return (
@@ -92,7 +97,7 @@ export default async function LeadsPage({
         </div>
       </header>
 
-      <LeadFilters sources={sources} />
+      <LeadFilters sources={sources} products={products} />
 
       {data.items.length === 0 ? (
         <div className="card">
@@ -119,7 +124,7 @@ export default async function LeadsPage({
         </div>
       ) : (
         <>
-          <LeadTable leads={data.items} />
+          <LeadTable leads={data.items} productLabels={productLabels} />
           <Pagination
             page={data.page}
             totalPages={data.totalPages}

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { LeadListItem } from '@sihl-one/contracts';
 
 import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
+import { ProductChips } from '@/components/ui/ProductChips';
 import { formatCompactCurrency, formatDate, formatRelative, humanise } from '@/lib/format';
 
 /**
@@ -12,7 +13,14 @@ import { formatCompactCurrency, formatDate, formatRelative, humanise } from '@/l
  * rows render as cards. Doing this with CSS overflow instead would technically
  * "work" and would be miserable to actually use on a visit.
  */
-export function LeadTable({ leads }: { leads: LeadListItem[] }) {
+export function LeadTable({
+  leads,
+  productLabels,
+}: {
+  leads: LeadListItem[];
+  /** Code → name from the product master, so chips read "NRI" not "Nri". */
+  productLabels?: Record<string, string>;
+}) {
   return (
     <>
       {/* Desktop */}
@@ -24,6 +32,7 @@ export function LeadTable({ leads }: { leads: LeadListItem[] }) {
                 <Th>Lead</Th>
                 <Th>Status</Th>
                 <Th>Score</Th>
+                <Th>Products</Th>
                 <Th>Source</Th>
                 <Th>Owner</Th>
                 <Th className="text-right">Value</Th>
@@ -67,6 +76,9 @@ export function LeadTable({ leads }: { leads: LeadListItem[] }) {
                   </td>
                   <td className="px-4 py-3">
                     <ScoreBadge score={lead.score} band={lead.scoreBand} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <ProductChips codes={lead.productInterest ?? []} labels={productLabels} tone="outline" />
                   </td>
                   <td className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
                     {humanise(lead.source)}

@@ -119,6 +119,15 @@ export const leadQuerySchema = paginationQuerySchema.extend({
     .union([codeSchema, z.array(codeSchema)])
     .optional()
     .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
+  /**
+   * Product codes. Matching is OR — a lead interested in *any* of the selected
+   * products qualifies, which is what people expect from a multi-select filter.
+   * "Interested in both" is a different question and would need its own control.
+   */
+  productInterest: z
+    .union([codeSchema, z.array(codeSchema)])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
   priority: z.enum(PRIORITIES).optional(),
   ownerId: idSchema.optional(),
   partnerId: idSchema.optional(),
