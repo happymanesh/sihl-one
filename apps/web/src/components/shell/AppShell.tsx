@@ -7,7 +7,6 @@ import type { AuthenticatedUser } from '@sihl-one/contracts';
 
 import { Logo } from '@/components/brand/Logo';
 import { Icon } from './Icon';
-import { IdleTimeout } from './IdleTimeout';
 import { UserMenu } from './UserMenu';
 import { SECTION_LABELS, visibleNavItems, type NavItem } from './navigation';
 
@@ -147,7 +146,20 @@ export function AppShell({
         </main>
       </div>
 
-      <IdleTimeout onLogout={onLogout} />
+      {/*
+        Idle warning is held back. Mounting it stalls the page segment inside
+        Suspense — the shell hydrates and stays interactive, the server streams
+        the full document, but the loading fallback is never replaced. Confirmed
+        by bisect: the dashboard renders with this unmounted and stalls with it
+        mounted, on an otherwise identical build and a valid session.
+
+        The security half of the feature is already live and unaffected: the API
+        rejects a refresh once session.lastSeenAt exceeds the idle window, so an
+        abandoned session cannot be resumed. What is missing is only the courtesy
+        countdown, which needs diagnosing against a dev server rather than by
+        redeploying.
+      */}
+      {null}
     </div>
   );
 }

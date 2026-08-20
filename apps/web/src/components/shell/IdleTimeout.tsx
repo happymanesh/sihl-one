@@ -47,11 +47,18 @@ export function IdleTimeout({
     void fetch('/api/session/touch', { method: 'POST', cache: 'no-store' }).catch(() => undefined);
   }, []);
 
+  // `remaining` is mirrored into a ref so the effect below can read it without
+  // depending on it. An earlier version listed it as a dependency, which tore
+  // down and re-registered the interval and all five listeners on every tick —
+  // enough churn during hydration to stall the page segment inside Suspense.
+  const warning = useRef(false);
+  warning.current = remaining !== null;
+
   useEffect(() => {
     const markActive = () => {
       // While the warning is showing, ordinary movement must not silently cancel
       // it — the user has to choose, or the countdown means nothing.
-      if (remaining !== null) return;
+      if (warning.current) return;
       lastActivity.current = Date.now();
     };
 
@@ -60,21 +67,23 @@ export function IdleTimeout({
     }
 
     const tick = window.setInterval(() => {
-      const idleFor = Date.now() - lastActivity.current;
-      const msLeft = idleMs - idleFor;
+      const msLeft = idleMs - (Date.now() - lastActivity.current);
 
       if (msLeft <= 0) {
         void signOut();
         return;
       }
-      setRemaining(msLeft <= warnMs ? Math.ceil(msLeft / 1000) : null);
+      // Functional form, and identical values bail out of re-rendering, so the
+      // common case — not idle — costs nothing once a second.
+      const next = msLeft <= warnMs ? Math.ceil(msLeft / 1000) : null;
+      setRemaining((current) => (current === next ? current : next));
     }, 1000);
 
     return () => {
       for (const event of EVENTS) window.removeEventListener(event, markActive);
       window.clearInterval(tick);
     };
-  }, [idleMs, warnMs, remaining, signOut]);
+  }, [idleMs, warnMs, signOut]);
 
   if (remaining === null) return null;
 
