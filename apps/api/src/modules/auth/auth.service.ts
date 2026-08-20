@@ -299,6 +299,21 @@ export class AuthService {
       throw new UnauthorizedException({ title: 'Session expired', detail: 'Sign in again to continue.' });
     }
 
+    // Idle timeout, enforced here rather than only in the browser. A countdown
+    // on the screen is a courtesy; without this check the refresh token still
+    // works for its full lifetime and the timeout is decorative.
+    const idleMs = this.config.auth.idleTimeoutMinutes * 60_000;
+    if (Date.now() - session.lastSeenAt.getTime() > idleMs) {
+      await this.prisma.session.update({
+        where: { id: session.id },
+        data: { revokedAt: new Date(), revokedReason: 'IDLE_TIMEOUT' },
+      });
+      throw new UnauthorizedException({
+        title: 'Signed out for inactivity',
+        detail: 'Sign in again to continue.',
+      });
+    }
+
     const roles = session.user.roles.map((assignment) => assignment.role.code as Role);
     const permissions = [
       ...new Set(session.user.roles.flatMap((a) => a.role.permissions as Permission[])),

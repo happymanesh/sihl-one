@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { PRIORITIES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
@@ -24,6 +24,55 @@ function FieldError({ errors }: { errors?: string[] }) {
     <p className="mt-1 text-xs font-medium text-danger-500" role="alert">
       {errors[0]}
     </p>
+  );
+}
+
+/**
+ * PAN, hidden behind a disclosure rather than shown as an empty optional field.
+ *
+ * A visible input is itself a prompt: reps were asking clients for PAN at first
+ * contact simply because the box was there. Marking it optional does not fix
+ * that — it says the field may be skipped, not that the question should not be
+ * asked. Removing it from first sight does, and the guidance appears only for
+ * whoever deliberately went looking.
+ *
+ * Opens automatically if the server rejected the value, so a validation error is
+ * never hidden inside a collapsed section.
+ */
+function PanField({ errors }: { errors?: string[] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open || Boolean(errors?.length);
+
+  if (!shown) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-6 text-sm font-semibold text-teal-600 hover:underline dark:text-teal-300"
+      >
+        + Add PAN (optional)
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <label className="label" htmlFor="pan">PAN</label>
+      <input
+        id="pan"
+        name="pan"
+        className="input font-mono uppercase"
+        maxLength={10}
+        placeholder="ABCDE1234F"
+        autoFocus={open}
+        aria-describedby="pan-guidance"
+        aria-invalid={Boolean(errors?.length)}
+      />
+      <p id="pan-guidance" className="mt-1 text-xs text-[var(--color-text-muted)]">
+        Only if the client offers it. PAN is collected properly at account opening.
+      </p>
+      <FieldError errors={errors} />
+    </>
   );
 }
 
@@ -105,9 +154,7 @@ export function NewLeadForm({
 
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
-            <label className="label" htmlFor="pan">PAN</label>
-            <input id="pan" name="pan" className="input font-mono uppercase" maxLength={10} placeholder="ABCDE1234F" />
-            <FieldError errors={state.errors?.pan} />
+            <PanField errors={state.errors?.pan} />
           </div>
           <div>
             <label className="label" htmlFor="city">City</label>

@@ -35,28 +35,78 @@ export function formatNumber(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-IN').format(value);
 }
 
-export function formatDate(value: string | Date | null | undefined): string {
-  if (!value) return '—';
+/**
+ * Every timestamp is stored UTC and displayed in IST.
+ *
+ * The timezone is pinned rather than left to the runtime, because these render
+ * on the server as well as in the browser: a container running UTC and a
+ * handset in Kolkata would otherwise disagree by five and a half hours, and the
+ * server would win on first paint.
+ */
+const IST = 'Asia/Kolkata';
+
+function toDate(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
   const date = typeof value === 'string' ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('en-IN', {
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** 05-Jan-2026. Hyphenated so it cannot be read as either DD/MM or MM/DD. */
+export function formatDate(value: string | Date | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  const parts = new Intl.DateTimeFormat('en-GB', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: IST,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('day')}-${get('month')}-${get('year')}`;
+}
+
+/** 14:30. `h23` rather than hour12:false, which yields "24:00" at midnight on some engines. */
+export function formatTime(value: string | Date | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: IST,
   }).format(date);
 }
 
+/** 05-Jan-2026 14:30 */
 export function formatDateTime(value: string | Date | null | undefined): string {
-  if (!value) return '—';
-  const date = typeof value === 'string' ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('en-IN', {
-    day: '2-digit',
-    month: 'short',
+  const date = toDate(value);
+  if (!date) return '—';
+  return `${formatDate(date)} ${formatTime(date)}`;
+}
+
+/**
+ * 2026-01-05 14:30 for machine-readable exports.
+ *
+ * Excel reinterprets anything that looks like a date on open, and mangles
+ * "05-Jan-2026" into whatever its locale prefers. ISO order survives that, sorts
+ * correctly as text, and is unambiguous to whoever receives the file.
+ */
+export function formatDateTimeForExport(value: string | Date | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
     year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(date);
+    hourCycle: 'h23',
+    timeZone: IST,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
 }
 
 /**

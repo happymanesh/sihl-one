@@ -29,6 +29,13 @@ const envSchema = z
 
     AUTH_MAX_FAILED_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
     AUTH_LOCKOUT_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
+    /**
+     * Sign the user out after this long without activity. Distinct from
+     * JWT_ACCESS_TTL, which is how long one access token lives — that renews
+     * silently, so on its own it keeps a session alive for the refresh
+     * token's full lifetime.
+     */
+    AUTH_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().min(5).max(1440).default(15),
 
     RATE_LIMIT_TTL: z.coerce.number().int().min(1).default(60),
     RATE_LIMIT_LIMIT: z.coerce.number().int().min(1).default(120),
@@ -147,6 +154,7 @@ export interface AppConfig {
     pepper: string;
     maxFailedAttempts: number;
     lockoutMinutes: number;
+    idleTimeoutMinutes: number;
   };
   rateLimit: { ttlSeconds: number; limit: number };
   storage: {
@@ -184,6 +192,7 @@ export function buildAppConfig(env: Env): AppConfig {
       pepper: env.PASSWORD_PEPPER,
       maxFailedAttempts: env.AUTH_MAX_FAILED_ATTEMPTS,
       lockoutMinutes: env.AUTH_LOCKOUT_MINUTES,
+      idleTimeoutMinutes: env.AUTH_IDLE_TIMEOUT_MINUTES,
     },
     rateLimit: { ttlSeconds: env.RATE_LIMIT_TTL, limit: env.RATE_LIMIT_LIMIT },
     storage: {

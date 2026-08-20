@@ -44,6 +44,7 @@ import { APP_CONFIG, buildAppConfig, validateEnv, type AppConfig, type Env } fro
           PASSWORD_PEPPER: read('PASSWORD_PEPPER'),
           AUTH_MAX_FAILED_ATTEMPTS: read('AUTH_MAX_FAILED_ATTEMPTS'),
           AUTH_LOCKOUT_MINUTES: read('AUTH_LOCKOUT_MINUTES'),
+          AUTH_IDLE_TIMEOUT_MINUTES: read('AUTH_IDLE_TIMEOUT_MINUTES'),
           RATE_LIMIT_TTL: read('RATE_LIMIT_TTL'),
           RATE_LIMIT_LIMIT: read('RATE_LIMIT_LIMIT'),
           STORAGE_DRIVER: read('STORAGE_DRIVER'),

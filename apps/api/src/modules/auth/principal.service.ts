@@ -52,8 +52,12 @@ export class PrincipalService {
       ...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[])),
     ];
 
-    // Touch lastSeenAt without awaiting — it is telemetry, not correctness, and
-    // must not add a write round-trip to the critical path of every request.
+    // Touch lastSeenAt without awaiting, so it never adds a write round-trip to
+    // the critical path of every request.
+    //
+    // This is no longer only telemetry: the idle timeout in AuthService.refresh
+    // measures against this column, so a session that stops being touched will
+    // be signed out. Do not remove it as a spare write.
     void this.prisma.session
       .update({ where: { id: sessionId }, data: { lastSeenAt: new Date() } })
       .catch(() => undefined);

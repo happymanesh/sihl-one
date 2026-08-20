@@ -1,0 +1,147 @@
+Day-1 meeting With CEO.
+
+-What does success in this role look like to you at 6 and 12 months?
+-What's the one problem that, if I solved it this year, would make this hire worth it?
+-What keeps you up at night — is it growth, cost, compliance/SEBI risk, or a competitor?
+-What's the budget reality, and what's my decision-making authority — what can I approve vs. what comes to you?
+-On AI governance with legal/compliance — what's driven this? A SEBI expectation, a board ask, an incident? — governance framed reactively vs. -proactively changes your whole first quarter.
+-Who are the 3-4 people I most need on my side, and where are the landmines?
+-What has been tried before and didn't work?
+-Things like to close in next 2 weeks.
+
+
+Department:
+----- 1st Floor
+Sales - B2B
+Sales - B2c
+----- 3rd Floor
+IT - Development
+IT - Support (Customer Support Desk) - viral, parul
+IT - Network
+IT - DEsign
+
+----- 1st Floor
+Dealing - HNI/Personal
+Dealing - Client
+Dealing - Global
+Payin/Payout 
+Accounts - Personal/Promotors
+Accounts - Clients
+Research
+
+----- Gr Floor
+Onboarding - NRI
+Onboarding - B2B
+Onboarding - DIY
+
+----- 2nd Floor
+Compliance - Why 2 section ?
+Onboarding - in 2nd Floor ?
+
+Research 
+
+
+
+Where is backoffice - Trading process, contract Note, Margin, compliance
+Where is RealTime RMS Team ?
+DP/Demat operation
+Training 
+QA Team
+
+
+
+client x product enrolled  and business unique client
+countwise and business wise
+Client onbaording last 1 year activation monthwise
+client count not trading from last 6 months...
+
+
+Customer support
+- CRM - inhouse - SB,AP,Branch, Easy pary partners
+- Trading (Desktop, Web and Mobile)
+- Web Whatsapp - for communication... promotional + Marketing + buyback + Advisory Call. (need to automate)
+- email using zoho product... manual...
+- SMS- Client IPO, Test message, template registration.
+- Website
+
+
+
+Parul-------
+Call - Centrailsed - 079-65081699 helpdesk multiple lines
+Email - helpdesk@sihl.in - manual managed among team and reply after confirming with parul.
+No log....
+security
+emails on mobile
+Robo Chat for support after office hours.
+
+
+GEt the list of the Account opening....and its conversion rate....
+get the active client list app wise.... turnover from platformwise
+
+
+
+SIHL Trading product for Global - for US equity and US ETF
+Onboard - Regulated NSE IX (Broker) - KYC pages is of NSE IX
+We are only as sub-broker.
+SUB-broker 3 portal provided to us
+Account, Client individual portfolio, All clients all trades
+2 days for account activation. email from NSE IX to client.
+Client will add bank account.
+journey: 
+Integrated - HDFC, AXIS, ICICI and INDUSIND (Trf funds from SIHL)
+Non-integrated - Download documents Bene details (A2) and get it updated from Forex with purpose in banks app. 2 days timeline for activation.
+Trf Funds.
+Purchase - Actual Transaction by ViewTrade - Shares with View Trade - DEpository receipt to Client DP.
+compliance issue - at india itself by SIHL and NSE IX team.
+
+
+
+
+http://localhost:3000/login?next=%2Fdashboard
+Web on :3000, API on :4000, OpenAPI at /api/docs. Sign in as salesmanager@sihl.in / Sihl@One2026! — six other seeded roles each show a genuinely different slice of the same data.
+
+
+
+
+
+https://crmnewapiuat.sihlnettrade.com:7802/api-docs/
+
+
+Sihl@One2026!
+new private repo → git remote add origin <url> && git branch -M main && git push -u origin main
+
+
+
+
+siddharth.v@sihl.in
+uFWemg@r*&K#6E
+
+
+
+
+kamal.thakkar@sihl.in
+j2hTzQ#Q3ar!Q#
+
+
+6ZNDX-4E3YH
+MK7RN-JR4EK
+U7TK2-DYQN7
+KEARS-FK37G
+P63XC-YHRKY
+BTNZK-9NWPZ
+MM5RS-UACT5
+G6KYK-U6PFW
+WKM44-ZY3CS
+86U5C-CSEMS
+
+
+
+
+
+
+
+
+
+
+
+

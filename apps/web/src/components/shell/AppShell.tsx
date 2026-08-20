@@ -7,6 +7,7 @@ import type { AuthenticatedUser } from '@sihl-one/contracts';
 
 import { Logo } from '@/components/brand/Logo';
 import { Icon } from './Icon';
+import { IdleTimeout } from './IdleTimeout';
 import { UserMenu } from './UserMenu';
 import { SECTION_LABELS, visibleNavItems, type NavItem } from './navigation';
 
@@ -21,6 +22,7 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const items = visibleNavItems(user);
 
   // Close the drawer on navigation. Without this it stays open over the page
@@ -29,12 +31,31 @@ export function AppShell({
     setMobileOpen(false);
   }, [pathname]);
 
+  // Collapsed state is a per-user preference, remembered the same way the theme
+  // is. It applies only from `lg` up: on a phone the sidebar is already a
+  // drawer, and a collapsed drawer would be a strip of icons over the page.
+  useEffect(() => {
+    setCollapsed(localStorage.getItem('sihl-nav-collapsed') === 'true');
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem('sihl-nav-collapsed', String(next));
+      return next;
+    });
+  };
+
   const sections = (['work', 'grow', 'admin'] as const)
     .map((section) => ({ section, items: items.filter((item) => item.section === section) }))
     .filter((group) => group.items.length > 0);
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
+    <div
+      className={`min-h-screen lg:grid ${
+        collapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[248px_1fr]'
+      }`}
+    >
       {/* Mobile scrim */}
       {mobileOpen ? (
         <div
@@ -47,23 +68,42 @@ export function AppShell({
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-transform lg:static lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        } ${collapsed ? 'lg:w-[68px]' : 'lg:w-[248px]'}`}
       >
-        <div className="flex h-14 items-center border-b border-[var(--color-border)] px-4">
-          <Link href="/dashboard">
+        <div className="flex h-14 items-center gap-1 border-b border-[var(--color-border)] px-4">
+          <Link href="/dashboard" className={collapsed ? 'lg:hidden' : undefined}>
             <Logo size="sm" />
           </Link>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="btn btn-ghost ml-auto hidden px-2 lg:inline-flex"
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          >
+            <Icon name="menu" size={18} />
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main">
           {sections.map((group) => (
             <div key={group.section} className="mb-5">
-              <p className="px-2 pb-1.5 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+              <p
+                className={`px-2 pb-1.5 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] ${
+                  collapsed ? 'lg:hidden' : ''
+                }`}
+              >
                 {SECTION_LABELS[group.section]}
               </p>
               <ul className="space-y-0.5">
                 {group.items.map((item) => (
-                  <NavLink key={item.href} item={item} pathname={pathname} />
+                  <NavLink
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    collapsed={collapsed}
+                  />
                 ))}
               </ul>
             </div>
@@ -106,15 +146,29 @@ export function AppShell({
           {children}
         </main>
       </div>
+
+      <IdleTimeout onLogout={onLogout} />
     </div>
   );
 }
 
-function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+function NavLink({
+  item,
+  pathname,
+  collapsed,
+}: {
+  item: NavItem;
+  pathname: string;
+  collapsed: boolean;
+}) {
   // Exact match for the dashboard, prefix match elsewhere, so /leads/abc still
   // highlights "Leads" but /dashboard does not stay lit on every page.
   const active =
     item.href === '/dashboard' ? pathname === item.href : pathname.startsWith(item.href);
+
+  // Hidden at `lg` when collapsed rather than removed, so the drawer on a phone
+  // still shows labels and screen readers always have the name.
+  const labelClass = collapsed ? 'lg:hidden' : '';
 
   if (item.available === false) {
     return (
@@ -125,8 +179,10 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
           className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-semibold text-[var(--color-text-subtle)] opacity-60"
         >
           <Icon name={item.icon} size={17} />
-          <span className="flex-1">{item.label}</span>
-          <span className="rounded-full bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-wide">
+          <span className={`flex-1 ${labelClass}`}>{item.label}</span>
+          <span
+            className={`rounded-full bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-wide ${labelClass}`}
+          >
             Soon
           </span>
         </span>
@@ -139,6 +195,8 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
       <Link
         href={item.href}
         aria-current={active ? 'page' : undefined}
+        // The title is the tooltip a collapsed rail needs; harmless when expanded.
+        title={item.label}
         className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-semibold transition-colors ${
           active
             ? 'bg-navy-500 text-white'
@@ -146,7 +204,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
         }`}
       >
         <Icon name={item.icon} size={17} />
-        {item.label}
+        <span className={labelClass}>{item.label}</span>
       </Link>
     </li>
   );
