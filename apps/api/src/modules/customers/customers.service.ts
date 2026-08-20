@@ -53,6 +53,23 @@ export class CustomersService {
     if (query.relationshipManagerId) and.push({ relationshipManagerId: query.relationshipManagerId });
     if (query.partnerId) and.push({ partnerId: query.partnerId });
 
+    // Which product relationship is being asked about. `opportunity` — wants it,
+    // does not hold it — is the actionable one and the default, because pitching
+    // a client something they already own is the mistake worth preventing.
+    if (query.productInterest?.length) {
+      const codes = query.productInterest;
+      const interested = { productInterest: { hasSome: codes } };
+      const holds = { holdings: { some: { product: { in: codes } } } };
+
+      if (query.productDimension === 'interested') {
+        and.push(interested);
+      } else if (query.productDimension === 'holds') {
+        and.push(holds);
+      } else {
+        and.push(interested, { NOT: holds });
+      }
+    }
+
     const where = { deletedAt: null, AND: and };
     const sortBy = query.sortBy && SORTABLE.has(query.sortBy) ? query.sortBy : 'createdAt';
 
@@ -65,6 +82,9 @@ export class CustomersService {
         include: {
           relationshipManager: { select: { id: true, firstName: true, lastName: true } },
           partner: { select: { id: true, name: true } },
+          // Product codes only. The list shows chips; the 360 screen is where
+          // values, sync times and the rest of the mirrored record belong.
+          holdings: { select: { product: true } },
         },
       }),
       this.prisma.customer.count({ where }),
@@ -91,6 +111,9 @@ export class CustomersService {
             }
           : null,
         partner: customer.partner,
+        productInterest: customer.productInterest,
+        // What they actually hold, mirrored from the back office (ADR-0002).
+        holdings: customer.holdings.map((holding) => holding.product),
         createdAt: customer.createdAt.toISOString(),
       })),
       total,

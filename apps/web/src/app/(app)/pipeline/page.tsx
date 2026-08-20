@@ -2,6 +2,10 @@ import Link from 'next/link';
 import type { LeadListItem } from '@sihl-one/contracts';
 
 import { ScoreBadge } from '@/components/ui/Badge';
+import type { ProductItem } from '@sihl-one/contracts';
+
+import { PipelineFilters } from '@/components/leads/PipelineFilters';
+import { ProductChips } from '@/components/ui/ProductChips';
 import { apiFetch, toQuery } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatCompactCurrency, humanise } from '@/lib/format';
@@ -31,22 +35,36 @@ interface Paginated {
  * 4,000 leads costs the same as one with four; the header shows the true total
  * while the body shows the first slice.
  */
-export default async function PipelinePage() {
+export default async function PipelinePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requireUser();
+  const params = await searchParams;
+  const productInterest = params.productInterest as string | string[] | undefined;
 
-  const summary = await apiFetch<PipelineSummary>('/leads/pipeline');
+  const [summary, products] = await Promise.all([
+    apiFetch<PipelineSummary>('/leads/pipeline'),
+    apiFetch<ProductItem[]>('/masters/products').catch(() => [] as ProductItem[]),
+  ]);
+  const productLabels = Object.fromEntries(products.map((product) => [product.code, product.name]));
 
   const columns = await Promise.all(
     COLUMNS.map(async (status) => {
       const data = await apiFetch<Paginated>(
-        `/leads${toQuery({ status, pageSize: '12', sortBy: 'score', sortDir: 'desc' })}`,
+        `/leads${toQuery({ status, productInterest, pageSize: '12', sortBy: 'score', sortDir: 'desc' })}`,
       );
       const totals = summary.columns.find((column) => column.status === status);
+      const filtered = Boolean(productInterest?.length);
       return {
         status,
         leads: data.items,
-        total: totals?.count ?? data.total,
-        value: totals?.estimatedValue ?? '0',
+        // The stage summary counts the whole board. Once a filter is on it
+        // would claim more leads than the column shows, so the filtered
+        // result's own total is the honest number.
+        total: filtered ? data.total : (totals?.count ?? data.total),
+        value: filtered ? null : (totals?.estimatedValue ?? '0'),
       };
     }),
   );
@@ -65,6 +83,8 @@ export default async function PipelinePage() {
         </Link>
       </header>
 
+      <PipelineFilters products={products} />
+
       <div className="grid gap-3 lg:grid-cols-4">
         {columns.map((column) => (
           <section
@@ -79,9 +99,11 @@ export default async function PipelinePage() {
                   {column.total}
                 </span>
               </div>
-              <p className="mt-0.5 text-xs text-[var(--color-text-subtle)] tnum">
-                {formatCompactCurrency(column.value)}
-              </p>
+              {column.value !== null ? (
+                <p className="mt-0.5 text-xs text-[var(--color-text-subtle)] tnum">
+                  {formatCompactCurrency(column.value)}
+                </p>
+              ) : null}
             </header>
 
             <div className="flex-1 space-y-2 p-2">
@@ -100,6 +122,16 @@ export default async function PipelinePage() {
                     <p className="mt-0.5 truncate font-mono text-[0.6875rem] text-[var(--color-text-subtle)]">
                       {lead.reference}
                     </p>
+
+                    {lead.productInterest?.length ? (
+                      <div className="mt-1.5">
+                        <ProductChips
+                          codes={lead.productInterest}
+                          labels={productLabels}
+                          tone="outline"
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <ScoreBadge score={lead.score} band={lead.scoreBand} />

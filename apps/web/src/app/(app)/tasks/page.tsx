@@ -5,6 +5,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/shell/Icon';
 import { PriorityBadge } from '@/components/ui/Badge';
 import { StatTile } from '@/components/ui/StatTile';
+import type { ProductItem } from '@sihl-one/contracts';
+
+import { ProductChips } from '@/components/ui/ProductChips';
 import { apiFetch, toQuery } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatDateTime, formatRelative } from '@/lib/format';
@@ -23,28 +26,33 @@ interface TaskRow {
   entityType: string | null;
   entityId: string | null;
   assignee: { id: string; fullName: string } | null;
+  /** From the linked lead, so a rep can triage without opening each task. */
+  productInterest: string[];
 }
 
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireUser();
   const params = await searchParams;
 
-  const [summary, data] = await Promise.all([
+  const [summary, data, products] = await Promise.all([
     apiFetch<{ open: number; overdue: number; dueToday: number; completedThisWeek: number }>(
       '/tasks/summary',
     ),
     apiFetch<{ items: TaskRow[]; total: number }>(
       `/tasks${toQuery({
-        status: params.status ?? 'OPEN',
-        overdueOnly: params.overdueOnly,
+        status: (params.status as string | undefined) ?? 'OPEN',
+        overdueOnly: params.overdueOnly as string | undefined,
         pageSize: '50',
       })}`,
     ),
+    apiFetch<ProductItem[]>('/masters/products').catch(() => [] as ProductItem[]),
   ]);
+
+  const productLabels = Object.fromEntries(products.map((product) => [product.code, product.name]));
 
   return (
     <div className="space-y-4">
@@ -109,10 +117,17 @@ export default async function TasksPage({
                     {task.description}
                   </p>
                 ) : null}
-                <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-subtle)]">
                   <span className="font-mono">{task.reference}</span>
-                  {task.assignee ? ` · ${task.assignee.fullName}` : ''}
-                </p>
+                  {task.assignee ? <span>· {task.assignee.fullName}</span> : null}
+                  {task.productInterest?.length ? (
+                    <ProductChips
+                      codes={task.productInterest}
+                      labels={productLabels}
+                      tone="outline"
+                    />
+                  ) : null}
+                </div>
               </div>
 
               <PriorityBadge priority={task.priority} />

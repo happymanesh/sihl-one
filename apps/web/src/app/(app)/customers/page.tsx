@@ -4,6 +4,10 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/shell/Icon';
 import { KycBadge } from '@/components/ui/Badge';
 import { Pagination } from '@/components/ui/Pagination';
+import type { ProductItem } from '@sihl-one/contracts';
+
+import { CustomerFilters } from '@/components/customers/CustomerFilters';
+import { ProductChips } from '@/components/ui/ProductChips';
 import { apiFetch, toQuery } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatDate, formatNumber, humanise } from '@/lib/format';
@@ -23,16 +27,23 @@ interface CustomerRow {
   onboardingStage: string;
   progressPercent: number;
   relationshipManager: { id: string; fullName: string } | null;
+  productInterest: string[];
+  holdings: string[];
   createdAt: string;
 }
 
 export default async function CustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireUser();
   const params = await searchParams;
+
+  const products = await apiFetch<ProductItem[]>('/masters/products').catch(
+    () => [] as ProductItem[],
+  );
+  const productLabels = Object.fromEntries(products.map((product) => [product.code, product.name]));
 
   const data = await apiFetch<{
     items: CustomerRow[];
@@ -46,6 +57,8 @@ export default async function CustomersPage({
       status: params.status,
       kycStatus: params.kycStatus,
       onboardingStage: params.onboardingStage,
+      productInterest: params.productInterest as string | string[] | undefined,
+      productDimension: params.productDimension,
       page: params.page ?? '1',
       pageSize: '20',
     })}`,
@@ -59,6 +72,8 @@ export default async function CustomersPage({
           {formatNumber(data.total)} in your scope
         </p>
       </header>
+
+      <CustomerFilters products={products} />
 
       {data.items.length === 0 ? (
         <div className="card">
@@ -80,7 +95,7 @@ export default async function CustomersPage({
               <table className="w-full text-sm">
                 <thead className="border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] text-left">
                   <tr>
-                    {['Customer', 'Onboarding', 'KYC', 'Relationship manager', 'Since'].map(
+                    {['Customer', 'Interested in', 'Holds', 'Onboarding', 'KYC', 'Relationship manager', 'Since'].map(
                       (heading) => (
                         <th
                           key={heading}
@@ -108,6 +123,22 @@ export default async function CustomersPage({
                           <span className="mx-1.5" aria-hidden>·</span>
                           <span className="tnum">{customer.mobileMasked}</span>
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <ProductChips
+                          codes={customer.productInterest ?? []}
+                          labels={productLabels}
+                          tone="outline"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        {/* Solid chips: what the back office says they actually
+                            hold, as opposed to what they asked about. */}
+                        <ProductChips
+                          codes={customer.holdings ?? []}
+                          labels={productLabels}
+                          tone="solid"
+                        />
                       </td>
                       <td className="px-4 py-3">
                         {/* Progress bar plus the stage name. The bar alone says

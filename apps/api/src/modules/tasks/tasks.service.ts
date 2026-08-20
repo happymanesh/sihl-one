@@ -47,6 +47,22 @@ export class TasksService {
       this.prisma.task.count({ where }),
     ]);
 
+    // Product interest for the leads these tasks hang off, fetched once for the
+    // page rather than per row. A rep triaging a task list wants to know what
+    // the client is after before opening anything.
+    const leadIds = rows
+      .filter((task) => task.entityType === 'LEAD' && task.entityId)
+      .map((task) => task.entityId as string);
+
+    const productsByLead = new Map<string, string[]>();
+    if (leadIds.length) {
+      const leads = await this.prisma.lead.findMany({
+        where: { id: { in: [...new Set(leadIds)] } },
+        select: { id: true, productInterest: true },
+      });
+      for (const lead of leads) productsByLead.set(lead.id, lead.productInterest);
+    }
+
     const now = new Date();
     return paginate(
       rows.map((task) => ({
@@ -60,6 +76,10 @@ export class TasksService {
         isOverdue: task.dueAt < now && !TERMINAL_STATUSES.has(task.status),
         entityType: task.entityType,
         entityId: task.entityId,
+        productInterest:
+          task.entityType === 'LEAD' && task.entityId
+            ? (productsByLead.get(task.entityId) ?? [])
+            : [],
         assignee: task.assignee
           ? { id: task.assignee.id, fullName: `${task.assignee.firstName} ${task.assignee.lastName}`.trim() }
           : null,

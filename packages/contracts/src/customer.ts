@@ -39,6 +39,20 @@ export const updateCustomerSchema = createCustomerSchema.partial().extend({
 });
 export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 
+/**
+ * Which product relationship a filter is asking about.
+ *
+ * A customer has two, and they answer different questions. Filtering by "PMS"
+ * without saying which produces three plausible result sets, and a rep who gets
+ * the wrong one concludes the filter is broken.
+ *
+ * `opportunity` is the default because it is the actionable list: wants it,
+ * does not hold it. Pitching a client something they already own is the mistake
+ * this exists to prevent.
+ */
+export const PRODUCT_DIMENSIONS = ['opportunity', 'interested', 'holds'] as const;
+export type ProductDimension = (typeof PRODUCT_DIMENSIONS)[number];
+
 export const customerQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().max(120).optional(),
   status: z.enum(CUSTOMER_STATUSES).optional(),
@@ -46,6 +60,12 @@ export const customerQuerySchema = paginationQuerySchema.extend({
   onboardingStage: z.enum(ONBOARDING_STAGES).optional(),
   relationshipManagerId: idSchema.optional(),
   partnerId: idSchema.optional(),
+  /** Product codes. Matching is OR, as on leads. */
+  productInterest: z
+    .union([codeSchema, z.array(codeSchema)])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
+  productDimension: z.enum(PRODUCT_DIMENSIONS).default('opportunity'),
 });
 export type CustomerQuery = z.infer<typeof customerQuerySchema>;
 
