@@ -117,12 +117,12 @@ export class DashboardService {
       this.prisma.customer.count({ where: { ...customerWhere, status: 'ONBOARDING' } }),
       this.prisma.customer.count({ where: { ...customerWhere, activatedAt: { gte: last30 } } }),
       this.prisma.task.count({
-        where: { deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS'] }, AND: [taskScope] },
+        where: { deletedAt: null, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } }, AND: [taskScope] },
       }),
       this.prisma.task.count({
         where: {
           deletedAt: null,
-          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
           dueAt: { lt: now },
           AND: [taskScope],
         },

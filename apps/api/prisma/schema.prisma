@@ -321,6 +321,15 @@ model Product {
   code  String @unique @db.VarChar(40)
   name  String @db.VarChar(80)
 
+  /// Parent product, for sub-products such as Equity → Intraday.
+  ///
+  /// Capped at two levels by convention rather than by the database: arbitrary
+  /// depth reads as flexibility and produces a hierarchy nobody can filter. The
+  /// masters service refuses a parent that already has one.
+  parentId String?
+  parent   Product?  @relation("ProductHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children Product[] @relation("ProductHierarchy")
+
   /// One line, for the dropdown and the card.
   summary String? @db.VarChar(300)
   /// What the salesperson actually reads out. Markdown.
@@ -1042,11 +1051,52 @@ model Activity {
   @@map("activity")
 }
 
-enum TaskStatus {
+/// The fixed behavioural classes a task status can belong to.
+///
+/// Every query and report keys off the category, never the status label, so an
+/// administrator can add "Awaiting client documents" and "Awaiting compliance"
+/// under IN_PROGRESS and no dashboard, filter or count needs changing. Renaming
+/// a label must never move a task between these.
+enum TaskStatusCategory {
   OPEN
   IN_PROGRESS
   DONE
   CANCELLED
+}
+
+/// Admin-managed task statuses.
+///
+/// Same shape as the source and product masters: system rows are permanent but
+/// relabellable and deactivatable, and nothing is ever deleted, so a task
+/// carrying a retired status still reads correctly.
+model TaskStatusMaster {
+  id    String @id @default(cuid())
+  code  String @unique @db.VarChar(40)
+  label String @db.VarChar(80)
+
+  /// One line, shown under the dropdown when this status is selected. The
+  /// reason a status master exists at all: "In progress" means different things
+  /// in different teams, and writing it down settles it.
+  meaning String? @db.VarChar(200)
+
+  category TaskStatusCategory
+
+  /// Keyed by entity so leads and visits can adopt this table later without a
+  /// second migration. Only TASK is used today.
+  entityType String @default("TASK") @db.VarChar(24)
+
+  isActive  Boolean @default(true)
+  isSystem  Boolean @default(false)
+  sortOrder Int     @default(100)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks Task[]
+
+  @@index([entityType, isActive, sortOrder])
+  @@map("task_status")
 }
 
 model Task {
@@ -1057,8 +1107,10 @@ model Task {
   title       String      @db.VarChar(160)
   description String?     @db.VarChar(2000)
 
-  status   TaskStatus @default(OPEN)
-  priority Priority   @default(MEDIUM)
+  /// Code into `task_status`; validated on write, never parsed for meaning.
+  status       String            @default("OPEN") @db.VarChar(40)
+  statusMaster TaskStatusMaster? @relation(fields: [status], references: [code], onDelete: Restrict, onUpdate: Cascade)
+  priority     Priority          @default(MEDIUM)
   dueAt    DateTime
 
   assigneeId String?

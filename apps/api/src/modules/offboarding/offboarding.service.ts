@@ -58,7 +58,7 @@ export class OffboardingService {
           where: { relationshipManagerId: userId, deletedAt: null },
         }),
         this.prisma.task.count({
-          where: { assigneeId: userId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS'] } },
+          where: { assigneeId: userId, deletedAt: null, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } },
         }),
         this.prisma.visit.count({ where: { userId, status: { in: ['PLANNED', 'CHECKED_IN'] } } }),
         this.prisma.session.count({
@@ -230,7 +230,7 @@ export class OffboardingService {
       const fallbackOwner = await this.pickRecipient(input, null, cursor + 1);
       if (fallbackOwner) {
         const result = await this.prisma.task.updateMany({
-          where: { assigneeId: userId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS'] } },
+          where: { assigneeId: userId, deletedAt: null, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } },
           data: { assigneeId: fallbackOwner },
         });
         tasksMoved = result.count;

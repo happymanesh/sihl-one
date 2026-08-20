@@ -92,8 +92,32 @@ export class LeadsService {
   // Reads
   // -------------------------------------------------------------------------
 
+  /**
+   * Widen a product filter to include sub-products.
+   *
+   * Someone asking for "Equity" expects its sub-products in the answer, not an
+   * empty list because those leads carry the child code instead. Done here
+   * rather than in `buildWhere`, which is synchronous and shared.
+   */
+  private async withSubProducts(query: LeadQuery): Promise<LeadQuery> {
+    if (!query.productInterest?.length) return query;
+
+    const children = await this.prisma.product.findMany({
+      where: { parent: { code: { in: query.productInterest } } },
+      select: { code: true },
+    });
+    if (children.length === 0) return query;
+
+    return {
+      ...query,
+      productInterest: [
+        ...new Set([...query.productInterest, ...children.map((child) => child.code)]),
+      ],
+    };
+  }
+
   async list(user: AuthenticatedPrincipal, query: LeadQuery): Promise<PaginatedResult<LeadListItem>> {
-    const where = this.buildWhere(user, query);
+    const where = this.buildWhere(user, await this.withSubProducts(query));
 
     // `sortBy` reaches Prisma as an object key, so it is checked against an
     // allow-list rather than passed through. An arbitrary string here would let
@@ -127,7 +151,8 @@ export class LeadsService {
    * shows the first page of each column.
    */
   async pipeline(user: AuthenticatedPrincipal, query: LeadQuery) {
-    const where = this.buildWhere(user, { ...query, status: undefined });
+    const expanded = await this.withSubProducts(query);
+    const where = this.buildWhere(user, { ...expanded, status: undefined });
 
     const [counts, values] = await Promise.all([
       this.prisma.lead.groupBy({ by: ['status'], where, _count: { _all: true } }),
@@ -1033,6 +1058,8 @@ export class LeadsService {
     // `hasSome` is array overlap — the OR semantics the filter advertises.
     // Served by the GIN index on lead.productInterest; without it this is a
     // sequential scan, which is invisible at pilot size and not at scale.
+    //
+    // The codes arrive already expanded — see `withSubProducts`.
     if (query.productInterest?.length) {
       and.push({ productInterest: { hasSome: query.productInterest } });
     }

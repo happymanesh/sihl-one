@@ -10,10 +10,32 @@
 # verbatim and fail before writing a single log line.
 set -e
 
-echo "[entrypoint] Applying database migrations…"
 # Run from apps/api: the config's schema and migrations paths are relative to
 # the working directory.
 cd apps/api
+
+# Recovery hatch for a migration that failed part-way.
+#
+# Prisma wraps each migration in a transaction, so a failure leaves the schema
+# untouched but writes a "failed" row that blocks every later migration with
+# P3009. Marking it rolled back is the documented fix, and without this the only
+# way to run it is a shell inside the container.
+#
+# Set to the migration name, deploy once, then unset. It is deliberately not a
+# boolean: naming the migration means you have looked at which one failed.
+if [ -n "$MIGRATE_RESOLVE_ROLLED_BACK" ]; then
+  echo "[entrypoint] Marking $MIGRATE_RESOLVE_ROLLED_BACK as rolled back…"
+  # Non-fatal on purpose. Once the migration has been fixed and applied, this
+  # call fails — there is nothing left to roll back — and with `set -e` a flag
+  # somebody forgot to clear would then stop the service from booting at all.
+  # A recovery hatch must not become an outage.
+  ../../node_modules/.bin/prisma migrate resolve \
+    --rolled-back "$MIGRATE_RESOLVE_ROLLED_BACK" \
+    --config prisma.config.production.mjs \
+    || echo "[entrypoint] Nothing to roll back — clear MIGRATE_RESOLVE_ROLLED_BACK."
+fi
+
+echo "[entrypoint] Applying database migrations…"
 ../../node_modules/.bin/prisma migrate deploy --config prisma.config.production.mjs
 echo "[entrypoint] Migrations applied."
 

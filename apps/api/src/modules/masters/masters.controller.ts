@@ -3,12 +3,16 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 import {
   createLeadSourceSchema,
   createProductSchema,
+  createTaskStatusSchema,
   masterQuerySchema,
+  updateTaskStatusSchema,
   updateLeadSourceSchema,
   updateProductSchema,
   type CreateLeadSourceInput,
   type CreateProductInput,
+  type CreateTaskStatusInput,
   type MasterQuery,
+  type UpdateTaskStatusInput,
   type UpdateLeadSourceInput,
   type UpdateProductInput,
 } from '@sihl-one/contracts';
@@ -131,4 +135,41 @@ export class MastersController {
   ): Promise<void> {
     return this.masters.deleteProduct(user, id);
   }
+
+  // -------------------------------------------------------------------------
+  // Task statuses
+  // -------------------------------------------------------------------------
+
+  @Get('task-statuses')
+  @RequirePermissions('task:read')
+  @ApiOperation({ summary: 'Task statuses, active ones by default' })
+  @ApiZodQuery(masterQuerySchema)
+  listTaskStatuses(@ZodQuery(masterQuerySchema) query: MasterQuery) {
+    return this.masters.listTaskStatuses(query);
+  }
+
+  @Post('task-statuses')
+  @RequirePermissions('system:configure')
+  @ApiOperation({ summary: 'Add a task status under an existing category' })
+  @ApiZodBody(createTaskStatusSchema)
+  createTaskStatus(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(createTaskStatusSchema) body: CreateTaskStatusInput,
+  ) {
+    return this.masters.createTaskStatus(user, body);
+  }
+
+  @Patch('task-statuses/:id')
+  @RequirePermissions('system:configure')
+  @ApiParam({ name: 'id' })
+  @ApiOperation({ summary: 'Relabel a status, or switch it off' })
+  @ApiZodBody(updateTaskStatusSchema)
+  updateTaskStatus(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(updateTaskStatusSchema) body: UpdateTaskStatusInput,
+  ) {
+    return this.masters.updateTaskStatus(user, id, body);
+  }
+
 }

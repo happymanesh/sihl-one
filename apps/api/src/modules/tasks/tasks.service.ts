@@ -7,7 +7,14 @@ import { ScopeService } from '../../common/scope.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
 
-const TERMINAL_STATUSES = new Set(['DONE', 'CANCELLED']);
+/**
+ * Terminal *categories*, not labels.
+ *
+ * An administrator may add "Closed — no response" under CANCELLED; it must
+ * behave like a cancellation without anyone editing this file. Reading the
+ * label here is what would break that.
+ */
+const TERMINAL_CATEGORIES = new Set(['DONE', 'CANCELLED']);
 
 @Injectable()
 export class TasksService {
@@ -29,7 +36,7 @@ export class TasksService {
     if (query.entityId) and.push({ entityId: query.entityId });
     if (query.dueBefore) and.push({ dueAt: { lte: query.dueBefore } });
     if (query.overdueOnly) {
-      and.push({ dueAt: { lt: new Date() }, status: { in: ['OPEN', 'IN_PROGRESS'] } });
+      and.push({ dueAt: { lt: new Date() }, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } });
     }
 
     const where = { deletedAt: null, AND: and };
@@ -42,7 +49,10 @@ export class TasksService {
         orderBy: [{ dueAt: 'asc' }],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
-        include: { assignee: { select: { id: true, firstName: true, lastName: true } } },
+        include: {
+          assignee: { select: { id: true, firstName: true, lastName: true } },
+          statusMaster: { select: { label: true, category: true, meaning: true } },
+        },
       }),
       this.prisma.task.count({ where }),
     ]);
@@ -73,7 +83,10 @@ export class TasksService {
         status: task.status,
         priority: task.priority,
         dueAt: task.dueAt.toISOString(),
-        isOverdue: task.dueAt < now && !TERMINAL_STATUSES.has(task.status),
+        isOverdue:
+          task.dueAt < now && !TERMINAL_CATEGORIES.has(task.statusMaster?.category ?? 'OPEN'),
+        statusLabel: task.statusMaster?.label ?? task.status,
+        statusCategory: task.statusMaster?.category ?? 'OPEN',
         entityType: task.entityType,
         entityId: task.entityId,
         productInterest:
@@ -123,10 +136,30 @@ export class TasksService {
   async update(user: AuthenticatedPrincipal, id: string, input: UpdateTaskInput) {
     const task = await this.prisma.task.findFirst({
       where: { id, deletedAt: null, AND: [this.scope.taskScope(user)] },
+      include: { statusMaster: { select: { category: true } } },
     });
     if (!task) throw new NotFoundException({ title: 'Task not found' });
 
-    if (TERMINAL_STATUSES.has(task.status) && input.status && !TERMINAL_STATUSES.has(input.status)) {
+    // Both sides resolved to categories, so a custom status behaves like the
+    // class it belongs to rather than like its name.
+    const currentCategory = task.statusMaster?.category ?? 'OPEN';
+    const nextCategory = input.status
+      ? ((
+          await this.prisma.taskStatusMaster.findUnique({
+            where: { code: input.status },
+            select: { category: true, isActive: true },
+          })
+        )?.category ?? null)
+      : null;
+
+    if (input.status && nextCategory === null) {
+      throw new BadRequestException({
+        title: 'Unknown status',
+        detail: 'That status does not exist.',
+      });
+    }
+
+    if (TERMINAL_CATEGORIES.has(currentCategory) && nextCategory && !TERMINAL_CATEGORIES.has(nextCategory)) {
       throw new BadRequestException({
         title: 'Task is closed',
         detail: 'A completed or cancelled task cannot be reopened. Create a follow-up task instead.',
@@ -137,7 +170,7 @@ export class TasksService {
       throw new BadRequestException({ title: 'Cannot reassign to that user' });
     }
 
-    const completing = input.status === 'DONE' && task.status !== 'DONE';
+    const completing = nextCategory === 'DONE' && currentCategory !== 'DONE';
 
     const updated = await this.prisma.task.update({
       where: { id },
@@ -164,21 +197,21 @@ export class TasksService {
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
     const [open, overdue, dueToday, completedThisWeek] = await this.prisma.$transaction([
-      this.prisma.task.count({ where: { ...base, status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
+      this.prisma.task.count({ where: { ...base, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } } }),
       this.prisma.task.count({
-        where: { ...base, status: { in: ['OPEN', 'IN_PROGRESS'] }, dueAt: { lt: now } },
+        where: { ...base, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } }, dueAt: { lt: now } },
       }),
       this.prisma.task.count({
         where: {
           ...base,
-          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
           dueAt: { gte: now, lte: endOfToday },
         },
       }),
       this.prisma.task.count({
         where: {
           ...base,
-          status: 'DONE',
+          statusMaster: { category: 'DONE' },
           completedAt: { gte: new Date(Date.now() - 7 * 86_400_000) },
         },
       }),

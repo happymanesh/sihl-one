@@ -1,16 +1,20 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  canDeactivateTaskStatus,
   canDeleteMasterRow,
   type CreateLeadSourceInput,
   type CreateProductInput,
+  type CreateTaskStatusInput,
   type LeadSourceItem,
   type MasterQuery,
   type ProductItem,
+  type TaskStatusItem,
   type UpdateLeadSourceInput,
   type UpdateProductInput,
+  type UpdateTaskStatusInput,
 } from '@sihl-one/contracts';
 
-import { AuditService } from '../../common/audit.service';
+import { AuditService, diffRecords } from '../../common/audit.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -226,6 +230,10 @@ export class MastersService {
           : {}),
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      include: {
+        parent: { select: { name: true } },
+        children: { select: { code: true } },
+      },
     });
 
     // `productInterest` is an array column, so the count is a separate pass —
@@ -236,17 +244,30 @@ export class MastersService {
       ),
     );
 
-    return rows.map((row, index) => ({ ...row, leadCount: counts[index]! }));
+    return rows.map((row, index) => ({
+      ...row,
+      parentName: row.parent?.name ?? null,
+      childCodes: row.children.map((child) => child.code),
+      leadCount: counts[index]!,
+    }));
   }
 
   async findProduct(code: string): Promise<ProductItem> {
-    const row = await this.prisma.product.findUnique({ where: { code } });
+    const row = await this.prisma.product.findUnique({
+      where: { code },
+      include: { parent: { select: { name: true } }, children: { select: { code: true } } },
+    });
     if (!row) throw new NotFoundException({ title: 'Product not found' });
 
     const leadCount = await this.prisma.lead.count({
       where: { deletedAt: null, productInterest: { has: row.code } },
     });
-    return { ...row, leadCount };
+    return {
+      ...row,
+      parentName: row.parent?.name ?? null,
+      childCodes: row.children.map((child) => child.code),
+      leadCount,
+    };
   }
 
   async createProduct(user: AuthenticatedPrincipal, input: CreateProductInput) {
@@ -256,6 +277,24 @@ export class MastersService {
         title: 'That code is taken',
         detail: `"${input.code}" is already used by ${existing.name}.`,
       });
+    }
+
+    if (input.parentId) {
+      const parent = await this.prisma.product.findUnique({
+        where: { id: input.parentId },
+        select: { id: true, name: true, parentId: true },
+      });
+      if (!parent) {
+        throw new NotFoundException({ title: 'Parent product not found' });
+      }
+      // Two levels only. Deeper hierarchies read as flexibility and produce a
+      // tree nobody can filter sensibly.
+      if (parent.parentId) {
+        throw new ConflictException({
+          title: 'Only two levels are supported',
+          detail: `"${parent.name}" is itself a sub-product, so it cannot be a parent.`,
+        });
+      }
     }
 
     const created = await this.prisma.product.create({
@@ -328,4 +367,86 @@ export class MastersService {
       changes: { code: row.code, name: row.name },
     });
   }
+
+  // -------------------------------------------------------------------------
+  // Task statuses
+  // -------------------------------------------------------------------------
+
+  async listTaskStatuses(query: MasterQuery): Promise<TaskStatusItem[]> {
+    const rows = await this.prisma.taskStatusMaster.findMany({
+      where: {
+        entityType: 'TASK',
+        ...(query.includeInactive ? {} : { isActive: true }),
+      },
+      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+      include: { _count: { select: { tasks: true } } },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      label: row.label,
+      meaning: row.meaning,
+      category: row.category as TaskStatusItem['category'],
+      isActive: row.isActive,
+      isSystem: row.isSystem,
+      sortOrder: row.sortOrder,
+      taskCount: row._count.tasks,
+    }));
+  }
+
+  async createTaskStatus(user: AuthenticatedPrincipal, input: CreateTaskStatusInput) {
+    const existing = await this.prisma.taskStatusMaster.findUnique({ where: { code: input.code } });
+    if (existing) {
+      throw new ConflictException({
+        title: 'That code is taken',
+        detail: `"${input.code}" is already used by ${existing.label}.`,
+      });
+    }
+
+    const created = await this.prisma.taskStatusMaster.create({
+      data: { ...input, meaning: input.meaning ?? null, createdById: user.id },
+    });
+
+    this.invalidate();
+    await this.audit.record({
+      action: 'CREATE',
+      resource: 'master.taskStatus',
+      resourceId: created.id,
+      changes: { code: created.code, label: created.label, category: created.category },
+    });
+
+    return created;
+  }
+
+  async updateTaskStatus(user: AuthenticatedPrincipal, id: string, input: UpdateTaskStatusInput) {
+    const before = await this.prisma.taskStatusMaster.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException({ title: 'Status not found' });
+
+    // Deactivating the last active status in a category leaves tasks in it with
+    // nowhere to go, so the rule is checked here rather than trusted to the UI.
+    if (input.isActive === false && before.isActive) {
+      const all = await this.listTaskStatuses({ includeInactive: true } as MasterQuery);
+      const verdict = canDeactivateTaskStatus(
+        { code: before.code, category: before.category as TaskStatusItem['category'], isActive: true },
+        all,
+      );
+      if (!verdict.allowed) {
+        throw new ConflictException({ title: 'Cannot switch that off', detail: verdict.reason });
+      }
+    }
+
+    const after = await this.prisma.taskStatusMaster.update({ where: { id }, data: input });
+
+    this.invalidate();
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'master.taskStatus',
+      resourceId: id,
+      changes: diffRecords(before, after),
+    });
+
+    return after;
+  }
+
 }

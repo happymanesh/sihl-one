@@ -165,7 +165,7 @@ export class CustomersService {
         select: { occurredAt: true },
       }),
       this.prisma.task.count({
-        where: { entityType: 'CUSTOMER', entityId: id, status: { in: ['OPEN', 'IN_PROGRESS'] }, deletedAt: null },
+        where: { entityType: 'CUSTOMER', entityId: id, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } }, deletedAt: null },
       }),
       this.prisma.visit.findFirst({
         where: { entityType: 'CUSTOMER', entityId: id, status: 'COMPLETED' },
