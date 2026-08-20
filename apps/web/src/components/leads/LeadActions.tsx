@@ -11,6 +11,7 @@ import {
   logActivity,
   type ActionState,
 } from '@/app/actions/leads';
+import { VoiceInputButton } from '@/components/leads/VoiceInputButton';
 import { humanise } from '@/lib/format';
 import { OwnerSuggestions } from './OwnerSuggestions';
 import { SendMessagePanel } from '@/components/messaging/SendMessagePanel';
@@ -29,6 +30,8 @@ interface Props {
   /** Active templates this lead could be sent. Empty hides the tab entirely. */
   templates: Array<{ code: string; name: string; channel: string; purpose: string; body: string }>;
   canUpdate: boolean;
+  /** Server-driven, so switching dictation on is a config change not a release. */
+  voiceInputEnabled: boolean;
   canAssign: boolean;
   canConvert: boolean;
 }
@@ -92,6 +95,7 @@ export function LeadActions(props: Props) {
             leadId={props.leadId}
             allowedTransitions={props.allowedTransitions}
             canUpdate={props.canUpdate}
+            voiceInputEnabled={props.voiceInputEnabled}
           />
         ) : null}
         {active === 'status' ? (
@@ -151,10 +155,12 @@ function LogInteractionForm({
   leadId,
   allowedTransitions,
   canUpdate,
+  voiceInputEnabled,
 }: {
   leadId: string;
   allowedTransitions: string[];
   canUpdate: boolean;
+  voiceInputEnabled: boolean;
 }) {
   const [state, action] = useActionState(logActivity, INITIAL);
   const formRef = useRef<HTMLFormElement>(null);
@@ -234,7 +240,10 @@ function LogInteractionForm({
       </div>
 
       <div>
-        <label className="label" htmlFor="body">Remarks</label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="label" htmlFor="body">Remarks</label>
+          <VoiceInputButton enabled={voiceInputEnabled} />
+        </div>
         <textarea
           id="body"
           name="body"

@@ -91,18 +91,46 @@ export class ScopeService {
 
   /** Row filter for tasks. Tasks are personal; scope only widens for managers. */
   taskScope(user: AuthenticatedPrincipal): Record<string, unknown> {
-    switch (user.dataScope) {
-      case 'ALL':
-        return {};
-      case 'ZONE':
-      case 'REGION':
-      case 'BRANCH':
-      case 'TEAM':
-        return { assigneeId: { in: [user.id, ...user.teamUserIds] } };
-      case 'SELF':
-      default:
-        return { OR: [{ assigneeId: user.id }, { createdById: user.id }] };
-    }
+    const base = (() => {
+      switch (user.dataScope) {
+        case 'ALL':
+          return {};
+        case 'ZONE':
+        case 'REGION':
+        case 'BRANCH':
+        case 'TEAM':
+          return { assigneeId: { in: [user.id, ...user.teamUserIds] } };
+        case 'SELF':
+        default:
+          return { OR: [{ assigneeId: user.id }, { createdById: user.id }] };
+      }
+    })();
+
+    return this.orAttended(base, user, 'task');
+  }
+
+  /**
+   * Widen a scope to include records the user was recorded as attending.
+   *
+   * A product expert brought in from another branch is outside the org subtree,
+   * so without this they cannot open the very thing they were asked to attend —
+   * which surfaces as "why can't I see the client I sat with yesterday?" and
+   * gets reported as a bug.
+   *
+   * Deliberately narrow: it grants that one record, not the branch, not the
+   * owner's book. It is the first rule here that reaches outside the org tree,
+   * so it stays as small as it can be.
+   */
+  private orAttended(
+    base: Record<string, unknown>,
+    user: AuthenticatedPrincipal,
+    kind: 'task' | 'visit',
+  ): Record<string, unknown> {
+    // An unscoped role already sees everything; widening it further is noise.
+    if (Object.keys(base).length === 0) return base;
+
+    const attended = { attendees: { some: { userId: user.id } } };
+    return { OR: [base, attended] };
   }
 
   /**
@@ -114,18 +142,22 @@ export class ScopeService {
    * fully unscoped role sees everything.
    */
   visitScope(user: AuthenticatedPrincipal): Record<string, unknown> {
-    switch (user.dataScope) {
-      case 'ALL':
-        return {};
-      case 'ZONE':
-      case 'REGION':
-      case 'BRANCH':
-      case 'TEAM':
-        return { userId: { in: [user.id, ...user.teamUserIds] } };
-      case 'SELF':
-      default:
-        return { userId: user.id };
-    }
+    const base = (() => {
+      switch (user.dataScope) {
+        case 'ALL':
+          return {};
+        case 'ZONE':
+        case 'REGION':
+        case 'BRANCH':
+        case 'TEAM':
+          return { userId: { in: [user.id, ...user.teamUserIds] } };
+        case 'SELF':
+        default:
+          return { userId: user.id };
+      }
+    })();
+
+    return this.orAttended(base, user, 'visit');
   }
 
   /**

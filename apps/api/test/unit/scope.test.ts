@@ -25,6 +25,7 @@ function principal(overrides: Partial<AuthenticatedPrincipal> = {}): Authenticat
     teamUserIds: [],
     partnerId: null,
     sessionId: 'session-1',
+    mustChangePassword: false,
     ...overrides,
   };
 }
@@ -117,5 +118,40 @@ describe('ScopeService — assignment authority', () => {
     assert.equal(scope.canAssignTo(user, 'rep-1'), true);
     assert.equal(scope.canAssignTo(user, 'user-1'), true);
     assert.equal(scope.canAssignTo(user, 'rep-from-another-branch'), false);
+  });
+});
+
+describe('attendee visibility', () => {
+  it('lets a scoped user reach a task they attended', () => {
+    const where = scope.taskScope(principal({ dataScope: 'SELF' }));
+
+    // The base rule plus the attendance exception, as alternatives.
+    assert.ok(Array.isArray(where.OR), 'expected an OR of base and attendance');
+    const branches = where.OR as Record<string, unknown>[];
+    assert.equal(branches.length, 2);
+    assert.deepEqual(branches[1], { attendees: { some: { userId: 'user-1' } } });
+  });
+
+  it('does the same for visits', () => {
+    const where = scope.visitScope(principal({ dataScope: 'TEAM', teamUserIds: ['u2'] }));
+
+    const branches = where.OR as Record<string, unknown>[];
+    assert.deepEqual(branches[0], { userId: { in: ['user-1', 'u2'] } });
+    assert.deepEqual(branches[1], { attendees: { some: { userId: 'user-1' } } });
+  });
+
+  it('does not widen an already unscoped role', () => {
+    // ALL sees everything; an OR here would be noise in every query.
+    assert.deepEqual(scope.taskScope(principal({ dataScope: 'ALL' })), {});
+    assert.deepEqual(scope.visitScope(principal({ dataScope: 'ALL' })), {});
+  });
+
+  it('grants the record, not the wider book', () => {
+    const where = scope.taskScope(principal({ dataScope: 'SELF' }));
+    const attendance = (where.OR as Record<string, unknown>[])[1]!;
+
+    // No assigneeId, no org unit — attendance must not leak anything adjacent.
+    assert.equal(JSON.stringify(attendance).includes('assigneeId'), false);
+    assert.equal(JSON.stringify(attendance).includes('orgUnit'), false);
   });
 });

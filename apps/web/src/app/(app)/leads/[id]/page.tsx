@@ -79,6 +79,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   }
 }
 
+/**
+ * Dictation is off until the language service is configured.
+ *
+ * A plain server-side environment variable rather than NEXT_PUBLIC_*: those are
+ * inlined at build time, and turning this on should be a config change on the
+ * running service, not a rebuild.
+ */
+function voiceInputEnabled(): boolean {
+  return process.env.VOICE_INPUT_ENABLED === 'true';
+}
+
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
@@ -187,6 +198,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             canUpdate={can(user, 'lead:update')}
             canAssign={can(user, 'lead:assign')}
             canConvert={can(user, 'lead:convert')}
+            voiceInputEnabled={voiceInputEnabled()}
           />
 
           <DocumentPanel

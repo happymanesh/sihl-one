@@ -173,6 +173,9 @@ model User {
   manager   User?   @relation("UserReportsTo", fields: [managerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   reports   User[]  @relation("UserReportsTo")
 
+  /// Tasks and visits this person attended alongside the owner.
+  attended  Attendee[] @relation("AttendeeUser")
+
   /// Where this person sits in the sales hierarchy. Separate from Role
   /// (what they may do) and DataScope (which rows) — see hierarchy.ts.
   designationId String?
@@ -1099,6 +1102,49 @@ model TaskStatusMaster {
   @@map("task_status")
 }
 
+/// Who else took part, besides the owner.
+///
+/// Planned attendees hang off the task, actual attendees off the visit. They are
+/// different facts: the gap between "we intended to bring a product expert" and
+/// "one came" is what tells you whether there are enough experts to go round,
+/// and collapsing them into one field loses that question entirely.
+///
+/// Credit is deliberately not divisible. The conversion stays with the record's
+/// owner and this table answers "who supported" — the moment credit can be
+/// split, it gets negotiated over, and a new thing to game is created.
+model Attendee {
+  id String @id @default(cuid())
+
+  /// Exactly one of these is set. Kept as two nullable relations rather than a
+  /// polymorphic pair so the database enforces that an attendee belongs to
+  /// something real.
+  taskId  String?
+  task    Task?   @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  visitId String?
+  visit   Visit?  @relation(fields: [visitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  userId String
+  user   User   @relation("AttendeeUser", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  role AttendeeRole @default(SUPPORT)
+
+  addedById String?
+  addedAt   DateTime @default(now())
+
+  @@unique([taskId, userId])
+  @@unique([visitId, userId])
+  @@index([userId])
+  @@map("attendee")
+}
+
+/// Why the person was there. Reporting groups by this, so "how often did a
+/// product expert have to attend" is answerable without reading job titles.
+enum AttendeeRole {
+  SUPPORT
+  PRODUCT_EXPERT
+  MANAGER
+}
+
 model Task {
   id          String      @id @default(cuid())
   reference   String      @unique @db.VarChar(24)
@@ -1125,6 +1171,9 @@ model Task {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  /// Planned attendees — who the owner intends to bring.
+  attendees Attendee[]
 
   @@index([assigneeId, status, dueAt])
   @@index([entityType, entityId])
@@ -1188,6 +1237,9 @@ model Visit {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// Actual attendees — who was there.
+  attendees Attendee[]
 
   @@index([userId, checkInAt])
   @@index([entityType, entityId])
