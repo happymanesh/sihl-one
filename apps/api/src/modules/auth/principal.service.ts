@@ -75,6 +75,7 @@ export class PrincipalService {
       teamUserIds: user.reports.map((report) => report.id),
       partnerId: user.partnerId,
       sessionId,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 }

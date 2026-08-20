@@ -1,13 +1,14 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
-import { IS_PUBLIC_KEY } from '../decorators';
+import { ALLOW_PENDING_PASSWORD_KEY, IS_PUBLIC_KEY } from '../decorators';
 import { RequestContextStore } from '../request-context';
 import { TokenService } from '../../modules/auth/token.service';
 import { PrincipalService } from '../../modules/auth/principal.service';
@@ -54,6 +55,24 @@ export class JwtAuthGuard implements CanActivate {
         title: 'Session is no longer valid',
         detail: 'Sign in again to continue.',
       });
+    }
+
+    // A temporary password gets the user in and no further. Enforced here
+    // rather than only by a redirect in the browser: the screen is a courtesy,
+    // and without this the issued password keeps working against the API
+    // directly for as long as nobody changes it.
+    if (principal.mustChangePassword) {
+      const allowed = this.reflector.getAllAndOverride<boolean>(ALLOW_PENDING_PASSWORD_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!allowed) {
+        throw new ForbiddenException({
+          title: 'Password change required',
+          detail: 'Set a new password before using the system.',
+          code: 'PASSWORD_CHANGE_REQUIRED',
+        });
+      }
     }
 
     request.user = principal;

@@ -16,7 +16,9 @@ import {
   type RefreshInput,
 } from '@sihl-one/contracts';
 
-import { CurrentUser, Public } from '../../common/decorators';
+import { CurrentUser, Public,
+  AllowPendingPasswordChange,
+} from '../../common/decorators';
 import { ApiZodBody, ZodBody } from '../../common/zod';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { AuthService } from './auth.service';
@@ -129,6 +131,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @AllowPendingPasswordChange()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Revoke the current session' })
   async logout(@CurrentUser() user: AuthenticatedPrincipal): Promise<void> {
@@ -144,12 +147,14 @@ export class AuthController {
   }
 
   @Get('me')
+  @AllowPendingPasswordChange()
   @ApiOperation({ summary: 'Current user, roles, permissions and data scope' })
   me(@CurrentUser('id') userId: string) {
     return this.auth.currentUser(userId);
   }
 
   @Post('change-password')
+  @AllowPendingPasswordChange()
   @HttpCode(HttpStatus.NO_CONTENT)
   @Throttle({ default: { limit: 5, ttl: 300_000 } })
   @ApiOperation({

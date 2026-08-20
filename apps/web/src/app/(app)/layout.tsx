@@ -1,3 +1,5 @@
+import type { Route } from 'next';
+import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { logout } from '@/app/actions/auth';
 import { requireUser } from '@/lib/auth';
@@ -11,6 +13,11 @@ import { requireUser } from '@/lib/auth';
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+
+  // A temporary password gets you in and nowhere else. The API refuses every
+  // route in this group while the flag is set, so without this redirect the
+  // user would land on a shell where each page returns 403.
+  if (user.mustChangePassword) redirect('/change-password' as Route);
 
   return (
     <AppShell user={user} onLogout={logout}>

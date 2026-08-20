@@ -16,6 +16,12 @@ export interface AuthenticatedPrincipal {
   teamUserIds: string[];
   partnerId: string | null;
   sessionId: string;
+  /**
+   * True while the user is still on the password an administrator issued.
+   * `JwtAuthGuard` refuses everything except changing it, so a temporary
+   * password cannot be used to work in the system indefinitely.
+   */
+  mustChangePassword: boolean;
 }
 
 export interface PaginatedResult<T> {

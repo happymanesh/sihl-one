@@ -8,6 +8,18 @@ export const IS_PUBLIC_KEY = 'sihl:isPublic';
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(IS_PUBLIC_KEY, true);
 
 /**
+ * Marks a route as reachable while the caller still owes a password change.
+ *
+ * Opt-out rather than opt-in, matching `@Public()`: a user on a temporary
+ * password is refused everywhere by default, so forgetting this decorator on a
+ * new route closes a door rather than opening one. Only changing the password
+ * and signing out should carry it.
+ */
+export const ALLOW_PENDING_PASSWORD_KEY = 'sihl:allowPendingPassword';
+export const AllowPendingPasswordChange = (): MethodDecorator =>
+  SetMetadata(ALLOW_PENDING_PASSWORD_KEY, true);
+
+/**
  * Required permissions for a route. The guard requires ALL listed permissions;
  * an OR relationship is expressed by splitting into separate routes, because
  * "any of these" is almost always a sign that two different use cases have been
