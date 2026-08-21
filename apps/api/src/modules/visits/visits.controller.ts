@@ -2,7 +2,8 @@ import { Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
-  cancelVisitSchema,
+  createVisitExpenseSchema,
+  type CreateVisitExpenseInput,  cancelVisitSchema,
   checkInSchema,
   checkOutSchema,
   planVisitSchema,
@@ -129,4 +130,35 @@ export class VisitsController {
   ) {
     return this.visits.cancel(user, id, body);
   }
+
+  // -------------------------------------------------------------------------
+  // Expenses — claims, not payables
+  // -------------------------------------------------------------------------
+
+  @Get(':id/expenses')
+  @RequirePermissions('visit:read')
+  @ApiParam({ name: 'id' })
+  @ApiOperation({ summary: 'Expenses claimed for a visit' })
+  listExpenses(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
+    return this.visits.listExpenses(user, id);
+  }
+
+  @Post(':id/expenses')
+  @RequirePermissions('visit:update')
+  @ApiParam({ name: 'id' })
+  @ApiOperation({
+    summary: 'Claim an expense against a visit',
+    description:
+      'Records what the rep says they spent, for finance to settle. Carries no ' +
+      'approval or payment state — SIHL ONE is not a system of record for money.',
+  })
+  @ApiZodBody(createVisitExpenseSchema)
+  addExpense(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(createVisitExpenseSchema) body: CreateVisitExpenseInput,
+  ) {
+    return this.visits.addExpense(user, id, body);
+  }
+
 }

@@ -126,3 +126,61 @@ export interface VisitListItem {
   requiresReview: boolean;
   isOverdue: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Expenses
+// ---------------------------------------------------------------------------
+
+/**
+ * A fixed list rather than a master.
+ *
+ * Finance maps these onto its own heads, so adding one is a conversation with
+ * finance — not a self-service change that silently produces a category nothing
+ * downstream knows how to post.
+ */
+export const EXPENSE_CATEGORIES = ['TRAVEL', 'FOOD', 'PARKING', 'ACCOMMODATION', 'OTHER'] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/** Sanity ceiling. Not a policy limit — policy belongs to finance, not here. */
+export const MAX_EXPENSE_CLAIM = 100_000;
+
+export const createVisitExpenseSchema = z.object({
+  category: z.enum(EXPENSE_CATEGORIES),
+  /**
+   * Sent as a string so the rupee value never passes through a float on its way
+   * in, matching how money is handled everywhere else.
+   */
+  amount: z
+    .string()
+    .trim()
+    .regex(/^\d{1,7}(\.\d{1,2})?$/, 'Enter an amount like 250 or 1250.50')
+    .refine((value) => Number(value) > 0, 'An expense must be more than zero')
+    .refine(
+      (value) => Number(value) <= MAX_EXPENSE_CLAIM,
+      `Claims above ${MAX_EXPENSE_CLAIM.toLocaleString('en-IN')} go through finance directly`,
+    ),
+  note: z.string().trim().max(300).optional(),
+  receiptKey: z.string().trim().max(300).optional(),
+});
+export type CreateVisitExpenseInput = z.infer<typeof createVisitExpenseSchema>;
+
+export interface VisitExpenseItem {
+  id: string;
+  category: ExpenseCategory;
+  /** String, as sent. Formatting is the caller's business. */
+  amount: string;
+  note: string | null;
+  hasReceipt: boolean;
+  claimedAt: string;
+}
+
+/**
+ * Total of a set of claims, as a string.
+ *
+ * Summed in paise as integers rather than adding floats: 0.1 + 0.2 is famously
+ * not 0.3, and this figure goes to finance.
+ */
+export function totalExpenseClaim(amounts: readonly string[]): string {
+  const paise = amounts.reduce((sum, amount) => sum + Math.round(Number(amount) * 100), 0);
+  return (paise / 100).toFixed(2);
+}

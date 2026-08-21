@@ -1256,6 +1256,51 @@ enum VisitStatus {
 /// is disproportionate under the DPDP Act's purpose-limitation principle, and
 /// the business question ("did the meeting happen, where, for how long") is
 /// fully answered by two points.
+/// An expense a rep is claiming for a visit.
+///
+/// A *claim*, never a payable. ADR-0002 puts money in the back office: this
+/// records what the rep says they spent and hands it to finance. It deliberately
+/// carries no approval state, no reimbursement status and no payment date —
+/// the moment this screen shows "approved" or "paid", SIHL ONE has become a
+/// second system of record for money, and every reconciliation argument that
+/// follows lands here.
+model VisitExpense {
+  id String @id @default(cuid())
+
+  visitId String
+  visit   Visit  @relation(fields: [visitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  category ExpenseCategory
+
+  /// Decimal, never Float — binary floating point cannot represent a rupee
+  /// amount exactly, and this figure is read by finance.
+  amount Decimal @db.Decimal(18, 2)
+
+  note String? @db.VarChar(300)
+
+  /// Object key for the receipt in the document store. Optional: a rep without
+  /// a receipt should still record the spend rather than not record it at all.
+  receiptKey String? @db.VarChar(300)
+
+  claimedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([visitId])
+  @@map("visit_expense")
+}
+
+/// What the money was spent on. A fixed list rather than a master: finance needs
+/// these to map onto its own heads, so adding one is a conversation with
+/// finance, not a self-service change.
+enum ExpenseCategory {
+  TRAVEL
+  FOOD
+  PARKING
+  ACCOMMODATION
+  OTHER
+}
+
 model Visit {
   id        String @id @default(cuid())
   reference String @unique @db.VarChar(24)
@@ -1299,6 +1344,9 @@ model Visit {
 
   /// Actual attendees — who was there.
   attendees Attendee[]
+
+  /// Expenses claimed for this visit. Claims, not payables.
+  expenses VisitExpense[]
 
   @@index([userId, checkInAt])
   @@index([entityType, entityId])

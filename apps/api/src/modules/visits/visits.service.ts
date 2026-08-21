@@ -14,6 +14,8 @@ import {
   type PlanVisitInput,
   type VisitListItem,
   type VisitQuery,
+  type CreateVisitExpenseInput,
+  type VisitExpenseItem,
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
@@ -632,4 +634,96 @@ export class VisitsService {
       detail: 'Visits can currently be planned against leads and customers.',
     });
   }
+
+  // -------------------------------------------------------------------------
+  // Expenses
+  // -------------------------------------------------------------------------
+
+  /**
+   * Claim an expense against a visit.
+   *
+   * Only the person who made the visit may claim for it. A manager can see the
+   * claim — that is what the scope filter is for — but claiming on someone
+   * else's behalf would put a spend in their name that they never entered, and
+   * this record is read by finance.
+   */
+  async addExpense(user: AuthenticatedPrincipal, visitId: string, input: CreateVisitExpenseInput) {
+    const visit = await this.prisma.visit.findFirst({
+      where: { id: visitId, AND: [this.scope.visitScope(user)] },
+      select: { id: true, userId: true, status: true },
+    });
+    if (!visit) throw new NotFoundException({ title: 'Visit not found' });
+
+    if (visit.userId !== user.id) {
+      throw new ForbiddenException({
+        title: 'Not your visit',
+        detail: 'Expenses are claimed by the person who made the visit.',
+      });
+    }
+
+    if (visit.status === 'CANCELLED') {
+      throw new BadRequestException({
+        title: 'Visit was cancelled',
+        detail: 'A cancelled visit cannot carry an expense claim.',
+      });
+    }
+
+    const created = await this.prisma.visitExpense.create({
+      data: {
+        visitId,
+        category: input.category,
+        amount: input.amount,
+        note: input.note ?? null,
+        receiptKey: input.receiptKey ?? null,
+        claimedById: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'CREATE',
+      resource: 'visit.expense',
+      resourceId: created.id,
+      changes: { visitId, category: created.category, amount: input.amount },
+    });
+
+    return this.toExpenseItem(created);
+  }
+
+  async listExpenses(user: AuthenticatedPrincipal, visitId: string): Promise<VisitExpenseItem[]> {
+    const visit = await this.prisma.visit.findFirst({
+      where: { id: visitId, AND: [this.scope.visitScope(user)] },
+      select: { id: true },
+    });
+    if (!visit) throw new NotFoundException({ title: 'Visit not found' });
+
+    const rows = await this.prisma.visitExpense.findMany({
+      where: { visitId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((row) => this.toExpenseItem(row));
+  }
+
+  private toExpenseItem(row: {
+    id: string;
+    category: string;
+    amount: unknown;
+    note: string | null;
+    receiptKey: string | null;
+    createdAt: Date;
+  }): VisitExpenseItem {
+    return {
+      id: row.id,
+      category: row.category as VisitExpenseItem['category'],
+      // Decimal to string, never through a Number — and always two places.
+      // String(Decimal) drops a trailing zero, so 450.50 comes back as "450.5",
+      // which is numerically right and wrong on a page of money.
+      amount: (row.amount as { toFixed(dp: number): string }).toFixed(2),
+      note: row.note,
+      // The key itself is not exposed: it is a storage path, and the download
+      // route is what decides who may read it.
+      hasReceipt: Boolean(row.receiptKey),
+      claimedAt: row.createdAt.toISOString(),
+    };
+  }
+
 }
