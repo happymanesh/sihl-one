@@ -7,7 +7,10 @@ import {
 import {
   assessVisitIntegrity,
   canTransitionVisit,
+  assessCheckInLocation,
   locationQuality,
+  visitEvidenceRules,
+  DEFAULT_VISIT_MODE,
   type CancelVisitInput,
   type CheckInInput,
   type CheckOutInput,
@@ -31,6 +34,15 @@ type VisitRow = {
   reference: string;
   status: string;
   purpose: string;
+  mode?: string;
+  modeMaster?: {
+    code: string;
+    label: string;
+    requiresPhoto: boolean;
+    requiresGeo: boolean;
+    requiresLink: boolean;
+    allowsScreenshot: boolean;
+  } | null;
   entityType: string;
   entityId: string;
   plannedAt: Date | null;
@@ -65,6 +77,7 @@ export class VisitsService {
 
   async plan(user: AuthenticatedPrincipal, input: PlanVisitInput) {
     const entityName = await this.assertEntityVisible(user, input.entityType, input.entityId);
+    const mode = await this.mustFindMode(input.mode);
     const reference = await this.references.next('VS');
 
     const visit = await this.prisma.visit.create({
@@ -75,6 +88,7 @@ export class VisitsService {
         userId: user.id,
         status: 'PLANNED',
         purpose: input.purpose,
+        mode: mode.code,
         plannedAt: input.plannedAt ?? null,
       },
     });
@@ -83,7 +97,12 @@ export class VisitsService {
       action: 'CREATE',
       resource: 'visit',
       resourceId: visit.id,
-      changes: { reference, entityType: input.entityType, entityId: input.entityId },
+      changes: {
+        reference,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        mode: mode.code,
+      },
     });
 
     return this.findOne(user, visit.id, entityName);
@@ -109,9 +128,24 @@ export class VisitsService {
       });
     }
 
+    const location = assessCheckInLocation(input);
+
+    // What this mode demands. Read from the master rather than assumed, so an
+    // administrator who adds a mode gets the behaviour they configured without
+    // a release.
+    const rules = visitEvidenceRules(await this.findMode(visit.mode));
+
+    if (rules.photo && !input.photoKey) {
+      throw new BadRequestException({
+        title: 'Check-in photo required',
+        detail:
+          "A visit at the client's location must be checked in with a photo taken in the app.",
+      });
+    }
+
     // The photo must actually exist in storage. Without this a client could
     // post any string as `photoKey` and produce a check-in with no evidence.
-    if (!(await this.storage.exists(input.photoKey))) {
+    if (input.photoKey && !(await this.storage.exists(input.photoKey))) {
       throw new BadRequestException({
         title: 'Check-in photo not found',
         detail: 'Upload the photo first, then submit the check-in with the returned key.',
@@ -125,11 +159,15 @@ export class VisitsService {
         data: {
           status: 'CHECKED_IN',
           checkInAt: now,
-          checkInLatitude: input.latitude,
-          checkInLongitude: input.longitude,
-          checkInAccuracy: input.accuracy,
+          checkInLatitude: input.latitude ?? null,
+          checkInLongitude: input.longitude ?? null,
+          checkInAccuracy: input.accuracy ?? null,
+          // Recorded, never refused. A poor fix or a denied permission marks the
+          // visit rather than stopping the rep entering one they actually made.
+          locationStatus: location.status,
+          locationReason: location.reason,
           checkInAddress: input.address ?? null,
-          checkInPhotoKey: input.photoKey,
+          checkInPhotoKey: input.photoKey ?? null,
           deviceId: input.deviceId ?? null,
           deviceInfo: (input.deviceInfo ?? null) as never,
         },
@@ -194,14 +232,24 @@ export class VisitsService {
       Math.round((now.getTime() - visit.checkInAt.getTime()) / 60_000),
     );
 
+    // Either end may now be missing a fix, so neither can be assumed present.
+    // `Number(null)` is 0, which would have placed the visit off the coast of
+    // Africa and then flagged the drift as suspicious.
+    const rules = visitEvidenceRules(await this.findMode(visit.mode));
+
     const integrity = assessVisitIntegrity({
-      checkIn: {
-        latitude: Number(visit.checkInLatitude),
-        longitude: Number(visit.checkInLongitude),
-      },
-      checkOut: { latitude: input.latitude, longitude: input.longitude },
+      checkIn:
+        visit.checkInLatitude !== null && visit.checkInLongitude !== null
+          ? { latitude: Number(visit.checkInLatitude), longitude: Number(visit.checkInLongitude) }
+          : null,
+      checkOut:
+        input.latitude !== undefined && input.longitude !== undefined
+          ? { latitude: input.latitude, longitude: input.longitude }
+          : null,
       checkInAccuracy: toNumber(visit.checkInAccuracy),
-      checkOutAccuracy: input.accuracy,
+      hasCheckedIn: visit.checkInAt !== null,
+      expectsLocation: rules.geo,
+      checkOutAccuracy: input.accuracy ?? null,
       durationMinutes,
     });
 
@@ -211,9 +259,9 @@ export class VisitsService {
         data: {
           status: 'COMPLETED',
           checkOutAt: now,
-          checkOutLatitude: input.latitude,
-          checkOutLongitude: input.longitude,
-          checkOutAccuracy: input.accuracy,
+          checkOutLatitude: input.latitude ?? null,
+          checkOutLongitude: input.longitude ?? null,
+          checkOutAccuracy: input.accuracy ?? null,
           durationMinutes,
           meetingNotes: input.meetingNotes,
           outcome: input.outcome ?? null,
@@ -342,7 +390,19 @@ export class VisitsService {
         orderBy: [{ createdAt: 'desc' }],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
-        include: { user: { select: { id: true, firstName: true, lastName: true } } },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true } },
+        modeMaster: {
+          select: {
+            code: true,
+            label: true,
+            requiresPhoto: true,
+            requiresGeo: true,
+            requiresLink: true,
+            allowsScreenshot: true,
+          },
+        },
+        },
       }),
       this.prisma.visit.count({ where }),
     ]);
@@ -360,7 +420,19 @@ export class VisitsService {
   async findOne(user: AuthenticatedPrincipal, visitId: string, knownEntityName?: string | null) {
     const visit = await this.prisma.visit.findFirst({
       where: { id: visitId, AND: [this.scope.visitScope(user)] },
-      include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        modeMaster: {
+          select: {
+            code: true,
+            label: true,
+            requiresPhoto: true,
+            requiresGeo: true,
+            requiresLink: true,
+            allowsScreenshot: true,
+          },
+        },
+      },
     });
 
     if (!visit) {
@@ -383,6 +455,8 @@ export class VisitsService {
           ? { latitude: Number(visit.checkOutLatitude), longitude: Number(visit.checkOutLongitude) }
           : null,
       checkInAccuracy: toNumber(visit.checkInAccuracy),
+      hasCheckedIn: visit.checkInAt !== null,
+      expectsLocation: visitEvidenceRules(visit.modeMaster).geo,
       checkOutAccuracy: toNumber(visit.checkOutAccuracy),
       durationMinutes: visit.durationMinutes,
     });
@@ -397,6 +471,11 @@ export class VisitsService {
       reference: visit.reference,
       status: visit.status,
       purpose: visit.purpose,
+      mode: visit.mode ?? DEFAULT_VISIT_MODE,
+      modeLabel: visit.modeMaster?.label ?? null,
+      // The same rules the server enforces, sent to the client so the two
+      // cannot disagree about whether a photo is needed.
+      evidence: visitEvidenceRules(visit.modeMaster),
       entityType: visit.entityType,
       entityId: visit.entityId,
       entityName,
@@ -511,6 +590,8 @@ export class VisitsService {
           ? { latitude: Number(visit.checkOutLatitude), longitude: Number(visit.checkOutLongitude) }
           : null,
       checkInAccuracy: toNumber(visit.checkInAccuracy),
+      hasCheckedIn: visit.checkInAt !== null,
+      expectsLocation: visitEvidenceRules(visit.modeMaster).geo,
       checkOutAccuracy: toNumber(visit.checkOutAccuracy),
       durationMinutes: visit.durationMinutes,
     });
@@ -520,6 +601,8 @@ export class VisitsService {
       reference: visit.reference,
       status: visit.status as VisitListItem['status'],
       purpose: visit.purpose,
+      mode: visit.mode ?? DEFAULT_VISIT_MODE,
+      modeLabel: visit.modeMaster?.label ?? null,
       entityType: visit.entityType,
       entityId: visit.entityId,
       entityName: names.get(`${visit.entityType}:${visit.entityId}`) ?? null,
@@ -588,6 +671,56 @@ export class VisitsService {
    * somewhere, and letting anyone else record it destroys the meaning of the
    * record.
    */
+  /**
+   * The evidence flags for a mode, or null when it cannot be found.
+   *
+   * Null is not an error here: `visitEvidenceRules` treats an unknown mode as
+   * the strictest one, so a missing master row fails towards asking for more
+   * evidence rather than less.
+   */
+  private async findMode(code: string) {
+    return this.prisma.meetingModeMaster.findUnique({
+      where: { code },
+      select: {
+        code: true,
+        label: true,
+        requiresPhoto: true,
+        requiresGeo: true,
+        requiresLink: true,
+        allowsScreenshot: true,
+      },
+    });
+  }
+
+  /**
+   * The mode a visit is being planned in, refusing anything unusable.
+   *
+   * The foreign key would catch an unknown code, but as a 500-shaped database
+   * error naming a constraint. A rep who picked a mode an administrator retired
+   * between page load and submit deserves a sentence they can act on.
+   */
+  private async mustFindMode(code: string) {
+    const mode = await this.prisma.meetingModeMaster.findUnique({
+      where: { code },
+      select: { code: true, label: true, isActive: true },
+    });
+
+    if (!mode) {
+      throw new BadRequestException({
+        title: 'Unknown meeting mode',
+        detail: `"${code}" is not a meeting mode. Choose one from the list.`,
+      });
+    }
+    if (!mode.isActive) {
+      throw new BadRequestException({
+        title: 'Meeting mode withdrawn',
+        detail: `"${mode.label}" is no longer available. Choose another.`,
+      });
+    }
+
+    return mode;
+  }
+
   private async mustFindOwn(user: AuthenticatedPrincipal, visitId: string) {
     const visit = await this.prisma.visit.findFirst({ where: { id: visitId } });
 

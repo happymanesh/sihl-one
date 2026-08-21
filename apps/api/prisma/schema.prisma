@@ -1064,6 +1064,7 @@ model MeetingModeMaster {
   updatedAt   DateTime @updatedAt
 
   activities Activity[]
+  visits     Visit[]
 
   @@index([isActive, sortOrder])
   @@map("meeting_mode")
@@ -1314,6 +1315,17 @@ model Visit {
   status  VisitStatus @default(PLANNED)
   purpose String      @db.VarChar(200)
 
+  /// How the engagement happens: at the client's premises, at a SIHL office,
+  /// online, on a call, over chat. Drawn from the same admin-managed master the
+  /// interaction log uses, so the two never disagree about what "online" means.
+  ///
+  /// The mode decides what check-in asks for. It also keeps field-activity
+  /// reporting honest: a phone call planned here must not be counted as a visit
+  /// to a client's premises, and this column is what lets a report tell them
+  /// apart.
+  mode       String             @default("CLIENT_SITE") @db.VarChar(40)
+  modeMaster MeetingModeMaster? @relation(fields: [mode], references: [code], onDelete: Restrict, onUpdate: Cascade)
+
   plannedAt DateTime?
 
   checkInAt        DateTime?
@@ -1324,6 +1336,15 @@ model Visit {
   /// Object-storage key for the check-in selfie. The image itself never lives
   /// in Postgres; only an authenticated, expiring URL is ever handed out.
   checkInPhotoKey  String?   @db.VarChar(300)
+
+  /// Whether the fix is good enough to count as evidence of presence.
+  ///
+  /// A visit is never refused for a poor fix: a rep in a basement with no signal
+  /// has still made the visit, and no record is worse data than one marked
+  /// unverified. The rate is reported per person, where a pattern shows and a
+  /// single bad reading does not.
+  locationStatus String? @db.VarChar(20)
+  locationReason String? @db.VarChar(20)
 
   checkOutAt        DateTime?
   checkOutLatitude  Decimal?  @db.Decimal(10, 7)
@@ -1351,6 +1372,7 @@ model Visit {
   @@index([userId, checkInAt])
   @@index([entityType, entityId])
   @@index([status])
+  @@index([mode])
   @@map("visit")
 }
 

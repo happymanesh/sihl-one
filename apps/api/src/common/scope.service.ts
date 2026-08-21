@@ -106,7 +106,7 @@ export class ScopeService {
       }
     })();
 
-    return this.orAttended(base, user, 'task');
+    return this.orAttended(base, user);
   }
 
   /**
@@ -124,7 +124,6 @@ export class ScopeService {
   private orAttended(
     base: Record<string, unknown>,
     user: AuthenticatedPrincipal,
-    kind: 'task' | 'visit',
   ): Record<string, unknown> {
     // An unscoped role already sees everything; widening it further is noise.
     if (Object.keys(base).length === 0) return base;
@@ -157,7 +156,7 @@ export class ScopeService {
       }
     })();
 
-    return this.orAttended(base, user, 'visit');
+    return this.orAttended(base, user);
   }
 
   /**

@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { DEFAULT_VISIT_MODE, visitEvidenceRules, type MeetingModeItem } from '@sihl-one/contracts';
 
 import { planVisit, type VisitActionState } from '@/app/actions/visits';
 
@@ -24,18 +25,23 @@ function SubmitButton() {
 export function PlanVisitForm({
   leads,
   customers,
+  meetingModes,
   presetEntityType,
   presetEntityId,
 }: {
   leads: Option[];
   customers: Option[];
+  meetingModes: MeetingModeItem[];
   presetEntityType?: string;
   presetEntityId?: string;
 }) {
   const [state, action] = useActionState(planVisit, INITIAL);
   const [entityType, setEntityType] = useState(presetEntityType ?? 'LEAD');
+  const [mode, setMode] = useState(DEFAULT_VISIT_MODE);
 
   const options = entityType === 'LEAD' ? leads : customers;
+  const selectedMode = meetingModes.find((item) => item.code === mode);
+  const evidence = visitEvidenceRules(selectedMode);
 
   return (
     <form action={action} className="space-y-4" noValidate>
@@ -99,6 +105,42 @@ export function PlanVisitForm({
           <p className="mt-1 text-xs text-danger-500">{state.errors.entityId[0]}</p>
         ) : null}
       </div>
+
+      {meetingModes.length > 0 ? (
+        <div>
+          <label className="label" htmlFor="mode">
+            How will this happen? <span className="text-danger-500">*</span>
+          </label>
+          <select
+            id="mode"
+            name="mode"
+            className="input"
+            value={mode}
+            onChange={(event) => setMode(event.target.value)}
+            aria-describedby="mode-note"
+          >
+            {meetingModes.map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Say now what check-in will ask for. A rep who discovers at the
+              client's door that a photo is required has been ambushed by the
+              software; one who read it while planning has not. */}
+          <p id="mode-note" className="mt-1 text-xs text-[var(--color-text-muted)]">
+            {selectedMode?.meaning ? `${selectedMode.meaning} ` : ''}
+            {evidence.photo
+              ? 'Check-in will ask for a photo taken in the app.'
+              : 'No check-in photo is needed for this mode.'}
+          </p>
+
+          {state.errors?.mode ? (
+            <p className="mt-1 text-xs text-danger-500">{state.errors.mode[0]}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div>
         <label className="label" htmlFor="purpose">

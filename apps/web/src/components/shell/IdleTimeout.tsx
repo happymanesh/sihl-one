@@ -27,7 +27,10 @@ export function IdleTimeout({
   warnSecondsBefore?: number;
 }) {
   const [remaining, setRemaining] = useState<number | null>(null);
-  const lastActivity = useRef(Date.now());
+  // Seeded in the effect below, not here: reading the clock during render is
+  // impure, and under React's concurrent rendering a render that is thrown away
+  // would still have stamped a time.
+  const lastActivity = useRef(0);
   const signingOut = useRef(false);
 
   const idleMs = idleMinutes * 60_000;
@@ -52,9 +55,14 @@ export function IdleTimeout({
   // down and re-registered the interval and all five listeners on every tick —
   // enough churn during hydration to stall the page segment inside Suspense.
   const warning = useRef(false);
-  warning.current = remaining !== null;
+  useEffect(() => {
+    warning.current = remaining !== null;
+  }, [remaining]);
 
   useEffect(() => {
+    // First paint: the session starts counting from when the shell mounted.
+    if (lastActivity.current === 0) lastActivity.current = Date.now();
+
     const markActive = () => {
       // While the warning is showing, ordinary movement must not silently cancel
       // it — the user has to choose, or the countdown means nothing.

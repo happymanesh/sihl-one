@@ -7,7 +7,16 @@ import {
   locationQuality,
   MAX_ACCEPTABLE_ACCURACY_METRES,
 } from '../src/geo';
-import { canTransitionVisit, checkInSchema, checkOutSchema } from '../src/visit';
+import {
+  assessCheckInLocation,
+  canTransitionVisit,
+  checkInSchema,
+  checkOutSchema,
+  DEFAULT_VISIT_MODE,
+  planVisitSchema,
+  VERIFIED_ACCURACY_METRES,
+  visitEvidenceRules,
+} from '../src/visit';
 import {
   formatBytes,
   isAllowedUploadType,
@@ -112,6 +121,54 @@ describe('visit integrity', () => {
     assert.match(result.reasons.join(' '), /under two minutes/);
   });
 
+  it('says nothing about a visit that has not been checked in yet', () => {
+    // Regression: a planned visit has no accuracy reading, and a missing
+    // reading was scored the same as a terrible one — so every planned visit
+    // in the list carried "the check-in location was too imprecise", about a
+    // check-in that had not happened.
+    const result = assessVisitIntegrity({
+      checkIn: null,
+      checkOut: null,
+      checkInAccuracy: null,
+      checkOutAccuracy: null,
+      durationMinutes: null,
+      hasCheckedIn: false,
+    });
+    assert.equal(result.requiresReview, false);
+    assert.deepEqual(result.reasons, []);
+  });
+
+  it('says nothing about a missing location on a phone call', () => {
+    // A call has nowhere to be. Flagging every call and chat would fill the
+    // review queue with entries no manager can act on, and a flag that fires on
+    // everything stops being read.
+    const result = assessVisitIntegrity({
+      checkIn: null,
+      checkOut: null,
+      checkInAccuracy: null,
+      checkOutAccuracy: null,
+      durationMinutes: 12,
+      hasCheckedIn: true,
+      expectsLocation: false,
+    });
+    assert.equal(result.requiresReview, false);
+    assert.deepEqual(result.reasons, []);
+  });
+
+  it('reports a check-in with no fix as absent, not as imprecise', () => {
+    const result = assessVisitIntegrity({
+      checkIn: null,
+      checkOut: null,
+      checkInAccuracy: null,
+      checkOutAccuracy: null,
+      durationMinutes: 30,
+      hasCheckedIn: true,
+    });
+    assert.equal(result.requiresReview, true);
+    assert.match(result.reasons.join(' '), /No location was recorded/);
+    assert.equal(result.reasons.join(' ').includes('too imprecise'), false);
+  });
+
   it('flags an unusable check-in fix', () => {
     const result = assessVisitIntegrity({
       checkIn: office,
@@ -157,24 +214,53 @@ describe('check-in validation', () => {
     assert.ok(checkInSchema.safeParse(valid).success);
   });
 
-  it('requires a photo — a check-in without one is just a claim', () => {
+  it('leaves the photo requirement to the server, which knows the mode', () => {
+    // This used to assert the schema rejected a check-in with no photo. It
+    // cannot any more, and should not: whether a photograph is required depends
+    // on the visit's mode, which lives in the database, not in the request. A
+    // phone call planned from the same screen must not demand a selfie at the
+    // rep's own desk. The rule now runs in VisitsService.checkIn, against the
+    // mode master — see `visitEvidenceRules`.
     const { photoKey, ...withoutPhoto } = valid;
     void photoKey;
-    assert.equal(checkInSchema.safeParse(withoutPhoto).success, false);
+    assert.equal(checkInSchema.safeParse(withoutPhoto).success, true);
+    assert.equal(visitEvidenceRules({ requiresPhoto: true }).photo, true);
   });
 
-  it('requires accuracy, so a coordinate always carries its uncertainty', () => {
-    const { accuracy, ...withoutAccuracy } = valid;
+  // These two previously asserted that a check-in was *rejected* without a good
+  // fix. That rule was wrong in the field: a rep in a client's basement with no
+  // signal has still made the visit, and refusing the check-in produces no
+  // record at all — worse data than one marked unverified. Nothing is rejected
+  // now; the quality is recorded and reported per person instead.
+
+  it('accepts a check-in with no location at all, and marks it unverified', () => {
+    const { latitude, longitude, accuracy, ...withoutFix } = valid;
+    void latitude;
+    void longitude;
     void accuracy;
-    assert.equal(checkInSchema.safeParse(withoutAccuracy).success, false);
+
+    assert.equal(
+      checkInSchema.safeParse({ ...withoutFix, locationFailureReason: 'DENIED' }).success,
+      true,
+    );
+    assert.deepEqual(assessCheckInLocation({ locationFailureReason: 'DENIED' }), {
+      status: 'UNVERIFIED',
+      reason: 'DENIED',
+    });
   });
 
-  it('rejects a fix too imprecise to mean anything', () => {
-    const result = checkInSchema.safeParse({
-      ...valid,
-      accuracy: MAX_ACCEPTABLE_ACCURACY_METRES + 1,
+  it('accepts an imprecise fix but does not call it verified', () => {
+    const imprecise = { ...valid, accuracy: VERIFIED_ACCURACY_METRES + 1 };
+
+    assert.equal(checkInSchema.safeParse(imprecise).success, true);
+    assert.deepEqual(assessCheckInLocation(imprecise), {
+      status: 'UNVERIFIED',
+      reason: 'IMPRECISE',
     });
-    assert.equal(result.success, false);
+  });
+
+  it('calls an accurate fix verified', () => {
+    assert.deepEqual(assessCheckInLocation(valid), { status: 'VERIFIED', reason: null });
   });
 
   it('rejects impossible coordinates', () => {
@@ -260,5 +346,64 @@ describe('partner validation', () => {
     assert.equal(createPartnerSchema.safeParse({ ...valid, commissionRate: 101 }).success, false);
     assert.equal(createPartnerSchema.safeParse({ ...valid, commissionRate: -1 }).success, false);
     assert.ok(createPartnerSchema.safeParse({ ...valid, commissionRate: 35 }).success);
+  });
+});
+
+
+describe('visit mode', () => {
+  const plan = {
+    entityType: 'LEAD',
+    entityId: 'cmsl2qi8t004qksts2ucwcecd',
+    purpose: 'Collect documents',
+  };
+
+  it('defaults to a visit at the client, which is what a visit used to mean', () => {
+    const parsed = planVisitSchema.safeParse(plan);
+    assert.equal(parsed.success, true);
+    assert.equal(parsed.success && parsed.data.mode, DEFAULT_VISIT_MODE);
+  });
+
+  it('accepts a mode the administrator added, without a code change', () => {
+    // The modes are a master, not an enum. A code this module has never heard
+    // of must pass the schema — the API checks it against the master, and the
+    // foreign key is the final word.
+    const parsed = planVisitSchema.safeParse({ ...plan, mode: 'BRANCH_WALK_IN' });
+    assert.equal(parsed.success, true);
+    assert.equal(parsed.success && parsed.data.mode, 'BRANCH_WALK_IN');
+  });
+
+  it('rejects an empty mode', () => {
+    assert.equal(planVisitSchema.safeParse({ ...plan, mode: '   ' }).success, false);
+  });
+
+  it('asks for a photo at the client site and not on a phone call', () => {
+    assert.equal(
+      visitEvidenceRules({ requiresPhoto: true, requiresGeo: true }).photo,
+      true,
+    );
+    assert.equal(
+      visitEvidenceRules({ requiresPhoto: false, requiresGeo: false }).photo,
+      false,
+    );
+  });
+
+  it('treats an unreadable mode as the strictest one', () => {
+    // Failing towards more evidence: a photo that turns out to be unnecessary
+    // is a far smaller failure than a client-site visit recorded with none.
+    assert.deepEqual(visitEvidenceRules(null), {
+      photo: true,
+      geo: true,
+      link: false,
+      screenshot: false,
+    });
+  });
+
+  it('never reports a flag as true just because the field is missing', () => {
+    assert.deepEqual(visitEvidenceRules({}), {
+      photo: false,
+      geo: false,
+      link: false,
+      screenshot: false,
+    });
   });
 });

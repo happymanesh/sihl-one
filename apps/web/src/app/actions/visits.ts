@@ -12,6 +12,13 @@ export interface VisitActionState {
   errors?: Record<string, string[]>;
 }
 
+/** A form field that may legitimately be blank. Blank means absent, never zero. */
+function optionalNumber(value: FormDataEntryValue | null): number | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function toErrorState(error: unknown, fallback: string): VisitActionState {
   if (error instanceof ApiError) {
     return {
@@ -41,6 +48,10 @@ export async function planVisit(
     entityType: formData.get('entityType'),
     entityId: formData.get('entityId'),
     purpose: formData.get('purpose'),
+    // Absent means "not sent by this caller", which the schema defaults to a
+    // client-site visit. Sending an empty string instead would fail validation
+    // and take the default away from callers that never had the field.
+    mode: formData.get('mode') || undefined,
     plannedAt: plannedAt ? new Date(String(plannedAt)) : undefined,
   });
 
@@ -81,10 +92,18 @@ export async function checkInVisit(
   const visitId = String(formData.get('visitId'));
 
   const parsed = checkInSchema.safeParse({
-    latitude: Number(formData.get('latitude')),
-    longitude: Number(formData.get('longitude')),
-    accuracy: Number(formData.get('accuracy')),
-    photoKey: formData.get('photoKey'),
+    // Not `Number(...)`: an absent fix arrives as an empty string, and
+    // `Number('')` is 0 — a perfectly valid latitude and longitude off the
+    // coast of Africa. A check-in with no location would have been stored as a
+    // pinpoint-accurate visit to Null Island.
+    latitude: optionalNumber(formData.get('latitude')),
+    longitude: optionalNumber(formData.get('longitude')),
+    accuracy: optionalNumber(formData.get('accuracy')),
+    locationFailureReason: formData.get('locationFailureReason') || undefined,
+    // Empty means the mode did not ask for a photo, so the field must arrive as
+    // absent. Passing '' through fails the schema's minimum length and reports
+    // "the check-in could not be recorded" with nothing the rep can act on.
+    photoKey: formData.get('photoKey') || undefined,
     address: formData.get('address') || undefined,
     deviceId: formData.get('deviceId') || undefined,
   });
@@ -116,9 +135,12 @@ export async function checkOutVisit(
   const followUp = formData.get('nextFollowUpAt');
 
   const parsed = checkOutSchema.safeParse({
-    latitude: Number(formData.get('latitude')),
-    longitude: Number(formData.get('longitude')),
-    accuracy: Number(formData.get('accuracy')),
+    // Optional at both ends now. A blank must reach the schema as `undefined`,
+    // never as 0 — see the note in checkInVisit.
+    latitude: optionalNumber(formData.get('latitude')),
+    longitude: optionalNumber(formData.get('longitude')),
+    accuracy: optionalNumber(formData.get('accuracy')),
+    locationFailureReason: formData.get('locationFailureReason') || undefined,
     meetingNotes: formData.get('meetingNotes'),
     outcome: formData.get('outcome') || undefined,
     nextFollowUpAt: followUp ? new Date(String(followUp)) : undefined,

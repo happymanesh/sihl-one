@@ -1,10 +1,15 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { locationQuality, MAX_ACCEPTABLE_ACCURACY_METRES } from '@sihl-one/contracts';
+import {
+  assessCheckInLocation,
+  locationQuality,
+  type LocationFailureReason,
+} from '@sihl-one/contracts';
 
 import { checkInVisit, checkOutVisit, type VisitActionState } from '@/app/actions/visits';
+import { CameraCapture } from './CameraCapture';
 
 const INITIAL: VisitActionState = { status: 'idle' };
 
@@ -32,11 +37,13 @@ const QUALITY_COPY: Record<string, { label: string; tone: string }> = {
 function useGeolocation() {
   const [fix, setFix] = useState<Fix | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState<LocationFailureReason | null>(null);
   const [locating, setLocating] = useState(false);
 
   const locate = () => {
     if (!('geolocation' in navigator)) {
       setError('This device cannot provide a location.');
+      setReason('UNSUPPORTED');
       return;
     }
 
@@ -50,23 +57,35 @@ function useGeolocation() {
           longitude: position.coords.longitude,
           accuracy: Math.round(position.coords.accuracy),
         });
+        setReason(null);
         setLocating(false);
       },
       (positionError) => {
         setLocating(false);
-        setError(
-          positionError.code === positionError.PERMISSION_DENIED
-            ? 'Location permission was refused. A visit cannot be recorded without it.'
-            : positionError.code === positionError.TIMEOUT
-              ? 'Could not get a location in time. Move somewhere with a clearer view of the sky and try again.'
-              : 'Could not determine your location.',
-        );
+        setFix(null);
+
+        if (positionError.code === positionError.PERMISSION_DENIED) {
+          setReason('DENIED');
+          setError(
+            'Location permission was refused. The visit will be recorded, but marked as unverified.',
+          );
+        } else if (positionError.code === positionError.TIMEOUT) {
+          setReason('TIMEOUT');
+          setError(
+            'Could not get a location in time. Move somewhere with a clearer view of the sky and try again, or continue — the visit will be marked as unverified.',
+          );
+        } else {
+          setReason('UNAVAILABLE');
+          setError(
+            'Could not determine your location. The visit will be recorded, but marked as unverified.',
+          );
+        }
       },
       { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
     );
   };
 
-  return { fix, error, locating, locate };
+  return { fix, error, reason, locating, locate };
 }
 
 function LocationReadout({ fix }: { fix: Fix }) {
@@ -85,24 +104,45 @@ function LocationReadout({ fix }: { fix: Fix }) {
         {fix.latitude.toFixed(5)}, {fix.longitude.toFixed(5)}
       </p>
       {quality === 'UNRELIABLE' ? (
-        <p className="mt-1.5 text-xs text-danger-500">
-          This reading is too imprecise to place the visit. Move outdoors and locate again.
+        <p className="mt-1.5 text-xs text-warn-600">
+          This reading is too imprecise to place the visit, so it will be recorded as unverified.
+          Moving outdoors and locating again usually fixes it.
         </p>
       ) : null}
     </div>
   );
 }
 
-export function CheckInPanel({ visitId }: { visitId: string }) {
+export function CheckInPanel({
+  visitId,
+  requiresPhoto,
+  expectsLocation,
+}: {
+  visitId: string;
+  /**
+   * Set from the visit's mode. A phone call planned from this screen must not
+   * demand a photograph of the rep at their own desk — that is theatre, and
+   * reps rightly resent being asked for it.
+   */
+  requiresPhoto: boolean;
+  /**
+   * Whether this mode expects a location at all.
+   *
+   * When it does not, the screen does not ask the browser for one. Prompting
+   * for GPS before every phone call collects a position nobody will read, for a
+   * mode where it proves nothing — and the brief is explicit that this product
+   * records deliberate events, not whereabouts.
+   */
+  expectsLocation: boolean;
+}) {
   const router = useRouter();
   const [state, action] = useActionState(checkInVisit, INITIAL);
-  const { fix, error, locating, locate } = useGeolocation();
+  const { fix, error, reason, locating, locate } = useGeolocation();
 
   const [photoKey, setPhotoKey] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
@@ -110,17 +150,16 @@ export function CheckInPanel({ visitId }: { visitId: string }) {
 
   // Ask for the location as soon as the panel opens — it is the slowest step,
   // and starting it while the user takes the photo removes the wait entirely.
+  // Skipped where the mode does not expect one: no prompt, no reading.
   useEffect(() => {
-    locate();
+    if (expectsLocation) locate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onPhotoChosen = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const onCaptured = async (file: File, previewUrl: string) => {
     setUploading(true);
     setUploadError(null);
+    setPhotoPreview(previewUrl);
 
     try {
       const body = new FormData();
@@ -131,24 +170,33 @@ export function CheckInPanel({ visitId }: { visitId: string }) {
 
       if (!response.ok || !result.storageKey) {
         setUploadError(result.detail ?? result.title ?? 'The photo could not be uploaded.');
+        setPhotoPreview(null);
         return;
       }
 
       setPhotoKey(result.storageKey);
-      setPhotoPreview(URL.createObjectURL(file));
     } catch {
       setUploadError('The photo could not be uploaded. Check your connection and try again.');
+      setPhotoPreview(null);
     } finally {
       setUploading(false);
     }
   };
 
-  const quality = fix ? locationQuality(fix.accuracy) : null;
-  const canSubmit =
-    Boolean(fix) &&
-    Boolean(photoKey) &&
-    quality !== 'UNRELIABLE' &&
-    (fix?.accuracy ?? Infinity) <= MAX_ACCEPTABLE_ACCURACY_METRES;
+  // The same call the server will make, so the rep is told what will be
+  // recorded before they press the button rather than after.
+  const assessment = assessCheckInLocation({
+    latitude: fix?.latitude,
+    longitude: fix?.longitude,
+    accuracy: fix?.accuracy,
+    locationFailureReason: reason ?? undefined,
+  });
+
+  // Only the photo gates the check-in, and only where the mode calls for one.
+  // A poor fix is recorded as a poor fix — refusing the visit outright would
+  // mean no record at all of a visit that genuinely happened, which is worse
+  // data, and it punishes the rep for the building they were sent into.
+  const canSubmit = (!requiresPhoto || Boolean(photoKey)) && !uploading;
 
   return (
     <form action={action} className="space-y-4">
@@ -157,6 +205,7 @@ export function CheckInPanel({ visitId }: { visitId: string }) {
       <input type="hidden" name="longitude" value={fix?.longitude ?? ''} />
       <input type="hidden" name="accuracy" value={fix?.accuracy ?? ''} />
       <input type="hidden" name="photoKey" value={photoKey ?? ''} />
+      <input type="hidden" name="locationFailureReason" value={reason ?? ''} />
 
       {state.status === 'error' && state.message ? (
         <div
@@ -167,12 +216,15 @@ export function CheckInPanel({ visitId }: { visitId: string }) {
         </div>
       ) : null}
 
+      {expectsLocation ? (
       <section>
-        <h3 className="text-sm font-bold">1. Your location</h3>
+        <h3 className="text-sm font-bold">{requiresPhoto ? '1. Your location' : 'Your location'}</h3>
         <div className="mt-2 space-y-2">
           {fix ? <LocationReadout fix={fix} /> : null}
+          {/* A warning, not an error: the check-in still goes through. Styling
+              this in red would tell the rep they are blocked when they are not. */}
           {error ? (
-            <p className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/15">
+            <p className="rounded-lg border border-warn-500/40 bg-warn-50 px-3 py-2 text-sm text-warn-600 dark:bg-warn-500/15 dark:text-warn-100">
               {error}
             </p>
           ) : null}
@@ -181,51 +233,52 @@ export function CheckInPanel({ visitId }: { visitId: string }) {
           </button>
         </div>
       </section>
+      ) : null}
 
+      {requiresPhoto ? (
       <section>
         <h3 className="text-sm font-bold">2. Check-in photo</h3>
         <p className="mt-0.5 text-xs text-[var(--color-text-subtle)]">
-          Required. This is the evidence that the visit happened.
+          Required. This is the evidence that the visit happened. The photo is taken here in the
+          app — an existing picture cannot be uploaded.
         </p>
-
-        <input
-          ref={fileInput}
-          type="file"
-          accept="image/*"
-          // `capture="user"` opens the front camera directly on a phone instead
-          // of the gallery, which is both faster and harder to fake with an old
-          // photo. On desktop it degrades to a normal file picker.
-          capture="user"
-          onChange={(event) => void onPhotoChosen(event)}
-          className="sr-only"
-        />
 
         <div className="mt-2 space-y-2">
           {photoPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={photoPreview}
-              alt="Check-in photo preview"
-              className="h-40 w-full rounded-lg object-cover"
+              alt="Check-in photo, with the location and time stamped on it"
+              className="w-full rounded-lg object-cover"
             />
           ) : null}
 
           {uploadError ? (
-            <p className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/15">
+            <p
+              role="alert"
+              className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/15"
+            >
               {uploadError}
             </p>
           ) : null}
 
-          <button
-            type="button"
-            onClick={() => fileInput.current?.click()}
-            className="btn btn-outline w-full"
-            disabled={uploading}
-          >
-            {uploading ? 'Uploading…' : photoKey ? 'Retake photo' : 'Take photo'}
-          </button>
+          {uploading ? (
+            <p className="text-center text-xs text-[var(--color-text-subtle)]">Uploading…</p>
+          ) : null}
+
+          <CameraCapture
+            stamp={{ latitude: fix?.latitude, longitude: fix?.longitude, accuracy: fix?.accuracy }}
+            onCapture={(file, previewUrl) => void onCaptured(file, previewUrl)}
+            onClear={() => {
+              setPhotoKey(null);
+              setPhotoPreview(null);
+            }}
+            hasPhoto={Boolean(photoKey)}
+            busy={uploading}
+          />
         </div>
       </section>
+      ) : null}
 
       <button type="submit" className="btn btn-accent w-full" disabled={!canSubmit}>
         Check in
@@ -233,32 +286,38 @@ export function CheckInPanel({ visitId }: { visitId: string }) {
 
       {!canSubmit ? (
         <p className="text-center text-xs text-[var(--color-text-subtle)]">
-          {!fix
-            ? 'Waiting for your location…'
-            : quality === 'UNRELIABLE'
-              ? 'The location reading is too imprecise.'
-              : 'Take a photo to check in.'}
+          {uploading ? 'Waiting for the photo to upload…' : 'Take a photo to check in.'}
+        </p>
+      ) : expectsLocation && assessment.status === 'UNVERIFIED' ? (
+        <p className="text-center text-xs text-warn-600">
+          This check-in will be recorded as <strong>location unverified</strong>.
+          {locating ? ' Still trying for a better fix…' : ''}
         </p>
       ) : null}
     </form>
   );
 }
 
-export function CheckOutPanel({ visitId }: { visitId: string }) {
+export function CheckOutPanel({
+  visitId,
+  expectsLocation,
+}: {
+  visitId: string;
+  /** See CheckInPanel: no prompt where the mode expects no location. */
+  expectsLocation: boolean;
+}) {
   const router = useRouter();
   const [state, action] = useActionState(checkOutVisit, INITIAL);
-  const { fix, error, locating, locate } = useGeolocation();
+  const { fix, error, reason, locating, locate } = useGeolocation();
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
   }, [state.status, router]);
 
   useEffect(() => {
-    locate();
+    if (expectsLocation) locate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const quality = fix ? locationQuality(fix.accuracy) : null;
 
   return (
     <form action={action} className="space-y-4">
@@ -266,6 +325,7 @@ export function CheckOutPanel({ visitId }: { visitId: string }) {
       <input type="hidden" name="latitude" value={fix?.latitude ?? ''} />
       <input type="hidden" name="longitude" value={fix?.longitude ?? ''} />
       <input type="hidden" name="accuracy" value={fix?.accuracy ?? ''} />
+      <input type="hidden" name="locationFailureReason" value={reason ?? ''} />
 
       {state.status === 'error' && state.message ? (
         <div
@@ -276,13 +336,13 @@ export function CheckOutPanel({ visitId }: { visitId: string }) {
         </div>
       ) : null}
 
-      {fix ? <LocationReadout fix={fix} /> : null}
-      {error ? (
-        <p className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/15">
+      {expectsLocation && fix ? <LocationReadout fix={fix} /> : null}
+      {expectsLocation && error ? (
+        <p className="rounded-lg border border-warn-500/40 bg-warn-50 px-3 py-2 text-sm text-warn-600 dark:bg-warn-500/15 dark:text-warn-100">
           {error}
         </p>
       ) : null}
-      {!fix ? (
+      {expectsLocation && !fix ? (
         <button type="button" onClick={locate} className="btn btn-outline w-full" disabled={locating}>
           {locating ? 'Locating…' : 'Get my location'}
         </button>
@@ -326,7 +386,11 @@ export function CheckOutPanel({ visitId }: { visitId: string }) {
         </div>
       </div>
 
-      <button type="submit" className="btn btn-accent w-full" disabled={!fix || quality === 'UNRELIABLE'}>
+      {/* Deliberately not gated on a location. A rep who checked in from a
+          basement must still be able to close the visit — blocking here would
+          strand it open and lose the meeting notes, which are worth far more
+          than a reading that was never going to arrive. */}
+      <button type="submit" className="btn btn-accent w-full">
         Check out and complete
       </button>
     </form>

@@ -85,6 +85,25 @@ export function assessVisitIntegrity(input: {
   checkInAccuracy: number | null;
   checkOutAccuracy: number | null;
   durationMinutes: number | null;
+  /**
+   * Whether the rep has actually checked in yet.
+   *
+   * Without this, a visit that is merely *planned* has no accuracy reading, and
+   * a missing reading looks identical to a terrible one — so every planned
+   * visit in the list was flagged "the check-in location was too imprecise",
+   * about a check-in that had not happened. Absent for older callers, where the
+   * presence of any check-in coordinate is the best available signal.
+   */
+  hasCheckedIn?: boolean;
+  /**
+   * Whether this visit's mode expects a location at all.
+   *
+   * A phone call has nowhere to be. Flagging "no location was recorded" on
+   * every call and chat would fill the review queue with entries no manager can
+   * act on, and a flag that fires on everything stops being read — which costs
+   * far more than it catches. Defaults to true for callers that predate modes.
+   */
+  expectsLocation?: boolean;
 }): VisitIntegrity {
   const reasons: string[] = [];
   let driftMetres: number | null = null;
@@ -102,8 +121,19 @@ export function assessVisitIntegrity(input: {
     }
   }
 
-  if (locationQuality(input.checkInAccuracy) === 'UNRELIABLE') {
-    reasons.push('The check-in location was too imprecise to place the visit.');
+  const checkedIn = input.hasCheckedIn ?? input.checkIn !== null;
+  const expectsLocation = input.expectsLocation ?? true;
+
+  if (checkedIn && expectsLocation) {
+    if (input.checkInAccuracy === null || input.checkInAccuracy === undefined) {
+      // A check-in with no fix at all. Since a poor signal no longer blocks the
+      // check-in, this is an ordinary outcome — worth a manager's eye, not an
+      // accusation, and phrased as the absence it is rather than as a bad
+      // reading that was never taken.
+      reasons.push('No location was recorded at check-in.');
+    } else if (locationQuality(input.checkInAccuracy) === 'UNRELIABLE') {
+      reasons.push('The check-in location was too imprecise to place the visit.');
+    }
   }
 
   if (input.durationMinutes !== null && input.durationMinutes < 2) {

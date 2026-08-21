@@ -12,6 +12,10 @@ interface VisitDetail {
   reference: string;
   status: string;
   purpose: string;
+  mode: string;
+  modeLabel: string | null;
+  /** What this visit's mode demands, decided by the API from the mode master. */
+  evidence: { photo: boolean; geo: boolean; link: boolean; screenshot: boolean } | null;
   entityType: string;
   entityId: string;
   entityName: string | null;
@@ -108,6 +112,10 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
             <dd className="font-medium">{visit.user?.fullName ?? '—'}</dd>
           </div>
           <div>
+            <dt className="text-xs text-[var(--color-text-muted)]">Mode</dt>
+            <dd className="font-medium">{visit.modeLabel ?? humanise(visit.mode)}</dd>
+          </div>
+          <div>
             <dt className="text-xs text-[var(--color-text-muted)]">Planned for</dt>
             <dd className="font-medium">
               {visit.plannedAt ? formatDateTime(visit.plannedAt) : 'No time set'}
@@ -135,11 +143,16 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
         <section className="card p-5">
           <h2 className="font-bold">Check in</h2>
           <p className="mt-0.5 text-xs text-[var(--color-text-subtle)]">
-            Records one location reading and a photo. Nothing is tracked between check-in and
-            check-out.
+            {visit.evidence?.photo
+              ? 'Records one location reading and a photo. Nothing is tracked between check-in and check-out.'
+              : 'Records one location reading. Nothing is tracked between check-in and check-out.'}
           </p>
           <div className="mt-4">
-            <CheckInPanel visitId={visit.id} />
+            <CheckInPanel
+              visitId={visit.id}
+              requiresPhoto={visit.evidence?.photo ?? true}
+              expectsLocation={visit.evidence?.geo ?? true}
+            />
           </div>
         </section>
       ) : null}
@@ -148,7 +161,7 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
         <section className="card p-5">
           <h2 className="font-bold">Check out</h2>
           <div className="mt-4">
-            <CheckOutPanel visitId={visit.id} />
+            <CheckOutPanel visitId={visit.id} expectsLocation={visit.evidence?.geo ?? true} />
           </div>
         </section>
       ) : null}
@@ -169,12 +182,22 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
                 Check-in
               </h3>
               <p className="mt-1 text-sm font-medium">{formatDateTime(visit.checkIn.at)}</p>
-              <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
-                {visit.checkIn.latitude?.toFixed(5)}, {visit.checkIn.longitude?.toFixed(5)}
-              </p>
-              <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                {humanise(visit.checkIn.quality)} · ±{visit.checkIn.accuracy} m
-              </p>
+              {/* A check-in may now legitimately carry no fix at all. Rendering
+                  the coordinates unconditionally printed a bare "," and
+                  "Unreliable · ± m", which reads as a broken page rather than
+                  as the plain fact that no reading was taken. */}
+              {visit.checkIn.latitude !== null && visit.checkIn.longitude !== null ? (
+                <>
+                  <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
+                    {visit.checkIn.latitude?.toFixed(5)}, {visit.checkIn.longitude?.toFixed(5)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                    {humanise(visit.checkIn.quality)} · ±{visit.checkIn.accuracy} m
+                  </p>
+                </>
+              ) : (
+                <p className="mt-0.5 text-xs text-warn-600">No location recorded</p>
+              )}
               {visit.checkIn.address ? (
                 <p className="mt-1 text-xs text-[var(--color-text-muted)]">
                   {visit.checkIn.address}
@@ -188,12 +211,18 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
                   Check-out
                 </h3>
                 <p className="mt-1 text-sm font-medium">{formatDateTime(visit.checkOut.at)}</p>
-                <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
-                  {visit.checkOut.latitude?.toFixed(5)}, {visit.checkOut.longitude?.toFixed(5)}
-                </p>
-                <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                  {humanise(visit.checkOut.quality)} · ±{visit.checkOut.accuracy} m
-                </p>
+                {visit.checkOut.latitude !== null && visit.checkOut.longitude !== null ? (
+                  <>
+                    <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
+                      {visit.checkOut.latitude?.toFixed(5)}, {visit.checkOut.longitude?.toFixed(5)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                      {humanise(visit.checkOut.quality)} · ±{visit.checkOut.accuracy} m
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-0.5 text-xs text-warn-600">No location recorded</p>
+                )}
               </div>
             ) : null}
           </div>

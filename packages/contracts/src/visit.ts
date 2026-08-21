@@ -17,6 +17,14 @@ const latitudeSchema = z.number().min(-90).max(90);
 const longitudeSchema = z.number().min(-180).max(180);
 
 /**
+ * What a visit is, unless told otherwise: the rep goes to the client.
+ *
+ * Matches the `CLIENT_SITE` row seeded into the meeting-mode master, and the
+ * column default in the database. All three have to agree.
+ */
+export const DEFAULT_VISIT_MODE = 'CLIENT_SITE';
+
+/**
  * Accuracy is required, not optional.
  *
  * A coordinate without its uncertainty is not evidence — it looks identical
@@ -31,36 +39,131 @@ const accuracySchema = z
     `Location accuracy is worse than ${MAX_ACCEPTABLE_ACCURACY_METRES} m, which is too imprecise to record a visit`,
   );
 
+/**
+ * The mode a visit is planned in.
+ *
+ * A free-form code rather than an enum, because the modes are an admin-managed
+ * master — an enum here would mean a release every time the business adds one.
+ * The API checks the code against that master, and the foreign key is the final
+ * word, so an unknown code cannot be stored.
+ */
+const visitModeSchema = z
+  .string()
+  .trim()
+  .min(1, 'Choose how this will happen')
+  .max(40);
+
 export const planVisitSchema = z.object({
   entityType: z.enum(ENTITY_TYPES),
   entityId: idSchema,
   purpose: z.string().trim().min(3, 'Say what the visit is for').max(200),
   plannedAt: z.coerce.date().optional(),
+  /**
+   * Optional for older callers, which planned physical visits because that was
+   * the only kind. Defaulting keeps their meaning rather than inventing a new
+   * one for records that already exist.
+   */
+  mode: visitModeSchema.optional().default(DEFAULT_VISIT_MODE),
 });
 export type PlanVisitInput = z.infer<typeof planVisitSchema>;
 
+/**
+ * What a mode demands at check-in.
+ *
+ * The flags live on the master row, set by an administrator, and this function
+ * is the only place that interprets them. Both the API and the check-in screen
+ * call it, so the button the rep sees and the rule the server enforces can
+ * never drift apart — the failure that produces "it let me submit and then said
+ * no".
+ */
+export interface VisitEvidenceRules {
+  photo: boolean;
+  geo: boolean;
+  link: boolean;
+  screenshot: boolean;
+}
+
+export function visitEvidenceRules(
+  mode: { requiresPhoto?: boolean; requiresGeo?: boolean; requiresLink?: boolean; allowsScreenshot?: boolean } | null | undefined,
+): VisitEvidenceRules {
+  // An unknown mode is treated as the strictest one. If the master row cannot
+  // be read, asking for a photograph that turns out to be unnecessary is a far
+  // smaller failure than silently accepting a client-site visit with no
+  // evidence at all.
+  if (!mode) return { photo: true, geo: true, link: false, screenshot: false };
+
+  return {
+    photo: mode.requiresPhoto === true,
+    geo: mode.requiresGeo === true,
+    link: mode.requiresLink === true,
+    screenshot: mode.allowsScreenshot === true,
+  };
+}
+
+/**
+ * Why a check-in has no usable location.
+ *
+ * Recorded rather than rejected. A rep standing in a client's basement with no
+ * signal has still made the visit, and refusing the check-in produces no record
+ * at all — which is worse data than a record marked unverified. The quality is
+ * reported per person instead, where a pattern is visible and a single bad fix
+ * is not.
+ */
+export const LOCATION_FAILURE_REASONS = [
+  'DENIED',
+  'UNAVAILABLE',
+  'TIMEOUT',
+  'IMPRECISE',
+  'UNSUPPORTED',
+] as const;
+export type LocationFailureReason = (typeof LOCATION_FAILURE_REASONS)[number];
+
+export const LOCATION_STATUSES = ['VERIFIED', 'UNVERIFIED'] as const;
+export type LocationStatus = (typeof LOCATION_STATUSES)[number];
+
 export const checkInSchema = z.object({
-  latitude: latitudeSchema,
-  longitude: longitudeSchema,
-  accuracy: accuracySchema,
   /**
-   * Storage key of the selfie, uploaded separately via POST /files.
+   * Optional, deliberately. See LOCATION_FAILURE_REASONS: a missing fix marks
+   * the visit unverified rather than blocking the rep from recording it.
+   */
+  latitude: latitudeSchema.optional(),
+  longitude: longitudeSchema.optional(),
+  accuracy: z.number().positive().optional(),
+  /** Set when the device could not give a usable fix. */
+  locationFailureReason: z.enum(LOCATION_FAILURE_REASONS).optional(),
+  /**
+   * Storage key of the photograph, uploaded separately via POST /files.
    *
-   * Required. The photograph is the whole reason the module exists — a
+   * Optional *here* and required by the server for modes that demand it. The
+   * schema cannot decide alone: whether a photograph is needed depends on the
+   * visit's mode, which lives in the database, not in the request. A phone call
+   * planned from this screen must not demand a selfie at your own desk.
+   *
+   * For a client-site visit the photograph is still the whole point — a
    * check-in without one is a self-reported claim, which the CRM already
    * supports through a plain activity.
    */
-  photoKey: z.string().min(1, 'A check-in photo is required').max(300),
+  photoKey: z.string().min(1).max(300).optional(),
   address: z.string().trim().max(400).optional(),
   deviceId: z.string().max(120).optional(),
   deviceInfo: z.record(z.unknown()).optional(),
 });
 export type CheckInInput = z.infer<typeof checkInSchema>;
 
+/**
+ * Check-out.
+ *
+ * The location is optional for the same reason it is optional at check-in, and
+ * more urgently: a rep who checked in from a basement must still be able to
+ * close the visit. Requiring a fix here would strand the visit open forever and
+ * lose the meeting notes — the most valuable thing in the whole record — to
+ * protect a reading that was never going to be good.
+ */
 export const checkOutSchema = z.object({
-  latitude: latitudeSchema,
-  longitude: longitudeSchema,
-  accuracy: accuracySchema,
+  latitude: latitudeSchema.optional(),
+  longitude: longitudeSchema.optional(),
+  accuracy: z.number().positive().optional(),
+  locationFailureReason: z.enum(LOCATION_FAILURE_REASONS).optional(),
   meetingNotes: z.string().trim().min(1, 'Record what was discussed').max(4000),
   outcome: z.string().trim().max(200).optional(),
   nextFollowUpAt: z.coerce.date().optional(),
@@ -113,6 +216,10 @@ export interface VisitListItem {
   reference: string;
   status: (typeof VISIT_STATUSES)[number];
   purpose: string;
+  /** Master code — stable, safe to filter and group a report on. */
+  mode: string;
+  /** The administrator's wording for that code, for display only. */
+  modeLabel: string | null;
   entityType: string;
   entityId: string;
   entityName: string | null;
@@ -184,3 +291,38 @@ export function totalExpenseClaim(amounts: readonly string[]): string {
   const paise = amounts.reduce((sum, amount) => sum + Math.round(Number(amount) * 100), 0);
   return (paise / 100).toFixed(2);
 }
+
+/**
+ * Is this check-in's location good enough to count as evidence?
+ *
+ * A fix with 3,000 m of uncertainty looks identical in the database to a good
+ * one, and is worthless for confirming someone was at a client's premises. It is
+ * recorded either way — but only an accurate fix is called verified, so the
+ * reported rate means something.
+ */
+export function assessCheckInLocation(input: {
+  latitude?: number;
+  longitude?: number;
+  accuracy?: number;
+  locationFailureReason?: LocationFailureReason;
+}): { status: LocationStatus; reason: LocationFailureReason | null } {
+  if (input.locationFailureReason) {
+    return { status: 'UNVERIFIED', reason: input.locationFailureReason };
+  }
+  if (input.latitude === undefined || input.longitude === undefined) {
+    return { status: 'UNVERIFIED', reason: 'UNAVAILABLE' };
+  }
+  if (input.accuracy === undefined || input.accuracy > VERIFIED_ACCURACY_METRES) {
+    return { status: 'UNVERIFIED', reason: 'IMPRECISE' };
+  }
+  return { status: 'VERIFIED', reason: null };
+}
+
+/**
+ * Above this, a fix is recorded but not treated as confirming presence.
+ *
+ * Far tighter than MAX_ACCEPTABLE_ACCURACY_METRES, which existed to reject a
+ * check-in outright. Nothing is rejected now, so this threshold can say what it
+ * actually means: close enough to place someone at a building.
+ */
+export const VERIFIED_ACCURACY_METRES = 100;

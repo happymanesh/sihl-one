@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { LeadListItem } from '@sihl-one/contracts';
+import type { LeadListItem, MeetingModeItem } from '@sihl-one/contracts';
 
 import { PlanVisitForm } from '@/components/visits/PlanVisitForm';
 import { apiFetch } from '@/lib/api';
@@ -24,13 +24,16 @@ export default async function PlanVisitPage({
 
   // Only the records the caller can actually visit are offered. Pulling the
   // whole book and filtering in the browser would both leak names and be slow.
-  const [leads, customers] = await Promise.all([
+  const [leads, customers, meetingModes] = await Promise.all([
     apiFetch<{ items: LeadListItem[] }>(
       '/leads?pageSize=50&status=CONTACTED&status=QUALIFIED&status=PROPOSAL',
     ).catch(() => ({ items: [] as LeadListItem[] })),
     apiFetch<{ items: CustomerRow[] }>('/customers?pageSize=50').catch(() => ({
       items: [] as CustomerRow[],
     })),
+    // An empty list hides the selector rather than blocking the form: planning
+    // a visit must not fail because a master could not be read.
+    apiFetch<MeetingModeItem[]>('/masters/meeting-modes').catch(() => [] as MeetingModeItem[]),
   ]);
 
   return (
@@ -54,6 +57,7 @@ export default async function PlanVisitPage({
 
       <div className="card p-5">
         <PlanVisitForm
+          meetingModes={meetingModes}
           leads={leads.items.map((lead) => ({
             id: lead.id,
             label: `${lead.fullName} — ${lead.reference}${lead.city ? ` (${lead.city})` : ''}`,
