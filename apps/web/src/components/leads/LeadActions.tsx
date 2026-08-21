@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { LEAD_LOST_REASONS } from '@sihl-one/contracts';
+import { LEAD_LOST_REASONS, type MeetingModeItem } from '@sihl-one/contracts';
 
 import {
   assignLead,
@@ -32,6 +32,7 @@ interface Props {
   canUpdate: boolean;
   /** Server-driven, so switching dictation on is a config change not a release. */
   voiceInputEnabled: boolean;
+  meetingModes: MeetingModeItem[];
   canAssign: boolean;
   canConvert: boolean;
 }
@@ -96,6 +97,7 @@ export function LeadActions(props: Props) {
             allowedTransitions={props.allowedTransitions}
             canUpdate={props.canUpdate}
             voiceInputEnabled={props.voiceInputEnabled}
+            meetingModes={props.meetingModes}
           />
         ) : null}
         {active === 'status' ? (
@@ -156,16 +158,21 @@ function LogInteractionForm({
   allowedTransitions,
   canUpdate,
   voiceInputEnabled,
+  meetingModes,
 }: {
   leadId: string;
   allowedTransitions: string[];
   canUpdate: boolean;
   voiceInputEnabled: boolean;
+  meetingModes: MeetingModeItem[];
 }) {
   const [state, action] = useActionState(logActivity, INITIAL);
   const formRef = useRef<HTMLFormElement>(null);
   const [missing, setMissing] = useState<string[]>([]);
   const [nextStatus, setNextStatus] = useState('');
+  const [mode, setMode] = useState('');
+
+  const selectedMode = meetingModes.find((item) => item.code === mode);
 
   // Statuses a rep may move to from here. CONVERTED is deliberately absent:
   // conversion needs PAN and its own confirmation, so it keeps its own tab.
@@ -199,6 +206,65 @@ function LogInteractionForm({
       <input type="hidden" name="entityType" value="LEAD" />
       <input type="hidden" name="entityId" value={leadId} />
       <Feedback state={state} />
+
+      {meetingModes.length > 0 ? (
+        <div>
+          <label className="label" htmlFor="meetingMode">How did it happen?</label>
+          <select
+            id="meetingMode"
+            name="meetingMode"
+            className="input"
+            value={mode}
+            onChange={(event) => setMode(event.target.value)}
+            aria-describedby="mode-meaning"
+          >
+            <option value="">Not recorded</option>
+            {meetingModes.map((item) => (
+              <option key={item.code} value={item.code}>{item.label}</option>
+            ))}
+          </select>
+          {/* The meaning, from the master. A mode name alone means different
+              things in different teams; writing it down settles it. */}
+          <p id="mode-meaning" className="mt-1 text-xs text-[var(--color-text-muted)]">
+            {selectedMode?.meaning ?? 'Optional — records whether this was a visit, a call or a message.'}
+          </p>
+        </div>
+      ) : null}
+
+      {selectedMode?.requiresLink ? (
+        <div>
+          <label className="label" htmlFor="meetingLink">Meeting link</label>
+          <input
+            id="meetingLink"
+            name="meetingLink"
+            type="url"
+            className="input"
+            placeholder="https://meet.google.com/…"
+            aria-invalid={Boolean(state.errors?.meetingLink)}
+            aria-describedby="meeting-link-help"
+          />
+          <p id="meeting-link-help" className="mt-1 text-xs text-[var(--color-text-subtle)]">
+            Approved providers only. Sending the link to the client is not switched on yet.
+          </p>
+          {state.errors?.meetingLink ? (
+            <p className="mt-1 text-xs text-danger-500">{state.errors.meetingLink[0]}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {selectedMode?.requiresPhoto ? (
+        <p className="rounded-lg border border-warn-500/40 bg-warn-50 px-3 py-2 text-xs text-warn-600 dark:bg-warn-500/10">
+          This mode expects a photograph taken in the app at the client&rsquo;s premises. Capture is
+          part of the visits screen and is not built yet.
+        </p>
+      ) : null}
+
+      {selectedMode?.allowsScreenshot ? (
+        <p className="text-xs text-[var(--color-text-subtle)]">
+          You can attach a screenshot as evidence after saving. Capture the full window, not a crop —
+          your manager sees what you attach.
+        </p>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div>

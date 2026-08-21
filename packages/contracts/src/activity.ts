@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ACTIVITY_DIRECTIONS, ACTIVITY_TYPES, PRIORITIES, TASK_STATUSES } from './enums';
-import { idSchema, paginationQuerySchema } from './common';
+import { checkMeetingLink } from './masters';
+import { codeSchema, idSchema, paginationQuerySchema } from './common';
 
 /** Polymorphic parent for an activity or task. */
 export const ENTITY_TYPES = ['LEAD', 'CUSTOMER', 'PARTNER', 'OPPORTUNITY'] as const;
@@ -18,10 +19,19 @@ export const createActivitySchema = z
     durationMinutes: z.number().int().min(0).max(600).optional(),
     outcome: z.string().trim().max(120).optional(),
     nextFollowUpAt: z.coerce.date().optional(),
+    /** Code into the meeting-mode master. */
+    meetingMode: codeSchema.optional(),
+    meetingLink: z.string().trim().max(500).optional(),
   })
   .refine((data) => !data.occurredAt || data.occurredAt.getTime() <= Date.now() + 60_000, {
     message: 'An activity cannot be logged with a future timestamp',
     path: ['occurredAt'],
+  })
+  .refine((data) => !data.meetingLink || checkMeetingLink(data.meetingLink).allowed, {
+    // Checked here as well as in the API so a bad link is rejected before it is
+    // ever stored — this URL goes to clients from SIHL's sender identity.
+    message: 'Use a link from an approved meeting provider.',
+    path: ['meetingLink'],
   });
 export type CreateActivityInput = z.infer<typeof createActivitySchema>;
 

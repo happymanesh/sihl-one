@@ -136,6 +136,8 @@ export async function logActivity(
     outcome: formData.get('outcome') || undefined,
     durationMinutes: duration ? Number(duration) : undefined,
     nextFollowUpAt: followUp ? new Date(String(followUp)) : undefined,
+    meetingMode: formData.get('meetingMode') || undefined,
+    meetingLink: formData.get('meetingLink') || undefined,
   });
 
   if (!parsed.success) {

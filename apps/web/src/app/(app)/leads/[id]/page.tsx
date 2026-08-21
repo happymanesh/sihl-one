@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { MeetingModeItem } from '@sihl-one/contracts';
 import type { Route } from 'next';
 
 import { Badge, LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
@@ -112,6 +113,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     ? await apiFetch<AssignableUser[]>('/users/assignable').catch(() => [])
     : [];
 
+  // Active modes only: one switched off yesterday must not be selectable today,
+  // though interactions already carrying it still read correctly.
+  const meetingModes = await apiFetch<MeetingModeItem[]>('/masters/meeting-modes').catch(
+    () => [] as MeetingModeItem[],
+  );
+
   return (
     <div className="space-y-5">
       <nav className="text-xs text-[var(--color-text-muted)]">
@@ -199,6 +206,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             canAssign={can(user, 'lead:assign')}
             canConvert={can(user, 'lead:convert')}
             voiceInputEnabled={voiceInputEnabled()}
+            meetingModes={meetingModes}
           />
 
           <DocumentPanel

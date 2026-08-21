@@ -4,13 +4,16 @@ import {
   canDeleteMasterRow,
   type CreateLeadSourceInput,
   type CreateProductInput,
+  type CreateMeetingModeInput,
   type CreateTaskStatusInput,
+  type MeetingModeItem,
   type LeadSourceItem,
   type MasterQuery,
   type ProductItem,
   type TaskStatusItem,
   type UpdateLeadSourceInput,
   type UpdateProductInput,
+  type UpdateMeetingModeInput,
   type UpdateTaskStatusInput,
 } from '@sihl-one/contracts';
 
@@ -442,6 +445,74 @@ export class MastersService {
     await this.audit.record({
       action: 'UPDATE',
       resource: 'master.taskStatus',
+      resourceId: id,
+      changes: diffRecords(before, after),
+    });
+
+    return after;
+  }
+
+
+  // -------------------------------------------------------------------------
+  // Meeting modes
+  // -------------------------------------------------------------------------
+
+  async listMeetingModes(query: MasterQuery): Promise<MeetingModeItem[]> {
+    const rows = await this.prisma.meetingModeMaster.findMany({
+      where: query.includeInactive ? {} : { isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+    });
+    return rows as unknown as MeetingModeItem[];
+  }
+
+  async createMeetingMode(user: AuthenticatedPrincipal, input: CreateMeetingModeInput) {
+    const existing = await this.prisma.meetingModeMaster.findUnique({ where: { code: input.code } });
+    if (existing) {
+      throw new ConflictException({
+        title: 'That code is taken',
+        detail: `"${input.code}" is already used by ${existing.label}.`,
+      });
+    }
+
+    const created = await this.prisma.meetingModeMaster.create({
+      data: { ...input, meaning: input.meaning ?? null, createdById: user.id },
+    });
+
+    this.invalidate();
+    await this.audit.record({
+      action: 'CREATE',
+      resource: 'master.meetingMode',
+      resourceId: created.id,
+      changes: { code: created.code, label: created.label },
+    });
+
+    return created;
+  }
+
+  async updateMeetingMode(user: AuthenticatedPrincipal, id: string, input: UpdateMeetingModeInput) {
+    const before = await this.prisma.meetingModeMaster.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException({ title: 'Meeting mode not found' });
+
+    // At least one mode must stay usable, or an interaction cannot record how it
+    // happened and the field falls back to meaning nothing.
+    if (input.isActive === false && before.isActive) {
+      const others = await this.prisma.meetingModeMaster.count({
+        where: { isActive: true, id: { not: id } },
+      });
+      if (others === 0) {
+        throw new ConflictException({
+          title: 'Cannot switch that off',
+          detail: 'It is the last active meeting mode — interactions would have no way to record how they happened.',
+        });
+      }
+    }
+
+    const after = await this.prisma.meetingModeMaster.update({ where: { id }, data: input });
+
+    this.invalidate();
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'master.meetingMode',
       resourceId: id,
       changes: diffRecords(before, after),
     });

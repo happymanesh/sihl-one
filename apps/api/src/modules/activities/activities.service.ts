@@ -1,5 +1,5 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
-import type { ActivityQuery, CreateActivityInput } from '@sihl-one/contracts';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { checkMeetingLink, type ActivityQuery, type CreateActivityInput } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
 import { ScopeService } from '../../common/scope.service';
@@ -84,6 +84,38 @@ export class ActivitiesService {
   async create(user: AuthenticatedPrincipal, input: CreateActivityInput) {
     await this.assertParentVisible(user, input.entityType, input.entityId);
 
+    // Re-checked here, not only in the schema. This URL is sent to clients from
+    // SIHL's sender identity, and anything enforced solely at the edge is
+    // enforced nowhere — a direct API call would bypass it entirely.
+    if (input.meetingLink) {
+      const verdict = checkMeetingLink(input.meetingLink);
+      if (!verdict.allowed) {
+        throw new BadRequestException({ title: 'Meeting link not allowed', detail: verdict.reason });
+      }
+    }
+
+    if (input.meetingMode) {
+      const mode = await this.prisma.meetingModeMaster.findUnique({
+        where: { code: input.meetingMode },
+        select: { isActive: true, requiresLink: true, label: true },
+      });
+      if (!mode) {
+        throw new BadRequestException({ title: 'Unknown meeting mode' });
+      }
+      if (!mode.isActive) {
+        throw new BadRequestException({
+          title: 'That mode is no longer available',
+          detail: `"${mode.label}" has been switched off.`,
+        });
+      }
+      if (mode.requiresLink && !input.meetingLink) {
+        throw new BadRequestException({
+          title: 'A meeting link is needed',
+          detail: `"${mode.label}" is an online meeting — paste the link so it can be shared with the client.`,
+        });
+      }
+    }
+
     const activity = await this.prisma.$transaction(async (tx) => {
       const created = await tx.activity.create({
         data: {
@@ -96,6 +128,8 @@ export class ActivitiesService {
           outcome: input.outcome ?? null,
           durationMinutes: input.durationMinutes ?? null,
           occurredAt: input.occurredAt ?? new Date(),
+          meetingMode: input.meetingMode ?? null,
+          meetingLink: input.meetingLink ?? null,
           actorId: user.id,
         },
       });

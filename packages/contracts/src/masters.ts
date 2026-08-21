@@ -265,3 +265,101 @@ export function canDeactivateTaskStatus(
   }
   return { allowed: true };
 }
+
+// ---------------------------------------------------------------------------
+// Meeting modes
+// ---------------------------------------------------------------------------
+
+export interface MeetingModeItem {
+  id: string;
+  code: string;
+  label: string;
+  meaning: string | null;
+  requiresPhoto: boolean;
+  requiresGeo: boolean;
+  createsVisit: boolean;
+  requiresLink: boolean;
+  allowsScreenshot: boolean;
+  isActive: boolean;
+  isSystem: boolean;
+  sortOrder: number;
+}
+
+export const createMeetingModeSchema = z.object({
+  code: codeSchema,
+  label: z.string().trim().min(2).max(80),
+  meaning: z.string().trim().max(200).optional(),
+  requiresPhoto: z.boolean().default(false),
+  requiresGeo: z.boolean().default(false),
+  createsVisit: z.boolean().default(false),
+  requiresLink: z.boolean().default(false),
+  allowsScreenshot: z.boolean().default(false),
+  sortOrder: z.number().int().min(0).max(9999).default(100),
+});
+export type CreateMeetingModeInput = z.infer<typeof createMeetingModeSchema>;
+
+/** The code is absent on purpose — interactions point at it. */
+export const updateMeetingModeSchema = createMeetingModeSchema
+  .omit({ code: true })
+  .partial()
+  .extend({ isActive: z.boolean().optional() });
+export type UpdateMeetingModeInput = z.infer<typeof updateMeetingModeSchema>;
+
+/**
+ * Meeting hosts a rep may paste a link from.
+ *
+ * This is a security control, not tidiness. The link is sent to clients from
+ * SIHL's own sender identity, so an unrestricted field turns the platform into
+ * a phishing channel — for a rogue rep, and more likely for a compromised
+ * account. Extend deliberately, never with a wildcard.
+ */
+export const ALLOWED_MEETING_HOSTS = [
+  'meet.google.com',
+  'zoom.us',
+  'teams.microsoft.com',
+  'teams.live.com',
+  'webex.com',
+  'gotomeeting.com',
+] as const;
+
+export interface MeetingLinkVerdict {
+  allowed: boolean;
+  reason?: string;
+}
+
+/**
+ * Is this a link we are willing to send to a client?
+ *
+ * Host matching is exact or a dotted suffix, never `includes`: a substring test
+ * would accept `zoom.us.evil.com`, which is precisely the attack an allow-list
+ * exists to stop.
+ */
+export function checkMeetingLink(raw: string): MeetingLinkVerdict {
+  const trimmed = raw.trim();
+  if (!trimmed) return { allowed: false, reason: 'Paste the meeting link.' };
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return { allowed: false, reason: 'That does not look like a link.' };
+  }
+
+  if (url.protocol !== 'https:') {
+    return { allowed: false, reason: 'Meeting links must be https.' };
+  }
+
+  const host = url.hostname.toLowerCase();
+  const permitted = ALLOWED_MEETING_HOSTS.some(
+    (allowed) => host === allowed || host.endsWith(`.${allowed}`),
+  );
+
+  if (!permitted) {
+    return {
+      allowed: false,
+      reason: `Links are limited to ${ALLOWED_MEETING_HOSTS.slice(0, 3).join(', ')} and other approved meeting providers.`,
+    };
+  }
+
+  return { allowed: true };
+}

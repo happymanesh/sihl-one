@@ -3,15 +3,19 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 import {
   createLeadSourceSchema,
   createProductSchema,
+  createMeetingModeSchema,
   createTaskStatusSchema,
   masterQuerySchema,
+  updateMeetingModeSchema,
   updateTaskStatusSchema,
   updateLeadSourceSchema,
   updateProductSchema,
   type CreateLeadSourceInput,
   type CreateProductInput,
+  type CreateMeetingModeInput,
   type CreateTaskStatusInput,
   type MasterQuery,
+  type UpdateMeetingModeInput,
   type UpdateTaskStatusInput,
   type UpdateLeadSourceInput,
   type UpdateProductInput,
@@ -170,6 +174,43 @@ export class MastersController {
     @ZodBody(updateTaskStatusSchema) body: UpdateTaskStatusInput,
   ) {
     return this.masters.updateTaskStatus(user, id, body);
+  }
+
+
+  // -------------------------------------------------------------------------
+  // Meeting modes
+  // -------------------------------------------------------------------------
+
+  @Get('meeting-modes')
+  @RequirePermissions('activity:read')
+  @ApiOperation({ summary: 'How an interaction can have happened' })
+  @ApiZodQuery(masterQuerySchema)
+  listMeetingModes(@ZodQuery(masterQuerySchema) query: MasterQuery) {
+    return this.masters.listMeetingModes(query);
+  }
+
+  @Post('meeting-modes')
+  @RequirePermissions('system:configure')
+  @ApiOperation({ summary: 'Add a meeting mode' })
+  @ApiZodBody(createMeetingModeSchema)
+  createMeetingMode(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(createMeetingModeSchema) body: CreateMeetingModeInput,
+  ) {
+    return this.masters.createMeetingMode(user, body);
+  }
+
+  @Patch('meeting-modes/:id')
+  @RequirePermissions('system:configure')
+  @ApiParam({ name: 'id' })
+  @ApiOperation({ summary: 'Edit a meeting mode, or switch it off' })
+  @ApiZodBody(updateMeetingModeSchema)
+  updateMeetingMode(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(updateMeetingModeSchema) body: UpdateMeetingModeInput,
+  ) {
+    return this.masters.updateMeetingMode(user, id, body);
   }
 
 }

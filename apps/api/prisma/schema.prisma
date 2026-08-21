@@ -1022,6 +1022,53 @@ enum ActivityDirection {
 /// rather than one nullable FK per parent: the timeline is always queried by
 /// parent, never joined across parents, and the alternative is four columns
 /// of which three are always null.
+/// How a client interaction happened.
+///
+/// A master rather than an enum so an administrator can add "At partner office"
+/// without a release. The flags — not the label — decide what the form asks
+/// for, so a new mode behaves correctly the moment it is created.
+model MeetingModeMaster {
+  id    String @id @default(cuid())
+  code  String @unique @db.VarChar(40)
+  label String @db.VarChar(80)
+
+  /// One line shown under the selector.
+  meaning String? @db.VarChar(200)
+
+  /// An in-app photograph is required. True only where the rep is physically
+  /// somewhere worth evidencing — photographing yourself at your own desk is
+  /// theatre.
+  requiresPhoto Boolean @default(false)
+
+  /// A location fix is captured with the interaction.
+  requiresGeo Boolean @default(false)
+
+  /// Choosing this mode creates a Visit, with check-in and check-out. A phone
+  /// call is not a visit, and forcing one produces visits with no location, no
+  /// duration and no premises, which corrupts every field-activity report.
+  createsVisit Boolean @default(false)
+
+  /// A meeting link is expected — online modes only.
+  requiresLink Boolean @default(false)
+
+  /// A screenshot may be attached as evidence, for modes that leave no other
+  /// trace. Weaker evidence than an in-app photograph, and labelled as such.
+  allowsScreenshot Boolean @default(false)
+
+  isActive  Boolean @default(true)
+  isSystem  Boolean @default(false)
+  sortOrder Int     @default(100)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  activities Activity[]
+
+  @@index([isActive, sortOrder])
+  @@map("meeting_mode")
+}
+
 model Activity {
   id         String            @id @default(cuid())
   entityType EntityType
@@ -1044,9 +1091,21 @@ model Activity {
   /// them differently, and keeps engagement counts honest.
   isSystemGenerated Boolean @default(false)
 
+  /// How it happened. Code into `meeting_mode`; never parsed for meaning.
+  meetingMode String?            @db.VarChar(40)
+  modeMaster  MeetingModeMaster? @relation(fields: [meetingMode], references: [code], onDelete: Restrict, onUpdate: Cascade)
+
+  /// Video-call link for online modes. Restricted to known meeting hosts before
+  /// it is stored: this URL is sent to clients from SIHL's sender identity, so
+  /// an arbitrary one would make the platform a phishing channel.
+  meetingLink String? @db.VarChar(500)
+
   metadata Json?
 
   createdAt DateTime @default(now())
+
+  /// Screenshots and files attached as evidence of this interaction.
+  evidence Document[]
 
   @@index([entityType, entityId, occurredAt])
   @@index([actorId, occurredAt])
@@ -1264,11 +1323,17 @@ model Document {
   scanStatus String  @default("PENDING") @db.VarChar(20)
   scanResult String? @db.VarChar(200)
 
+  /// Set when this file evidences a specific interaction — a screenshot of a
+  /// chat or an online meeting. Null for ordinary documents on the record.
+  activityId String?
+  activity   Activity? @relation(fields: [activityId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
   uploadedById String?
   createdAt    DateTime  @default(now())
   deletedAt    DateTime?
 
   @@index([entityType, entityId])
+  @@index([activityId])
   @@map("document")
 }
 
