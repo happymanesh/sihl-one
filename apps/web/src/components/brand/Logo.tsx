@@ -1,50 +1,62 @@
 /**
- * SIHL ONE wordmark, drawn rather than loaded as an image so it stays sharp at
- * any size, inherits the current colour, and costs no network request on the
- * login screen — which is the one page where first paint is most visible.
+ * The Shah Investor's Home corporate logo.
+ *
+ * Replaces the drawn "SIHL ONE" mark and wordmark that stood here before —
+ * change 7 asked for both the name and the icon to become the company logo.
+ *
+ * The supplied file is a JPEG with a solid white background, so it cannot sit
+ * directly on the navy header without reading as a white rectangle someone
+ * forgot to cut out. It is placed on a deliberate white plate instead, which
+ * looks intentional on dark grounds and disappears on light ones. A transparent
+ * PNG or, better, an SVG would remove the need for the plate entirely and would
+ * stay sharp on high-density screens — worth asking marketing for.
+ *
+ * Rendered with a plain `img` rather than `next/image`: the file is 8 KB and a
+ * fixed size, so optimisation buys nothing, and explicit dimensions prevent the
+ * layout shift that would otherwise show on every page load.
  */
+
+/** Natural size of the asset, used to keep the aspect ratio honest. */
+const NATURAL_WIDTH = 249;
+const NATURAL_HEIGHT = 96;
+const RATIO = NATURAL_WIDTH / NATURAL_HEIGHT;
+
 export function Logo({
   size = 'md',
   inverted = false,
 }: {
   size?: 'sm' | 'md' | 'lg';
+  /** Set on dark grounds, where the plate needs an edge to sit against. */
   inverted?: boolean;
 }) {
-  const dimensions = { sm: 26, md: 32, lg: 44 }[size];
-  const textSize = { sm: 'text-base', md: 'text-lg', lg: 'text-2xl' }[size];
+  // Taller than the old mark at every step: this logo carries the company name
+  // inside the artwork, and below about thirty pixels the words stop being
+  // words.
+  const height = { sm: 30, md: 38, lg: 54 }[size];
+  const width = Math.round(height * RATIO);
 
   return (
-    <span className="inline-flex items-center gap-2.5">
-      <svg
-        width={dimensions}
-        height={dimensions}
-        viewBox="0 0 40 40"
-        fill="none"
-        aria-hidden
-        className="shrink-0"
-      >
-        <rect width="40" height="40" rx="10" fill="url(#sihl-brand)" />
-        {/* An upward step chart — the business is investing, and the mark should
-            say so without needing a caption. */}
-        <path
-          d="M10 27.5V22h4.5v5.5H10Zm7.75 0V17h4.5v10.5h-4.5Zm7.75 0V11.5H30V27.5h-4.5Z"
-          fill="white"
-          fillOpacity="0.95"
-        />
-        <defs>
-          <linearGradient id="sihl-brand" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#0A5281" />
-            <stop offset="0.55" stopColor="#1D8F6A" />
-            <stop offset="1" stopColor="#66BB46" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <span className={`font-extrabold tracking-tight ${textSize} ${inverted ? 'text-white' : ''}`}>
-        SIHL{' '}
-        <span className={inverted ? 'text-brand-green-300' : 'text-teal-600 dark:text-teal-300'}>
-          ONE
-        </span>
-      </span>
+    <span
+      // `w-fit self-start` matters more than it looks: several callers place
+      // this inside a flex column, where a child stretches to full width by
+      // default — turning the plate into a 550-pixel white bar across the navy
+      // panel. Hugging the artwork is the whole point of having a plate.
+      // The dark-mode ring is a `dark:` variant rather than a prop, so callers
+      // do not have to know the theme. `inverted` covers the panels that are
+      // dark in *both* themes, such as the login hero.
+      className={`inline-flex w-fit shrink-0 self-start items-center rounded-lg bg-white px-2 py-1.5 dark:ring-1 dark:ring-white/15 ${
+        inverted ? 'ring-1 ring-white/25' : ''
+      }`}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/sihllogo.jpg"
+        alt="Shah Investor's Home Ltd"
+        width={width}
+        height={height}
+        style={{ height, width }}
+        className="block"
+      />
     </span>
   );
 }
