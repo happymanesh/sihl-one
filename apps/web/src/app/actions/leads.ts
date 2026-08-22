@@ -8,6 +8,7 @@ import {
   convertLeadSchema,
   createActivitySchema,
   createLeadSchema,
+  updateLeadSchema,
   type ProductInterest,
 } from '@sihl-one/contracts';
 
@@ -39,6 +40,102 @@ function zodErrors(issues: Array<{ path: PropertyKey[]; message: string }>) {
   return errors;
 }
 
+/**
+ * Reads the optional client profile out of the form.
+ *
+ * Returns undefined when the section was left untouched, which the API treats
+ * as "this request says nothing about the profile" rather than "clear it" — so
+ * a rep correcting a misspelt surname cannot wipe the income and family
+ * somebody else spent weeks gathering.
+ *
+ * Family rows are read positionally: the five controls in each row post under
+ * the same names, so the nth relation belongs with the nth name. A row whose
+ * fields are all blank is dropped rather than saved as an empty relative.
+ */
+function readProfile(formData: FormData) {
+  const text = (key: string) => {
+    const value = formData.get(`profile.${key}`);
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return trimmed || undefined;
+  };
+
+  const relations = formData.getAll('family.relation').map(String);
+  const names = formData.getAll('family.name').map(String);
+  const occupations = formData.getAll('family.occupation').map(String);
+  const locations = formData.getAll('family.location').map(String);
+  const statuses = formData.getAll('family.maritalStatus').map(String);
+
+  const familyMembers = relations
+    .map((relation, index) => ({
+      relation,
+      name: names[index]?.trim() || undefined,
+      occupation: occupations[index]?.trim() || undefined,
+      location: locations[index]?.trim() || undefined,
+      maritalStatus: statuses[index]?.trim() || undefined,
+    }))
+    .filter((member) => member.name || member.occupation || member.location || member.maritalStatus);
+
+  const investments = formData.getAll('profile.existingInvestments').map(String);
+
+  const profile = {
+    occupation: text('occupation'),
+    companyName: text('companyName'),
+    designation: text('designation'),
+    riskCategory: text('riskCategory'),
+    monthlyIncome: text('monthlyIncome'),
+    annualIncomeBand: text('annualIncomeBand'),
+    monthlySip: text('monthlySip'),
+    monthlyEmi: text('monthlyEmi'),
+    investmentGoal: text('investmentGoal'),
+    existingInvestments: investments.length ? investments : undefined,
+    insuranceCover: text('insuranceCover'),
+    mediclaimBand: text('mediclaimBand'),
+    otherInvestments: text('otherInvestments'),
+    familyMembers: familyMembers.length ? familyMembers : undefined,
+  };
+
+  const touched = Object.values(profile).some((value) => value !== undefined);
+  return touched ? profile : undefined;
+}
+
+/**
+ * Saves the client profile on an existing lead.
+ *
+ * Separate from a general lead edit, which the web app does not offer at all
+ * today. The profile is the part that genuinely accrues over time — occupation
+ * this week, income next month, a daughter's college the month after — so it
+ * gets its own save rather than waiting for an edit screen to exist.
+ */
+export async function updateLeadProfile(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  const profile = readProfile(formData);
+
+  const parsed = updateLeadSchema.safeParse({
+    // An untouched section clears nothing; an emptied one sends explicit blanks.
+    profile: profile ?? {},
+  });
+
+  if (!parsed.success) {
+    return {
+      status: 'error',
+      message: 'Please correct the highlighted fields.',
+      errors: zodErrors(parsed.error.issues),
+    };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}`, { method: 'PATCH', body: parsed.data });
+  } catch (error) {
+    return toErrorState(error, 'The details could not be saved.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  return { status: 'success', message: 'Saved.' };
+}
+
 export async function createLead(_previous: ActionState, formData: FormData): Promise<ActionState> {
   const estimatedValue = formData.get('estimatedValue');
 
@@ -56,6 +153,7 @@ export async function createLead(_previous: ActionState, formData: FormData): Pr
     estimatedValue: estimatedValue ? Number(estimatedValue) : undefined,
     ownerId: formData.get('ownerId') || undefined,
     notes: formData.get('notes') || undefined,
+    profile: readProfile(formData),
   });
 
   if (!parsed.success) {

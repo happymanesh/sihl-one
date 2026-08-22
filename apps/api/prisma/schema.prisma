@@ -221,6 +221,7 @@ model User {
   sessions       Session[]
   ownedLeads     Lead[]     @relation("LeadOwner")
   verifiedLeads  Lead[]     @relation("LeadMobileVerifier")
+  editedProfiles LeadProfile[] @relation("LeadProfileEditor")
   ownedEvents    Event[]    @relation("EventOwner")
   managedCustomers Customer[] @relation("CustomerRM")
   activities     Activity[] @relation("ActivityActor")
@@ -665,6 +666,8 @@ model Lead {
   deletedAt   DateTime?
 
   statusHistory LeadStatusHistory[]
+  profile       LeadProfile?
+  familyMembers LeadFamilyMember[]
   consents      ConsentRecord[]
   importRows    LeadImportRow[]
 
@@ -686,6 +689,69 @@ model Lead {
   @@index([importBatchId])
   @@index([consentStatus])
   @@map("lead")
+}
+
+/// The client profile a rep builds up over time.
+///
+/// Every field is nullable on purpose: a lead starts as a name and a number,
+/// and occupation, income and family arrive over weeks or not at all. Separate
+/// from `lead` because the lead row is read on every list and board, while this
+/// is read when somebody opens one record — and because data this sensitive is
+/// better not carried by the common query.
+///
+/// ADR-0002: this is what a client told a salesperson, not verified financials.
+model LeadProfile {
+  id     String @id @default(cuid())
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  occupation  String? @db.VarChar(120)
+  companyName String? @db.VarChar(160)
+  designation String? @db.VarChar(120)
+
+  /// The client's own sense of it, not a SEBI suitability assessment.
+  riskCategory String? @db.VarChar(10)
+
+  /// Decimal, never Float — these are rupee figures and they get reported on.
+  monthlyIncome    Decimal? @db.Decimal(18, 2)
+  annualIncomeBand String?  @db.VarChar(24)
+  monthlySip       Decimal? @db.Decimal(18, 2)
+  monthlyEmi       Decimal? @db.Decimal(18, 2)
+
+  investmentGoal String? @db.VarChar(400)
+
+  /// Codes, stored the same way productInterest is on Lead.
+  existingInvestments String[]
+  insuranceCover      Decimal? @db.Decimal(18, 2)
+  mediclaimBand       String?  @db.VarChar(24)
+  otherInvestments    String?  @db.VarChar(300)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("LeadProfileEditor", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([annualIncomeBand])
+  @@index([riskCategory])
+  @@map("lead_profile")
+}
+
+/// A person in the client's household.
+model LeadFamilyMember {
+  id     String @id @default(cuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  relation      String  @db.VarChar(16)
+  name          String? @db.VarChar(80)
+  occupation    String? @db.VarChar(80)
+  location      String? @db.VarChar(80)
+  maritalStatus String? @db.VarChar(12)
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@map("lead_family_member")
 }
 
 model LeadStatusHistory {

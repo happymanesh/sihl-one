@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type {
+  LeadProfileView,
   MeetingModeItem,
   MobileVerificationMethod,
   ProductItem,
@@ -11,6 +12,7 @@ import { DocumentPanel } from '@/components/documents/DocumentPanel';
 import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
 import { Timeline } from '@/components/leads/Timeline';
+import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
 import { apiFetch } from '@/lib/api';
 import { can, requireUser } from '@/lib/auth';
@@ -32,6 +34,7 @@ interface LeadDetail {
   source: string;
   priority: string;
   productInterest: string[];
+  profile: LeadProfileView | null;
   estimatedValue: string | null;
   score: number;
   scoreBand: string;
@@ -233,6 +236,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             voiceInputEnabled={voiceInputEnabled()}
             meetingModes={meetingModes}
             products={products}
+          />
+
+          <LeadProfilePanel
+            leadId={lead.id}
+            profile={lead.profile}
+            canEdit={can(user, 'lead:update')}
           />
 
           <DocumentPanel

@@ -21,6 +21,8 @@ import {
   type LeadListItem,
   type LeadQuery,
   type LeadStatus,
+  type LeadProfileInput,
+  type LeadProfileView,
   type UpdateLeadInput,
   type VerifyLeadMobileInput,
 } from '@sihl-one/contracts';
@@ -31,6 +33,7 @@ import { ReferenceService } from '../../common/reference.service';
 import { ScopeService } from '../../common/scope.service';
 import { RequestContextStore } from '../../common/request-context';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
+import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CaptureCodeService } from '../events/capture-code.service';
 import { MastersService } from '../masters/masters.service';
@@ -191,6 +194,8 @@ export class LeadsService {
         statusHistory: { orderBy: { changedAt: 'desc' }, take: 50 },
         customer: { select: { id: true, reference: true, clientCode: true } },
         mobileVerifiedBy: { select: { id: true, firstName: true, lastName: true } },
+        profile: true,
+        familyMembers: { orderBy: { createdAt: 'asc' } },
       },
     });
 
@@ -240,6 +245,7 @@ export class LeadsService {
               `${lead.mobileVerifiedBy.firstName} ${lead.mobileVerifiedBy.lastName}`.trim(),
           }
         : null,
+      profile: this.toProfileView(lead.profile, lead.familyMembers),
       email: lead.email,
       panMasked: maskPan(lead.pan),
       city: lead.city,
@@ -378,6 +384,8 @@ export class LeadsService {
       await tx.leadStatusHistory.create({
         data: { leadId: created.id, fromStatus: null, toStatus: 'NEW', changedById: user.id },
       });
+
+      await this.writeProfile(tx, created.id, user.id, input.profile);
 
       if (input.notes) {
         await tx.activity.create({
@@ -584,7 +592,9 @@ export class LeadsService {
       });
     }
 
-    const { status, attribution, notes, ...rest } = input;
+    // `profile` is written separately, to its own table — it must not reach the
+    // lead row's update payload.
+    const { status, attribution, notes, profile: _profile, ...rest } = input;
     if (status && status !== before.status) {
       throw new BadRequestException({
         title: 'Use the status endpoint',
@@ -614,6 +624,10 @@ export class LeadsService {
             }),
       },
     });
+
+    if (input.profile) {
+      await this.writeProfile(this.prisma, id, user.id, input.profile);
+    }
 
     if (!keepsVerification && before.mobileVerifiedAt) {
       // Recorded separately from the edit itself: losing a verification is the
@@ -1215,6 +1229,137 @@ export class LeadsService {
     });
 
     return this.findOne(user, id);
+  }
+
+  /**
+   * Writes the client profile, if one was supplied.
+   *
+   * Absent means "this request said nothing about the profile", which must not
+   * be confused with "clear it" — a rep editing a lead's city would otherwise
+   * wipe the income and family somebody else spent weeks gathering. Only fields
+   * actually present are written.
+   *
+   * The household is replaced wholesale rather than diffed. A family is a short
+   * list edited as a unit; matching rows by identity would buy nothing and
+   * would leave orphans whenever somebody reordered them.
+   */
+  private async writeProfile(
+    tx: Prisma.TransactionClient,
+    leadId: string,
+    userId: string,
+    profile: LeadProfileInput | undefined,
+  ): Promise<void> {
+    if (!profile) return;
+
+    const { familyMembers, ...fields } = profile;
+
+    const hasProfileFields = Object.values(fields).some(
+      (value) => value !== undefined && !(Array.isArray(value) && value.length === 0),
+    );
+
+    if (hasProfileFields) {
+      const data = {
+        occupation: fields.occupation ?? null,
+        companyName: fields.companyName ?? null,
+        designation: fields.designation ?? null,
+        riskCategory: fields.riskCategory ?? null,
+        monthlyIncome: fields.monthlyIncome ?? null,
+        annualIncomeBand: fields.annualIncomeBand ?? null,
+        monthlySip: fields.monthlySip ?? null,
+        monthlyEmi: fields.monthlyEmi ?? null,
+        investmentGoal: fields.investmentGoal ?? null,
+        existingInvestments: fields.existingInvestments ?? [],
+        insuranceCover: fields.insuranceCover ?? null,
+        mediclaimBand: fields.mediclaimBand ?? null,
+        otherInvestments: fields.otherInvestments ?? null,
+        updatedById: userId,
+      };
+
+      await tx.leadProfile.upsert({
+        where: { leadId },
+        create: { leadId, ...data },
+        update: data,
+      });
+    }
+
+    if (familyMembers) {
+      await tx.leadFamilyMember.deleteMany({ where: { leadId } });
+      if (familyMembers.length > 0) {
+        await tx.leadFamilyMember.createMany({
+          data: familyMembers.map((member) => ({
+            leadId,
+            relation: member.relation,
+            name: member.name ?? null,
+            occupation: member.occupation ?? null,
+            location: member.location ?? null,
+            maritalStatus: member.maritalStatus ?? null,
+          })),
+        });
+      }
+    }
+  }
+
+  /** Shapes the stored profile for the wire. Money leaves as strings. */
+  private toProfileView(
+    profile: {
+      occupation: string | null;
+      companyName: string | null;
+      designation: string | null;
+      riskCategory: string | null;
+      monthlyIncome: unknown;
+      annualIncomeBand: string | null;
+      monthlySip: unknown;
+      monthlyEmi: unknown;
+      investmentGoal: string | null;
+      existingInvestments: string[];
+      insuranceCover: unknown;
+      mediclaimBand: string | null;
+      otherInvestments: string | null;
+      updatedAt: Date;
+    } | null,
+    family: Array<{
+      id: string;
+      relation: string;
+      name: string | null;
+      occupation: string | null;
+      location: string | null;
+      maritalStatus: string | null;
+    }>,
+  ): LeadProfileView | null {
+    if (!profile && family.length === 0) return null;
+
+    // Two decimals forced: String(Decimal) drops a trailing zero, so 45000.50
+    // would come back as '45000.5' — right as a number, wrong on a page of
+    // money.
+    const money = (value: unknown): string | null =>
+      value === null || value === undefined ? null : (value as { toFixed(n: number): string }).toFixed(2);
+
+    return {
+      occupation: profile?.occupation ?? null,
+      companyName: profile?.companyName ?? null,
+      designation: profile?.designation ?? null,
+      riskCategory: (profile?.riskCategory as LeadProfileView['riskCategory']) ?? null,
+      monthlyIncome: money(profile?.monthlyIncome),
+      annualIncomeBand: (profile?.annualIncomeBand as LeadProfileView['annualIncomeBand']) ?? null,
+      monthlySip: money(profile?.monthlySip),
+      monthlyEmi: money(profile?.monthlyEmi),
+      investmentGoal: profile?.investmentGoal ?? null,
+      existingInvestments: (profile?.existingInvestments ??
+        []) as LeadProfileView['existingInvestments'],
+      insuranceCover: money(profile?.insuranceCover),
+      mediclaimBand: (profile?.mediclaimBand as LeadProfileView['mediclaimBand']) ?? null,
+      otherInvestments: profile?.otherInvestments ?? null,
+      familyMembers: family.map((member) => ({
+        id: member.id,
+        relation: member.relation as LeadProfileView['familyMembers'][number]['relation'],
+        name: member.name,
+        occupation: member.occupation,
+        location: member.location,
+        maritalStatus:
+          member.maritalStatus as LeadProfileView['familyMembers'][number]['maritalStatus'],
+      })),
+      updatedAt: profile?.updatedAt?.toISOString() ?? null,
+    };
   }
 
   private async mustFindInScope(user: AuthenticatedPrincipal, id: string) {

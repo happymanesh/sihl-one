@@ -1,4 +1,6 @@
 import { z } from 'zod';
+
+import { leadProfileSchema } from './lead-profile';
 import {
   LEAD_LOST_REASONS,
   LEAD_STATUSES,
@@ -65,6 +67,12 @@ export const createLeadSchema = z.object({
   campaignId: idSchema.optional(),
   attribution: attributionSchema.optional(),
   notes: z.string().trim().max(2000).optional(),
+  /**
+   * The client profile — occupation, income, holdings, family. Entirely
+   * optional: a lead usually starts as a name and a number, and the rest
+   * arrives over weeks if at all.
+   */
+  profile: leadProfileSchema.optional(),
 });
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
 
