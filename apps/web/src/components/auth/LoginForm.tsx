@@ -44,7 +44,7 @@ export function LoginForm({ next }: { next?: string }) {
 
       <div>
         <label className="label" htmlFor="identifier">
-          Email or mobile
+          Email, mobile or code
         </label>
         <input
           id="identifier"
@@ -55,8 +55,14 @@ export function LoginForm({ next }: { next?: string }) {
           autoComplete="username"
           autoCapitalize="none"
           spellCheck={false}
+          aria-describedby="identifier-hint"
           aria-invalid={state.status === 'error'}
         />
+        {/* Partners were told to use their back-office code and would otherwise
+            hunt for an email address they were never issued. */}
+        <p id="identifier-hint" className="mt-1 text-xs text-[var(--color-text-subtle)]">
+          Staff can use their employee code, partners their partner code.
+        </p>
       </div>
 
       <div>

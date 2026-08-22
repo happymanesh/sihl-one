@@ -50,7 +50,9 @@ export async function createUser(
   const parsed = createUserSchema.safeParse({
     firstName: formData.get('firstName'),
     lastName: formData.get('lastName'),
-    email: formData.get('email'),
+    // Blank means "generate one", which the schema allows and the server does.
+    email: formData.get('email') || undefined,
+    userType: formData.get('userType') || undefined,
     mobile: formData.get('mobile') || undefined,
     employeeCode: formData.get('employeeCode') || undefined,
     designationId: formData.get('designationId'),

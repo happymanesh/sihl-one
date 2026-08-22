@@ -65,11 +65,19 @@ export class AuthService {
 
   async login(input: LoginInput): Promise<LoginResponse | MfaChallengeResponse> {
     const identifier = input.identifier.trim().toLowerCase();
+    // Employee codes are stored uppercase (SIHL-0001, R0018). Without this the
+    // lowercasing above — which email and mobile need — would mean a code
+    // typed exactly as it appears on someone's ID card never matches.
+    const asCode = input.identifier.trim().toUpperCase();
 
     const user = await this.prisma.user.findFirst({
       where: {
         deletedAt: null,
-        OR: [{ email: identifier }, { mobile: identifier.replace(/^(\+91|91|0)/, '') }],
+        OR: [
+          { email: identifier },
+          { mobile: identifier.replace(/^(\+91|91|0)/, '') },
+          { employeeCode: asCode },
+        ],
       },
       include: {
         roles: { include: { role: true } },

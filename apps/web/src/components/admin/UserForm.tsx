@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { ROLES, type DesignationSummary } from '@sihl-one/contracts';
+import { ROLES, suggestWorkEmail, type DesignationSummary } from '@sihl-one/contracts';
 
 import { createUser, updateUser, type UserFormState } from '@/app/actions/users';
 import { humanise } from '@/lib/format';
@@ -21,6 +21,7 @@ export interface UserFormValues {
   email?: string;
   mobile?: string | null;
   employeeCode?: string | null;
+  userType?: string;
   designationId?: string | null;
   orgUnitId?: string | null;
   managerId?: string | null;
@@ -69,6 +70,23 @@ export function UserForm({
 }) {
   const [state, action] = useActionState(mode === 'create' ? createUser : updateUser, INITIAL);
   const [designationId, setDesignationId] = useState(values?.designationId ?? '');
+  const [userType, setUserType] = useState(values?.userType ?? 'INTERNAL');
+  const [firstName, setFirstName] = useState(values?.firstName ?? '');
+  const [lastName, setLastName] = useState(values?.lastName ?? '');
+  const [email, setEmail] = useState(values?.email ?? '');
+  const [emailEdited, setEmailEdited] = useState(mode === 'edit');
+
+  // Staff get an address built from their name; partners keep their own, so
+  // there is nothing to suggest for them.
+  const suggestsEmail = mode === 'create' && userType === 'INTERNAL';
+
+  useEffect(() => {
+    if (!suggestsEmail || emailEdited) return;
+    // Uniqueness is settled by the server, which can see every address already
+    // issued. This is the shape, shown early so the administrator can object to
+    // it before the account exists.
+    setEmail(suggestWorkEmail(firstName, lastName) ?? '');
+  }, [firstName, lastName, suggestsEmail, emailEdited]);
   const [managers, setManagers] = useState<Array<{ id: string; fullName: string; designation: string | null }>>([]);
   const [loadingManagers, setLoadingManagers] = useState(false);
 
@@ -121,6 +139,42 @@ export function UserForm({
         </div>
       ) : null}
 
+      {mode === 'create' ? (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-bold">Who is this login for?</legend>
+          <input type="hidden" name="userType" value={userType} />
+          <div className="flex gap-2">
+            {(
+              [
+                ['INTERNAL', 'SIHL employee'],
+                ['PARTNER', 'Associate partner'],
+              ] as const
+            ).map(([value, label]) => (
+              <label
+                key={value}
+                className="flex-1 cursor-pointer rounded-lg border border-[var(--color-border-strong)] px-3 py-2 text-center text-sm font-semibold transition-colors has-[:checked]:border-navy-500 has-[:checked]:bg-navy-500 has-[:checked]:text-white"
+              >
+                <input
+                  type="radio"
+                  name="userTypeChoice"
+                  value={value}
+                  checked={userType === value}
+                  onChange={() => setUserType(value)}
+                  aria-label={label}
+                  className="sr-only"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-[var(--color-text-subtle)]">
+            {userType === 'INTERNAL'
+              ? 'Gets an @sihl.in address and an employee code, both generated below.'
+              : 'Signs in with their own email and the partner code from the back office.'}
+          </p>
+        </fieldset>
+      ) : null}
+
       <fieldset className="space-y-3">
         <legend className="text-sm font-bold">Person</legend>
 
@@ -135,6 +189,7 @@ export function UserForm({
               className="input"
               required
               defaultValue={values?.firstName ?? ''}
+              onChange={(event) => setFirstName(event.target.value)}
             />
             <FieldError errors={state.errors?.firstName} />
           </div>
@@ -148,6 +203,7 @@ export function UserForm({
               className="input"
               required
               defaultValue={values?.lastName ?? ''}
+              onChange={(event) => setLastName(event.target.value)}
             />
             <FieldError errors={state.errors?.lastName} />
           </div>
@@ -163,14 +219,27 @@ export function UserForm({
               name="email"
               type="email"
               className="input"
-              required
-              defaultValue={values?.email ?? ''}
+              required={!suggestsEmail}
+              value={mode === 'edit' ? undefined : email}
+              defaultValue={mode === 'edit' ? (values?.email ?? '') : undefined}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                // Once an administrator types their own address, stop
+                // overwriting it from the name. Silently correcting somebody's
+                // deliberate edit is worse than not suggesting at all.
+                setEmailEdited(true);
+              }}
               // Changing the sign-in identity of an existing account is an
               // identity operation, not a profile edit — it belongs with a
               // verification step rather than in this form.
               readOnly={mode === 'edit'}
               disabled={mode === 'edit'}
             />
+            {suggestsEmail && !emailEdited && email ? (
+              <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                Generated from the name. Type over it if this person needs a different address.
+              </p>
+            ) : null}
             <FieldError errors={state.errors?.email} />
           </div>
           <div>
@@ -188,15 +257,27 @@ export function UserForm({
           </div>
           <div>
             <label className="label" htmlFor="employeeCode">
-              Employee code
+              {userType === 'PARTNER' ? (
+                <>
+                  Partner code <span className="text-danger-500">*</span>
+                </>
+              ) : (
+                'Employee code'
+              )}
             </label>
             <input
               id="employeeCode"
               name="employeeCode"
               className="input font-mono uppercase"
-              placeholder="SIHL-0421"
+              placeholder={userType === 'PARTNER' ? 'R0018' : 'Generated'}
+              required={userType === 'PARTNER'}
               defaultValue={values?.employeeCode ?? ''}
             />
+            <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+              {userType === 'PARTNER'
+                ? 'The code the back office already issued this partner.'
+                : 'Leave blank to generate the next one, SIHL-0001 onwards.'}
+            </p>
             <FieldError errors={state.errors?.employeeCode} />
           </div>
         </div>

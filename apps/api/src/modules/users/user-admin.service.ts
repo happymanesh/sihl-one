@@ -4,9 +4,12 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import {
   canGrantRoles,
   canManageUserAt,
+  formatStaffCode,
   ROLE_PERMISSIONS,
   scopeForDesignation,
+  suggestWorkEmail,
   validateReportingLine,
+  WORK_EMAIL_DOMAIN,
   type ActorContext,
   type CreateDesignationInput,
   type CreateUserInput,
@@ -170,6 +173,16 @@ export class UserAdminService {
 
     if (input.employeeCode) await this.assertEmployeeCodeFree(input.employeeCode);
 
+    // Staff get a generated code; partners bring the one the back office
+    // already issued, which the schema makes mandatory for them.
+    const employeeCode =
+      input.employeeCode ??
+      (input.userType === 'INTERNAL'
+        ? await this.generateStaffCode()
+        : null);
+
+    const email = input.email ?? (await this.generateWorkEmail(input.firstName, input.lastName));
+
     const reference = await this.references.next('US');
 
     // No password is set. The account is INVITED until an administrator issues
@@ -180,9 +193,9 @@ export class UserAdminService {
         reference,
         firstName: input.firstName,
         lastName: input.lastName,
-        email: input.email,
+        email,
         mobile: input.mobile ?? null,
-        employeeCode: input.employeeCode ?? null,
+        employeeCode,
         designationId: designation.id,
         orgUnitId: orgUnit.id,
         managerId: input.managerId ?? null,
@@ -458,6 +471,68 @@ export class UserAdminService {
     if (!result.allowed) {
       throw new BadRequestException({ title: 'Invalid reporting line', detail: result.reason });
     }
+  }
+
+  /**
+   * The next free staff code.
+   *
+   * The counter is atomic, but a code can still be taken — an administrator may
+   * have typed SIHL-0007 by hand for somebody. So the counter is advanced until
+   * a free code appears rather than trusting it blindly; skipping a number
+   * costs nothing, and a duplicate employee code costs an afternoon.
+   */
+  private async generateStaffCode(): Promise<string> {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const code = formatStaffCode(await this.references.nextStaffCode());
+      const taken = await this.prisma.user.findFirst({
+        where: { employeeCode: code, deletedAt: null },
+        select: { id: true },
+      });
+      if (!taken) return code;
+    }
+
+    throw new BadRequestException({
+      title: 'Could not allocate an employee code',
+      detail: 'Enter one manually. The generated sequence is colliding with codes already in use.',
+    });
+  }
+
+  /**
+   * firstname.lastname@sihl.in, avoiding addresses already issued.
+   *
+   * Soft-deleted users are included in the check on purpose: their address is
+   * still theirs in every system that ever received mail from it, and handing
+   * it to a new joiner would deliver a departed colleague's replies to them.
+   */
+  private async generateWorkEmail(firstName: string, lastName: string): Promise<string> {
+    const suggested = suggestWorkEmail(firstName, lastName, []);
+    if (!suggested) {
+      throw new BadRequestException({
+        title: 'Could not build an email address',
+        detail: 'That name has no letters to build an address from. Enter the address directly.',
+      });
+    }
+
+    const local = suggested.slice(0, suggested.indexOf('@'));
+    const existing = await this.prisma.user.findMany({
+      where: { email: { startsWith: local, endsWith: `@${WORK_EMAIL_DOMAIN}` } },
+      select: { email: true },
+    });
+
+    const email = suggestWorkEmail(
+      firstName,
+      lastName,
+      existing.map((row) => row.email),
+    );
+
+    if (!email) {
+      throw new BadRequestException({
+        title: 'Could not build an email address',
+        detail: 'Too many people share this name. Enter the address directly.',
+      });
+    }
+
+    return email;
   }
 
   private async assertEmployeeCodeFree(code: string, exceptUserId?: string): Promise<void> {

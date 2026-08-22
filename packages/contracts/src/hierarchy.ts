@@ -79,12 +79,90 @@ export const employeeCodeSchema = z
   .max(24)
   .regex(/^[A-Z0-9][A-Z0-9/-]*$/, 'Use letters, digits, hyphens and slashes only');
 
+// ---------------------------------------------------------------------------
+// Generated identity
+
+/** Where staff email lives. Partners keep their own address. */
+export const WORK_EMAIL_DOMAIN = 'sihl.in';
+
+/** Prefix for generated staff codes: SIHL-0001. */
+export const STAFF_CODE_PREFIX = 'SIHL';
+
+export function formatStaffCode(sequence: number): string {
+  return `${STAFF_CODE_PREFIX}-${String(sequence).padStart(4, '0')}`;
+}
+
+/**
+ * The local part of a work address, from a person's name.
+ *
+ * Strips accents and anything that is not a letter or digit, because an address
+ * has to survive being read down a phone line and typed by someone else.
+ * Multi-word names close up rather than growing more dots: "Anita Rani Sharma"
+ * is anita.ranisharma, not anita.rani.sharma, so the shape stays predictable.
+ */
+function emailLocalPart(firstName: string, lastName: string): string {
+  const clean = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const first = clean(firstName);
+  const last = clean(lastName);
+
+  if (!first && !last) return '';
+  if (!last) return first;
+  if (!first) return last;
+  return `${first}.${last}`;
+}
+
+/**
+ * A work address for a new joiner, avoiding ones already issued.
+ *
+ * Collisions are real — SIHL will hire a second Rahul Mehta — so the caller
+ * passes the addresses already in use and gets the first free variant:
+ * rahul.mehta, then rahul.mehta2, rahul.mehta3. Deliberately not
+ * rahul.mehta1: the first person of a name has no numeral, and starting at 2
+ * keeps that true.
+ *
+ * Returns null when the name yields nothing usable, so the caller asks rather
+ * than inventing an address like `@sihl.in` with an empty local part.
+ */
+export function suggestWorkEmail(
+  firstName: string,
+  lastName: string,
+  taken: readonly string[] = [],
+): string | null {
+  const local = emailLocalPart(firstName, lastName);
+  if (!local) return null;
+
+  const used = new Set(taken.map((value) => value.trim().toLowerCase()));
+
+  for (let suffix = 0; suffix < 100; suffix += 1) {
+    const candidate = `${local}${suffix === 0 ? '' : suffix + 1}@${WORK_EMAIL_DOMAIN}`;
+    if (!used.has(candidate)) return candidate;
+  }
+
+  // A hundred people sharing one name is not a naming problem any more.
+  return null;
+}
+
 export const createUserSchema = z.object({
   firstName: z.string().trim().min(1).max(60),
   lastName: z.string().trim().min(1).max(60),
-  email: emailSchema,
+  /**
+   * Optional for staff: left out, the server generates
+   * firstname.lastname@sihl.in. Partners must supply their own address —
+   * they are not SIHL staff and do not get SIHL mail.
+   */
+  email: emailSchema.optional(),
   mobile: indianMobileSchema.optional(),
-  /** Optional until the HR feed exists; unique across the company when present. */
+  /**
+   * Generated for staff (SIHL-0001) when absent. Required for partners, where
+   * it is the code the back office already issued them — see the refinement
+   * below for why it is not generated on their behalf.
+   */
   employeeCode: employeeCodeSchema.optional(),
   designationId: idSchema,
   roleCodes: z.array(z.enum(ROLES)).min(1, 'Choose at least one role').max(4),
@@ -97,7 +175,30 @@ export const createUserSchema = z.object({
    */
   dataScope: z.enum(DATA_SCOPES).optional(),
   userType: z.enum(USER_TYPES).default('INTERNAL'),
-});
+})
+  .superRefine((input, ctx) => {
+    if (input.userType !== 'PARTNER') return;
+
+    // A partner already has an identity in the back office, where brokerage and
+    // payouts are actually recorded. Minting a second one here would create two
+    // codes for one firm that somebody has to reconcile by hand every time a
+    // number is questioned.
+    if (!input.employeeCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the partner's code from the back office, for example R0018.",
+        path: ['employeeCode'],
+      });
+    }
+
+    if (!input.email) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Partners sign in with their own email address, so it has to be entered.',
+        path: ['email'],
+      });
+    }
+  });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
 export const updateUserSchema = z.object({

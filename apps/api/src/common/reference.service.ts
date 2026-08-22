@@ -36,4 +36,27 @@ export class ReferenceService {
     const value = rows[0]?.value ?? 1;
     return `${prefix}-${year}-${String(value).padStart(6, '0')}`;
   }
+
+  /**
+   * The next staff code: SIHL-0001.
+   *
+   * Deliberately not year-scoped, unlike every reference above. A lead
+   * reference restarting each January is useful; an employee number restarting
+   * each January would hand a new joiner the code of somebody who left, and
+   * that number appears on their login, their records and other people's
+   * memories of them.
+   *
+   * Uses the same atomic counter row, so two administrators creating a user at
+   * the same moment cannot receive the same code.
+   */
+  async nextStaffCode(): Promise<number> {
+    const rows = await this.prisma.$queryRaw<Array<{ value: number }>>`
+      INSERT INTO "counter" ("key", "value", "updatedAt")
+      VALUES ('STAFF-CODE', 1, NOW())
+      ON CONFLICT ("key")
+      DO UPDATE SET "value" = "counter"."value" + 1, "updatedAt" = NOW()
+      RETURNING "value"
+    `;
+    return rows[0]?.value ?? 1;
+  }
 }
