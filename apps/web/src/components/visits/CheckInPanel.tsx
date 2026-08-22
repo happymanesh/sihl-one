@@ -9,6 +9,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { checkInVisit, checkOutVisit, type VisitActionState } from '@/app/actions/visits';
+import { VoiceInputButton } from '@/components/leads/VoiceInputButton';
 import { CameraCapture } from './CameraCapture';
 
 const INITIAL: VisitActionState = { status: 'idle' };
@@ -333,10 +334,17 @@ export function CheckInPanel({
 export function CheckOutPanel({
   visitId,
   expectsLocation,
+  voiceInputEnabled = false,
 }: {
   visitId: string;
   /** See CheckInPanel: no prompt where the mode expects no location. */
   expectsLocation: boolean;
+  /**
+   * Dictation for the meeting notes. Same control as the interaction form, and
+   * arguably needed more here: this is typed standing outside a client's office
+   * on a phone, not at a desk.
+   */
+  voiceInputEnabled?: boolean;
 }) {
   const router = useRouter();
   const [state, action] = useActionState(checkOutVisit, INITIAL);
@@ -381,9 +389,12 @@ export function CheckOutPanel({
       ) : null}
 
       <div>
-        <label className="label" htmlFor="meetingNotes">
-          What was discussed? <span className="text-danger-500">*</span>
-        </label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="label" htmlFor="meetingNotes">
+            What was discussed? <span className="text-danger-500">*</span>
+          </label>
+          <VoiceInputButton enabled={voiceInputEnabled} />
+        </div>
         <textarea
           id="meetingNotes"
           name="meetingNotes"

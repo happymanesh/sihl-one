@@ -161,7 +161,11 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
         <section className="card p-5">
           <h2 className="font-bold">Check out</h2>
           <div className="mt-4">
-            <CheckOutPanel visitId={visit.id} expectsLocation={visit.evidence?.geo ?? true} />
+            <CheckOutPanel
+              visitId={visit.id}
+              expectsLocation={visit.evidence?.geo ?? true}
+              voiceInputEnabled={process.env.VOICE_INPUT_ENABLED === 'true'}
+            />
           </div>
         </section>
       ) : null}
