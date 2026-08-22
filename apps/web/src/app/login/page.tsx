@@ -71,6 +71,13 @@ export default async function LoginPage({
             >
               Your session expired. Please sign in again.
             </div>
+          ) : reason === 'password-changed' ? (
+            <div
+              className="mt-5 rounded-lg border border-teal-500/40 bg-teal-50 px-3 py-2 text-sm text-teal-700 dark:bg-teal-900/30 dark:text-teal-200"
+              role="status"
+            >
+              Your password has been changed. Sign in with the new one.
+            </div>
           ) : reason === 'unavailable' ? (
             <div
               className="mt-5 rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/15"

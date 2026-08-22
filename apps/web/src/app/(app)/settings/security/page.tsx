@@ -1,6 +1,7 @@
 import type { MfaSetupResponse, MfaStatus } from '@sihl-one/contracts';
 
 import { MfaPanel } from '@/components/settings/MfaPanel';
+import { PasswordPanel } from '@/components/settings/PasswordPanel';
 import { QrCode } from '@/components/ui/QrCode';
 import { apiFetch } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
@@ -25,6 +26,8 @@ export default async function SecurityPage() {
           {user.email}
         </p>
       </header>
+
+      <PasswordPanel />
 
       <MfaPanel
         status={status}
