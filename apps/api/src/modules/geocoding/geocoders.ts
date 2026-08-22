@@ -128,13 +128,14 @@ export class MapplsGeocoder implements Geocoder {
     if (!first) return null;
 
     const formatted = first.formatted_address ?? first.formattedAddress ?? first.address;
-    if (typeof formatted === 'string' && formatted.trim()) return formatted.trim();
+    if (typeof formatted === 'string' && formatted.trim()) return tidy(formatted);
 
-    const parts = ['house_number', 'street', 'subLocality', 'locality', 'city', 'state', 'pincode']
+    // Field names verified against a live response: camelCase, not snake_case.
+    const parts = ['houseNumber', 'houseName', 'street', 'subLocality', 'locality', 'city', 'state', 'pincode']
       .map((field) => first[field])
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 
-    return parts.length ? parts.join(', ') : null;
+    return parts.length ? tidy(parts.join(', ')) : null;
   }
 
   private remember(key: string, address: string | null): void {
@@ -188,4 +189,18 @@ export class MapplsGeocoder implements Geocoder {
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * Trims noise from a provider address before it is stamped on a photo.
+ *
+ * Mappls ends every Indian address with "(India)", which costs a line of a
+ * stamp that sits on evidence of a visit inside India. The country is the one
+ * part of the address nobody needed to be told.
+ */
+function tidy(address: string): string {
+  return address
+    .replace(/\s*\(India\)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

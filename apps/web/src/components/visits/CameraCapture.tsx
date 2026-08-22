@@ -336,14 +336,15 @@ function stampLines(stamp: CameraStamp): string[] {
 }
 
 /**
- * Splits a long address across at most two lines.
+ * Splits a long address across a few lines.
  *
- * Indian addresses routinely run past eighty characters, and a single line
- * would either overflow the frame or shrink the type past reading. Two lines is
- * the limit: beyond that the stamp starts covering the premises it is evidence
- * of.
+ * Sized against a real one: "Ellis Bridge Road, Swami Vivekanand Chowk, Ellis
+ * Bridge, Ahmedabad, Gujarat. Pin-380006" is 87 characters, and an earlier
+ * limit of two lines of 42 would have silently cut the pincode off. Three lines
+ * of 52 covers what the provider actually returns; beyond that the stamp starts
+ * covering the premises it is evidence of.
  */
-function wrapAddress(address: string, perLine = 42): string[] {
+function wrapAddress(address: string, perLine = 52, maxLines = 3): string[] {
   const words = address.split(/\s+/);
   const lines: string[] = [];
   let current = '';
@@ -354,12 +355,12 @@ function wrapAddress(address: string, perLine = 42): string[] {
     else {
       lines.push(current);
       current = word;
-      if (lines.length === 2) break;
+      if (lines.length === maxLines) break;
     }
   }
 
-  if (lines.length < 2 && current) lines.push(current);
-  return lines.slice(0, 2);
+  if (lines.length < maxLines && current) lines.push(current);
+  return lines.slice(0, maxLines);
 }
 
 function drawStamp(
