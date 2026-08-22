@@ -5,6 +5,7 @@ import { Global, Module } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration';
 import { FilesController } from './files.controller';
 import { LocalStorageDriver } from './local-storage.driver';
+import { ClamAvFileScanner } from './clamav.scanner';
 import { NoopFileScanner, PermissiveFileScanner } from './scanners';
 import { StorageService } from './storage.service';
 import { FILE_SCANNER, STORAGE_DRIVER } from './storage.types';
@@ -30,10 +31,22 @@ import { FILE_SCANNER, STORAGE_DRIVER } from './storage.types';
     {
       provide: FILE_SCANNER,
       inject: [APP_CONFIG],
-      useFactory: (config: AppConfig) =>
-        config.storage.scannerMode === 'permissive'
-          ? new PermissiveFileScanner()
-          : new NoopFileScanner(),
+      useFactory: (config: AppConfig) => {
+        switch (config.storage.scannerMode) {
+          case 'clamav':
+            // The host is guaranteed by the configuration validator, which
+            // refuses this mode without one.
+            return new ClamAvFileScanner(
+              config.storage.clamav.host!,
+              config.storage.clamav.port,
+              config.storage.clamav.timeoutMs,
+            );
+          case 'permissive':
+            return new PermissiveFileScanner();
+          default:
+            return new NoopFileScanner();
+        }
+      },
     },
     StorageService,
   ],

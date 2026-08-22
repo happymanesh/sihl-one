@@ -50,6 +50,19 @@ const envSchema = z
       .default('false')
       .transform((value) => value === 'true'),
     FILE_SCANNER_MODE: z.enum(['noop', 'permissive', 'clamav']).default('noop'),
+    /**
+     * Where clamd listens. On Railway this is the private hostname of the
+     * ClamAV service, which is not reachable from the public internet — the
+     * scanner must never be exposed, since it accepts arbitrary bytes.
+     */
+    CLAMAV_HOST: z.string().min(1).optional(),
+    CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).default(3310),
+    /**
+     * clamd loads its signature database at startup and refuses connections
+     * until it is ready, which takes tens of seconds after a deploy. This has
+     * to outlast that without holding a request thread indefinitely.
+     */
+    CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
 
     OUTBOX_RELAY_ENABLED: z
       .enum(['true', 'false'])
@@ -62,6 +75,17 @@ const envSchema = z
     SEED_PASSWORD: z.string().optional(),
   })
   .superRefine((env, ctx) => {
+    // Checked in every environment: a scanner that cannot be reached marks
+    // every upload FAILED, and that should be a boot error, not a mystery
+    // discovered by a user who cannot download their own document.
+    if (env.FILE_SCANNER_MODE === 'clamav' && !env.CLAMAV_HOST) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'FILE_SCANNER_MODE=clamav requires CLAMAV_HOST.',
+        path: ['CLAMAV_HOST'],
+      });
+    }
+
     if (env.NODE_ENV !== 'production') return;
 
     // Production-only checks. These are the mistakes that actually happen: a
@@ -162,6 +186,7 @@ export interface AppConfig {
     localRoot: string;
     localDurable: boolean;
     scannerMode: Env['FILE_SCANNER_MODE'];
+    clamav: { host: string | undefined; port: number; timeoutMs: number };
   };
   outbox: {
     enabled: boolean;
@@ -200,6 +225,11 @@ export function buildAppConfig(env: Env): AppConfig {
       localRoot: env.STORAGE_LOCAL_ROOT,
       localDurable: env.STORAGE_LOCAL_DURABLE,
       scannerMode: env.FILE_SCANNER_MODE,
+      clamav: {
+        host: env.CLAMAV_HOST,
+        port: env.CLAMAV_PORT,
+        timeoutMs: env.CLAMAV_TIMEOUT_MS,
+      },
     },
     outbox: {
       enabled: env.OUTBOX_RELAY_ENABLED,

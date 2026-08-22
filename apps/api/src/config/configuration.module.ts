@@ -28,6 +28,10 @@ import { APP_CONFIG, buildAppConfig, validateEnv, type AppConfig, type Env } fro
       inject: [ConfigService],
       useFactory: (config: ConfigService): AppConfig => {
         const read = <K extends keyof Env>(key: K): Env[K] => config.getOrThrow(key as string);
+        // Optional keys: getOrThrow would turn "not set" into a boot failure,
+        // and these are legitimately absent unless the feature is switched on.
+        const readOptional = <K extends keyof Env>(key: K): Env[K] | undefined =>
+          config.get(key as string);
         return buildAppConfig({
           NODE_ENV: read('NODE_ENV'),
           DATABASE_URL: read('DATABASE_URL'),
@@ -51,6 +55,9 @@ import { APP_CONFIG, buildAppConfig, validateEnv, type AppConfig, type Env } fro
           STORAGE_LOCAL_ROOT: read('STORAGE_LOCAL_ROOT'),
           STORAGE_LOCAL_DURABLE: read('STORAGE_LOCAL_DURABLE'),
           FILE_SCANNER_MODE: read('FILE_SCANNER_MODE'),
+          CLAMAV_HOST: readOptional('CLAMAV_HOST'),
+          CLAMAV_PORT: read('CLAMAV_PORT'),
+          CLAMAV_TIMEOUT_MS: read('CLAMAV_TIMEOUT_MS'),
           OUTBOX_RELAY_ENABLED: read('OUTBOX_RELAY_ENABLED'),
           OUTBOX_RELAY_INTERVAL_MS: read('OUTBOX_RELAY_INTERVAL_MS'),
           OUTBOX_RELAY_BATCH_SIZE: read('OUTBOX_RELAY_BATCH_SIZE'),
