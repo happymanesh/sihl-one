@@ -90,21 +90,30 @@ export default async function TasksPage({
           />
         </div>
       ) : (
+        // Two groups rather than five siblings in one wrapping row. The title
+        // used to sit in a `flex-1 min-w-0` cell beside four items that never
+        // shrink, so on a phone it collapsed to a sliver and broke "Follow up
+        // with Parth Chauhan" one word per line. The title now owns the full
+        // width until there is room for more.
         <ul className="space-y-2">
           {data.items.map((task) => (
-            <li key={task.id} className="card flex flex-wrap items-center gap-3 p-3.5">
-              <span
-                className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                  task.isOverdue
-                    ? 'bg-danger-500'
-                    : task.status === 'DONE'
-                      ? 'bg-teal-500'
-                      : 'bg-navy-300'
-                }`}
-                aria-hidden
-              />
+            <li
+              key={task.id}
+              className="card flex flex-wrap items-center gap-x-3 gap-y-2 p-3.5"
+            >
+              <div className="flex w-full min-w-0 items-start gap-3 sm:w-auto sm:flex-1">
+                <span
+                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                    task.isOverdue
+                      ? 'bg-danger-500'
+                      : task.status === 'DONE'
+                        ? 'bg-teal-500'
+                        : 'bg-navy-300'
+                  }`}
+                  aria-hidden
+                />
 
-              <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1">
                 <p
                   className={`font-semibold ${
                     task.status === 'DONE' ? 'text-[var(--color-text-muted)] line-through' : ''
@@ -128,26 +137,32 @@ export default async function TasksPage({
                     />
                   ) : null}
                 </div>
+                </div>
               </div>
 
-              <PriorityBadge priority={task.priority} />
+              {/* Priority, due date and the action travel together: on a phone
+                  they wrap onto their own line instead of squeezing the title. */}
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                <PriorityBadge priority={task.priority} />
 
-              <div className="w-32 shrink-0 text-right">
                 <p
-                  className={`text-xs font-semibold ${
+                  className={`text-xs font-semibold sm:w-28 sm:text-right ${
                     task.isOverdue ? 'text-danger-500' : 'text-[var(--color-text-muted)]'
                   }`}
                   title={formatDateTime(task.dueAt)}
                 >
                   {formatRelative(task.dueAt)}
                 </p>
-              </div>
 
-              {task.entityType === 'LEAD' && task.entityId ? (
-                <Link href={`/leads/${task.entityId}`} className="btn btn-outline h-8 text-xs">
-                  Open lead
-                </Link>
-              ) : null}
+                {task.entityType === 'LEAD' && task.entityId ? (
+                  <Link
+                    href={`/leads/${task.entityId}`}
+                    className="btn btn-outline ml-auto h-8 shrink-0 text-xs sm:ml-0"
+                  >
+                    Open lead
+                  </Link>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
