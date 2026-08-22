@@ -42,7 +42,11 @@ ENV NODE_ENV=production
 
 # tini reaps zombies and forwards SIGTERM, so Nest's shutdown hooks actually run
 # and in-flight requests drain instead of being cut off mid-transaction.
-RUN apk add --no-cache tini
+#
+# su-exec drops privileges in the entrypoint. The container has to start as root
+# for exactly one reason — see the volume note there — and hands over to the
+# unprivileged user before anything else happens.
+RUN apk add --no-cache tini su-exec
 
 # Never run as root. A container escape should not start from uid 0.
 RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S nodejs -G nodejs
@@ -60,7 +64,11 @@ COPY --from=build --chown=nodejs:nodejs /app/apps/api/package.json ./apps/api/
 COPY --from=build --chown=nodejs:nodejs /app/apps/api/prisma.config.production.mjs ./apps/api/
 COPY --chmod=755 apps/api/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 
-USER nodejs
+# Deliberately no `USER nodejs` here. The entrypoint starts as root, fixes the
+# ownership of the mounted volume — the one thing that needs root — and then
+# re-execs itself as nodejs. The application process never runs as root; see
+# docker-entrypoint.sh. Setting USER here instead would leave the volume
+# unwritable and every upload failing with EACCES.
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -10,6 +10,32 @@
 # verbatim and fail before writing a single log line.
 set -e
 
+# Take ownership of the persistent volume, then stop being root.
+#
+# Railway mounts its volumes owned by root. The application runs as uid 1001, so
+# it could not even create its own storage directory inside the mount: every
+# upload died with `EACCES: permission denied, mkdir '/data/storage'` — check-in
+# photos and client documents alike. The directory cannot be created at build
+# time either, because the mount replaces whatever the image had there.
+#
+# This is the only operation in the whole container that needs root, so it runs
+# first and privileges are dropped immediately afterwards by re-execing this
+# same script as nodejs. Everything below — migrations, seeds, the API itself —
+# runs unprivileged. Guarded on `id -u` so the second pass falls straight
+# through, and so the script still works if the platform starts it as nodejs.
+if [ "$(id -u)" = "0" ]; then
+  if [ -n "$STORAGE_LOCAL_ROOT" ]; then
+    echo "[entrypoint] Preparing $STORAGE_LOCAL_ROOT for uid 1001…"
+    mkdir -p "$STORAGE_LOCAL_ROOT"
+    # Recursive: a directory created by an earlier root-only run is still
+    # root-owned, and would keep failing for everything written underneath it.
+    chown -R nodejs:nodejs "$STORAGE_LOCAL_ROOT"
+  fi
+
+  echo "[entrypoint] Dropping to user nodejs."
+  exec su-exec nodejs "$0" "$@"
+fi
+
 # Run from apps/api: the config's schema and migrations paths are relative to
 # the working directory.
 cd apps/api
