@@ -22,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { PartnersModule } from './modules/partners/partners.module';
+import { GeocodingModule } from './modules/geocoding/geocoding.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { VisitsModule } from './modules/visits/visits.module';
 import { AssignmentModule } from './modules/assignment/assignment.module';
@@ -51,6 +52,7 @@ import { PerformanceModule } from './modules/performance/performance.module';
     PrismaModule,
     CommonModule,
     StorageModule,
+    GeocodingModule,
     AssignmentModule,
     AuditModule,
     CampaignsModule,

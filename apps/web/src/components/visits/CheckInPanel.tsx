@@ -183,6 +183,30 @@ export function CheckInPanel({
     }
   };
 
+  // Resolved as soon as a fix arrives, in parallel with the rep framing the
+  // shot, so the address is normally already there when they press Capture.
+  // Never awaited by anything: a slow or absent answer just means the stamp
+  // carries coordinates and a time.
+  const [address, setAddress] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!fix) return;
+    let cancelled = false;
+
+    fetch(`/api/reverse-geocode?lat=${fix.latitude}&lng=${fix.longitude}`)
+      .then((response) => (response.ok ? response.json() : { address: null }))
+      .then((body: { address?: string | null }) => {
+        if (!cancelled) setAddress(body.address ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setAddress(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fix]);
+
   // The same call the server will make, so the rep is told what will be
   // recorded before they press the button rather than after.
   const assessment = assessCheckInLocation({
@@ -206,6 +230,9 @@ export function CheckInPanel({
       <input type="hidden" name="accuracy" value={fix?.accuracy ?? ''} />
       <input type="hidden" name="photoKey" value={photoKey ?? ''} />
       <input type="hidden" name="locationFailureReason" value={reason ?? ''} />
+      {/* Stored on the visit as well as burnt into the photo. The image is for
+          a human reading a printout; the column is what a report can group. */}
+      <input type="hidden" name="address" value={address ?? ''} />
 
       {state.status === 'error' && state.message ? (
         <div
@@ -267,7 +294,12 @@ export function CheckInPanel({
           ) : null}
 
           <CameraCapture
-            stamp={{ latitude: fix?.latitude, longitude: fix?.longitude, accuracy: fix?.accuracy }}
+            stamp={{
+              latitude: fix?.latitude,
+              longitude: fix?.longitude,
+              accuracy: fix?.accuracy,
+              address,
+            }}
             onCapture={(file, previewUrl) => void onCaptured(file, previewUrl)}
             onClear={() => {
               setPhotoKey(null);

@@ -64,6 +64,29 @@ const envSchema = z
      */
     CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
 
+    /**
+     * Reverse geocoding for the check-in photo stamp. Off by default: the stamp
+     * is complete with coordinates and a timestamp, and an address is an
+     * improvement rather than a requirement.
+     */
+    GEOCODER: z.enum(['none', 'mappls']).default('none'),
+    MAPPLS_CLIENT_ID: z.string().min(1).optional(),
+    MAPPLS_CLIENT_SECRET: z.string().min(1).optional(),
+    /** Both configurable: their API host has moved more than once. */
+    MAPPLS_TOKEN_URL: z
+      .string()
+      .url()
+      .default('https://outpost.mappls.com/api/security/oauth/token'),
+    MAPPLS_REVERSE_URL: z
+      .string()
+      .url()
+      .default('https://apis.mappls.com/advancedmaps/v1/rev_geocode'),
+    /**
+     * Short on purpose. This runs while a rep waits to check in, and a slow
+     * answer is worth less than a fast blank.
+     */
+    GEOCODER_TIMEOUT_MS: z.coerce.number().int().min(500).max(15_000).default(4_000),
+
     OUTBOX_RELAY_ENABLED: z
       .enum(['true', 'false'])
       .default('true')
@@ -78,6 +101,14 @@ const envSchema = z
     // Checked in every environment: a scanner that cannot be reached marks
     // every upload FAILED, and that should be a boot error, not a mystery
     // discovered by a user who cannot download their own document.
+    if (env.GEOCODER === 'mappls' && (!env.MAPPLS_CLIENT_ID || !env.MAPPLS_CLIENT_SECRET)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'GEOCODER=mappls requires MAPPLS_CLIENT_ID and MAPPLS_CLIENT_SECRET.',
+        path: ['MAPPLS_CLIENT_ID'],
+      });
+    }
+
     if (env.FILE_SCANNER_MODE === 'clamav' && !env.CLAMAV_HOST) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -188,6 +219,16 @@ export interface AppConfig {
     scannerMode: Env['FILE_SCANNER_MODE'];
     clamav: { host: string | undefined; port: number; timeoutMs: number };
   };
+  geocoding: {
+    provider: Env['GEOCODER'];
+    timeoutMs: number;
+    mappls: {
+      clientId: string | undefined;
+      clientSecret: string | undefined;
+      tokenUrl: string;
+      reverseUrl: string;
+    };
+  };
   outbox: {
     enabled: boolean;
     intervalMs: number;
@@ -229,6 +270,16 @@ export function buildAppConfig(env: Env): AppConfig {
         host: env.CLAMAV_HOST,
         port: env.CLAMAV_PORT,
         timeoutMs: env.CLAMAV_TIMEOUT_MS,
+      },
+    },
+    geocoding: {
+      provider: env.GEOCODER,
+      timeoutMs: env.GEOCODER_TIMEOUT_MS,
+      mappls: {
+        clientId: env.MAPPLS_CLIENT_ID,
+        clientSecret: env.MAPPLS_CLIENT_SECRET,
+        tokenUrl: env.MAPPLS_TOKEN_URL,
+        reverseUrl: env.MAPPLS_REVERSE_URL,
       },
     },
     outbox: {

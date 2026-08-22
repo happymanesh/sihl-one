@@ -33,6 +33,8 @@ export interface CameraStamp {
   latitude?: number;
   longitude?: number;
   accuracy?: number;
+  /** Resolved from the coordinates, when a geocoder is configured. */
+  address?: string | null;
 }
 
 type Phase = 'idle' | 'requesting' | 'live' | 'denied' | 'unsupported' | 'failed';
@@ -323,10 +325,41 @@ function stampLines(stamp: CameraStamp): string[] {
   const accuracy =
     stamp.accuracy === undefined ? '' : `  ±${Math.round(stamp.accuracy)} m`;
 
-  return [
-    `${stamp.latitude.toFixed(5)}, ${stamp.longitude.toFixed(5)}${accuracy}`,
-    when,
-  ];
+  const lines = [`${stamp.latitude.toFixed(5)}, ${stamp.longitude.toFixed(5)}${accuracy}`, when];
+
+  // The address goes first when there is one: it is the line a human reads.
+  // Absent — no geocoder configured, or the lookup did not answer in time — the
+  // stamp is the coordinates and the time, which is a complete record.
+  if (stamp.address) lines.unshift(...wrapAddress(stamp.address));
+
+  return lines;
+}
+
+/**
+ * Splits a long address across at most two lines.
+ *
+ * Indian addresses routinely run past eighty characters, and a single line
+ * would either overflow the frame or shrink the type past reading. Two lines is
+ * the limit: beyond that the stamp starts covering the premises it is evidence
+ * of.
+ */
+function wrapAddress(address: string, perLine = 42): string[] {
+  const words = address.split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (current.length === 0) current = word;
+    else if (current.length + 1 + word.length <= perLine) current += ` ${word}`;
+    else {
+      lines.push(current);
+      current = word;
+      if (lines.length === 2) break;
+    }
+  }
+
+  if (lines.length < 2 && current) lines.push(current);
+  return lines.slice(0, 2);
 }
 
 function drawStamp(
