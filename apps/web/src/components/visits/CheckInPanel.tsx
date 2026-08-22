@@ -393,7 +393,7 @@ export function CheckOutPanel({
           <label className="label" htmlFor="meetingNotes">
             What was discussed? <span className="text-danger-500">*</span>
           </label>
-          <VoiceInputButton enabled={voiceInputEnabled} />
+          <VoiceInputButton enabled={voiceInputEnabled} targetId="meetingNotes" />
         </div>
         <textarea
           id="meetingNotes"

@@ -87,6 +87,21 @@ const envSchema = z
      */
     GEOCODER_TIMEOUT_MS: z.coerce.number().int().min(500).max(15_000).default(4_000),
 
+    /**
+     * Dictation. Off by default; the control is visible but disabled until a
+     * provider is configured, because reps were told it is coming.
+     */
+    SPEECH_PROVIDER: z.enum(['none', 'sarvam']).default('none'),
+    SARVAM_API_KEY: z.string().min(1).optional(),
+    /** Saaras models transcribe and translate; Saarika only transcribes. */
+    SARVAM_STT_MODEL: z.string().min(1).default('saaras:v3'),
+    SARVAM_STT_URL: z.string().url().default('https://api.sarvam.ai/speech-to-text-translate'),
+    /**
+     * Generous compared with geocoding: a rep has finished speaking and is
+     * watching a spinner, so waiting is better than losing the note.
+     */
+    SPEECH_TIMEOUT_MS: z.coerce.number().int().min(2_000).max(120_000).default(45_000),
+
     OUTBOX_RELAY_ENABLED: z
       .enum(['true', 'false'])
       .default('true')
@@ -101,6 +116,14 @@ const envSchema = z
     // Checked in every environment: a scanner that cannot be reached marks
     // every upload FAILED, and that should be a boot error, not a mystery
     // discovered by a user who cannot download their own document.
+    if (env.SPEECH_PROVIDER === 'sarvam' && !env.SARVAM_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SPEECH_PROVIDER=sarvam requires SARVAM_API_KEY.',
+        path: ['SARVAM_API_KEY'],
+      });
+    }
+
     if (env.GEOCODER === 'mappls' && (!env.MAPPLS_CLIENT_ID || !env.MAPPLS_CLIENT_SECRET)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -219,6 +242,11 @@ export interface AppConfig {
     scannerMode: Env['FILE_SCANNER_MODE'];
     clamav: { host: string | undefined; port: number; timeoutMs: number };
   };
+  speech: {
+    provider: Env['SPEECH_PROVIDER'];
+    timeoutMs: number;
+    sarvam: { apiKey: string | undefined; model: string; endpoint: string };
+  };
   geocoding: {
     provider: Env['GEOCODER'];
     timeoutMs: number;
@@ -270,6 +298,15 @@ export function buildAppConfig(env: Env): AppConfig {
         host: env.CLAMAV_HOST,
         port: env.CLAMAV_PORT,
         timeoutMs: env.CLAMAV_TIMEOUT_MS,
+      },
+    },
+    speech: {
+      provider: env.SPEECH_PROVIDER,
+      timeoutMs: env.SPEECH_TIMEOUT_MS,
+      sarvam: {
+        apiKey: env.SARVAM_API_KEY,
+        model: env.SARVAM_STT_MODEL,
+        endpoint: env.SARVAM_STT_URL,
       },
     },
     geocoding: {

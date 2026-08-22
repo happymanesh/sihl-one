@@ -23,6 +23,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { PartnersModule } from './modules/partners/partners.module';
 import { GeocodingModule } from './modules/geocoding/geocoding.module';
+import { SpeechModule } from './modules/speech/speech.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { VisitsModule } from './modules/visits/visits.module';
 import { AssignmentModule } from './modules/assignment/assignment.module';
@@ -53,6 +54,7 @@ import { PerformanceModule } from './modules/performance/performance.module';
     CommonModule,
     StorageModule,
     GeocodingModule,
+    SpeechModule,
     AssignmentModule,
     AuditModule,
     CampaignsModule,

@@ -387,7 +387,7 @@ function LogInteractionForm({
       <div>
         <div className="flex items-center justify-between gap-2">
           <label className="label" htmlFor="body">Remarks</label>
-          <VoiceInputButton enabled={voiceInputEnabled} />
+          <VoiceInputButton enabled={voiceInputEnabled} targetId="body" />
         </div>
         <textarea
           id="body"
