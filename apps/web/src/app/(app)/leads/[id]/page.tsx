@@ -1,5 +1,9 @@
 import Link from 'next/link';
-import type { MeetingModeItem, MobileVerificationMethod } from '@sihl-one/contracts';
+import type {
+  MeetingModeItem,
+  MobileVerificationMethod,
+  ProductItem,
+} from '@sihl-one/contracts';
 import type { Route } from 'next';
 
 import { Badge, LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
@@ -123,6 +127,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     () => [] as MeetingModeItem[],
   );
 
+  // Offered on the interaction form so a rep can record what was discussed and
+  // what they expect it to earn. An empty list hides the section rather than
+  // blocking the form.
+  const products = await apiFetch<ProductItem[]>('/masters/products').catch(
+    () => [] as ProductItem[],
+  );
+
   return (
     <div className="space-y-5">
       <nav className="text-xs text-[var(--color-text-muted)]">
@@ -221,6 +232,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             canConvert={can(user, 'lead:convert')}
             voiceInputEnabled={voiceInputEnabled()}
             meetingModes={meetingModes}
+            products={products}
           />
 
           <DocumentPanel

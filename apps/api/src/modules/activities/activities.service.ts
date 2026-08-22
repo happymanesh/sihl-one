@@ -1,5 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { checkMeetingLink, type ActivityQuery, type CreateActivityInput } from '@sihl-one/contracts';
+import {
+  checkMeetingLink,
+  totalExpectedBrokerage,
+  type ActivityQuery,
+  type CreateActivityInput,
+} from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
 import { ScopeService } from '../../common/scope.service';
@@ -50,7 +55,13 @@ export class ActivitiesService {
         orderBy: { occurredAt: query.sortDir },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
-        include: { actor: { select: { id: true, firstName: true, lastName: true } } },
+        include: {
+          actor: { select: { id: true, firstName: true, lastName: true } },
+          productValues: {
+            include: { product: { select: { name: true } } },
+            orderBy: { productCode: 'asc' },
+          },
+        },
       }),
       this.prisma.activity.count({ where }),
     ]);
@@ -74,6 +85,17 @@ export class ActivitiesService {
               fullName: `${activity.actor.firstName} ${activity.actor.lastName}`.trim(),
             }
           : null,
+        productValues: activity.productValues.map((entry) => ({
+          productCode: entry.productCode,
+          productName: entry.product?.name ?? null,
+          // Two decimals forced: String(Decimal) drops a trailing zero, so
+          // 5000.50 comes back as '5000.5' — numerically right and wrong on a
+          // page of money.
+          expectedBrokerage: entry.expectedBrokerage.toFixed(2),
+        })),
+        expectedBrokerageTotal: totalExpectedBrokerage(
+          activity.productValues.map((entry) => entry.expectedBrokerage.toFixed(2)),
+        ),
       })),
       total,
       query.page,
@@ -116,6 +138,34 @@ export class ActivitiesService {
       }
     }
 
+    // Validated before the transaction opens: an unknown or retired product
+    // should be a sentence the rep can act on, not a foreign-key violation
+    // surfacing as a 500 after the interaction has already been written.
+    const productValues = input.productValues ?? [];
+    if (productValues.length > 0) {
+      const codes = productValues.map((entry) => entry.productCode);
+      const known = await this.prisma.product.findMany({
+        where: { code: { in: codes } },
+        select: { code: true, isActive: true, name: true },
+      });
+
+      const missing = codes.filter((code) => !known.some((product) => product.code === code));
+      if (missing.length > 0) {
+        throw new BadRequestException({
+          title: 'Unknown product',
+          detail: `${missing.join(', ')} is not a product. Choose from the list.`,
+        });
+      }
+
+      const retired = known.filter((product) => !product.isActive);
+      if (retired.length > 0) {
+        throw new BadRequestException({
+          title: 'That product is no longer offered',
+          detail: `${retired.map((product) => product.name).join(', ')} has been withdrawn.`,
+        });
+      }
+    }
+
     const activity = await this.prisma.$transaction(async (tx) => {
       const created = await tx.activity.create({
         data: {
@@ -133,6 +183,18 @@ export class ActivitiesService {
           actorId: user.id,
         },
       });
+
+      if (productValues.length > 0) {
+        await tx.activityProductValue.createMany({
+          data: productValues.map((entry) => ({
+            activityId: created.id,
+            productCode: entry.productCode,
+            // The string crosses the wire and Prisma converts it to Decimal.
+            // It is never turned into a JavaScript number on the way through.
+            expectedBrokerage: entry.expectedBrokerage,
+          })),
+        });
+      }
 
       // Logging an interaction moves the parent's recency clock, and for a lead
       // it also changes the score — a lead that was just spoken to is a

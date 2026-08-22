@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { LEAD_LOST_REASONS, type MeetingModeItem } from '@sihl-one/contracts';
+import { LEAD_LOST_REASONS, type MeetingModeItem, type ProductItem } from '@sihl-one/contracts';
 
 import {
   assignLead,
@@ -33,6 +33,7 @@ interface Props {
   /** Server-driven, so switching dictation on is a config change not a release. */
   voiceInputEnabled: boolean;
   meetingModes: MeetingModeItem[];
+  products: ProductItem[];
   canAssign: boolean;
   canConvert: boolean;
 }
@@ -44,6 +45,81 @@ interface Props {
  * practice and stacking them all expanded pushes the timeline — the thing being
  * read most — below the fold.
  */
+/**
+ * Which products were discussed, and what the rep expects each to earn.
+ *
+ * The amount only appears once a product is ticked, so the form stays short for
+ * the majority of interactions that are not a pitch. Leaving an amount blank is
+ * allowed and means exactly that — no figure — rather than zero, because
+ * "I expect nothing" and "I did not estimate" are different claims and only one
+ * of them belongs in a forecast.
+ */
+function ProductValueFields({ products }: { products: ProductItem[] }) {
+  const [picked, setPicked] = useState<string[]>([]);
+
+  if (products.length === 0) return null;
+
+  const toggle = (code: string) =>
+    setPicked((current) =>
+      current.includes(code) ? current.filter((value) => value !== code) : [...current, code],
+    );
+
+  return (
+    <div>
+      <span className="label">Products discussed</span>
+
+      <div className="flex flex-wrap gap-1.5">
+        {products.map((product) => (
+          <label
+            key={product.code}
+            className="cursor-pointer rounded-lg border border-[var(--color-border-strong)] px-2.5 py-1 text-xs font-semibold transition-colors has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white"
+          >
+            <input
+              type="checkbox"
+              checked={picked.includes(product.code)}
+              onChange={() => toggle(product.code)}
+              aria-label={product.name}
+              className="sr-only"
+            />
+            {product.name}
+          </label>
+        ))}
+      </div>
+
+      {picked.length > 0 ? (
+        <div className="mt-2.5 space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+          <p className="text-xs font-semibold">Expected brokerage</p>
+
+          {picked.map((code) => {
+            const product = products.find((item) => item.code === code);
+            return (
+              <div key={code} className="flex items-center gap-2">
+                <label className="flex-1 text-xs" htmlFor={`productValue.${code}`}>
+                  {product?.name ?? code}
+                </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-[var(--color-text-subtle)]">₹</span>
+                  <input
+                    id={`productValue.${code}`}
+                    name={`productValue.${code}`}
+                    inputMode="decimal"
+                    placeholder="Optional"
+                    className="input h-8 w-32 text-right text-xs tnum"
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          <p className="text-xs text-[var(--color-text-subtle)]">
+            Your estimate, for the pipeline. Actual brokerage comes from the back office.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function LeadActions(props: Props) {
   const isClosed = ['CONVERTED', 'LOST', 'DISQUALIFIED'].includes(props.status);
   const canConvertNow = props.canConvert && props.allowedTransitions.includes('CONVERTED');
@@ -98,6 +174,7 @@ export function LeadActions(props: Props) {
             canUpdate={props.canUpdate}
             voiceInputEnabled={props.voiceInputEnabled}
             meetingModes={props.meetingModes}
+            products={props.products}
           />
         ) : null}
         {active === 'status' ? (
@@ -159,12 +236,14 @@ function LogInteractionForm({
   canUpdate,
   voiceInputEnabled,
   meetingModes,
+  products,
 }: {
   leadId: string;
   allowedTransitions: string[];
   canUpdate: boolean;
   voiceInputEnabled: boolean;
   meetingModes: MeetingModeItem[];
+  products: ProductItem[];
 }) {
   const [state, action] = useActionState(logActivity, INITIAL);
   const formRef = useRef<HTMLFormElement>(null);
@@ -318,6 +397,8 @@ function LogInteractionForm({
           placeholder="Anything the next person needs to know."
         />
       </div>
+
+      <ProductValueFields products={products} />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>

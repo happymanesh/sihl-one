@@ -161,6 +161,29 @@ export async function unverifyLeadMobile(
   return { status: 'success', message: 'Confirmation withdrawn.' };
 }
 
+/**
+ * Product lines from the form.
+ *
+ * The form posts one `productValue.<CODE>` field per product the rep ticked.
+ * A blank is dropped rather than sent as zero: "I discussed this and expect
+ * nothing" and "I did not put a number on it" are different statements, and
+ * only one of them should land in a forecast.
+ */
+function readProductValues(
+  formData: FormData,
+): Array<{ productCode: string; expectedBrokerage: string }> | undefined {
+  const values: Array<{ productCode: string; expectedBrokerage: string }> = [];
+
+  for (const [key, raw] of formData.entries()) {
+    if (!key.startsWith('productValue.')) continue;
+    const amount = String(raw).trim();
+    if (!amount) continue;
+    values.push({ productCode: key.slice('productValue.'.length), expectedBrokerage: amount });
+  }
+
+  return values.length > 0 ? values : undefined;
+}
+
 export async function logActivity(
   _previous: ActionState,
   formData: FormData,
@@ -182,6 +205,7 @@ export async function logActivity(
     nextFollowUpAt: followUp ? new Date(String(followUp)) : undefined,
     meetingMode: formData.get('meetingMode') || undefined,
     meetingLink: formData.get('meetingLink') || undefined,
+    productValues: readProductValues(formData),
   });
 
   if (!parsed.success) {

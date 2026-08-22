@@ -360,6 +360,8 @@ model Product {
   updatedAt   DateTime @updatedAt
 
   @@index([isActive, sortOrder])
+  activityValues ActivityProductValue[]
+
   @@map("product")
 }
 
@@ -1122,10 +1124,37 @@ model Activity {
   /// Screenshots and files attached as evidence of this interaction.
   evidence Document[]
 
+  productValues ActivityProductValue[]
+
   @@index([entityType, entityId, occurredAt])
   @@index([actorId, occurredAt])
   @@index([type])
   @@map("activity")
+}
+
+/// What a rep expects one interaction to earn, per product.
+///
+/// An estimate, and the column name says so. ADR-0002 puts brokerage in the
+/// back office: that system knows what was actually charged, this one knows
+/// what a salesperson believed at the time. Sharing the word "brokerage"
+/// between them is how a forecast gets quoted as revenue.
+model ActivityProductValue {
+  id String @id @default(cuid())
+
+  activityId String
+  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  productCode String  @db.VarChar(40)
+  product     Product @relation(fields: [productCode], references: [code], onDelete: Restrict, onUpdate: Cascade)
+
+  /// Decimal, never Float — this is summed and reported as money.
+  expectedBrokerage Decimal @default(0) @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([activityId, productCode])
+  @@index([productCode, createdAt])
+  @@map("activity_product")
 }
 
 /// The fixed behavioural classes a task status can belong to.
