@@ -174,12 +174,30 @@ function SourceRow({ source }: { source: LeadSourceItem }) {
 function ProductsTab({ products }: { products: ProductItem[] }) {
   const [state, action] = useActionState(createProduct, INITIAL);
 
+  const topLevel = products.filter((product) => !product.parentId);
+  const childrenOf = (parentId: string) =>
+    products.filter((product) => product.parentId === parentId);
+
   return (
     <div className="space-y-4">
       <section className="card p-0">
         <ul className="divide-y divide-[var(--color-border)]">
-          {products.map((product) => (
-            <ProductRow key={product.id} product={product} />
+          {/* Parents first, each followed by its own sub-products. A flat
+              alphabetical list hides the structure that makes sub-products
+              worth having — "Equity" and "Equity intraday" would sit apart. */}
+          {topLevel.map((parent) => (
+            <li key={parent.id}>
+              <ProductRow product={parent} />
+              {childrenOf(parent.id).length > 0 ? (
+                <ul className="border-t border-[var(--color-border)] bg-[var(--color-surface-muted)] pl-6">
+                  {childrenOf(parent.id).map((child) => (
+                    <li key={child.id} className="border-b border-[var(--color-border)] last:border-b-0">
+                      <ProductRow product={child} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
           ))}
         </ul>
       </section>
@@ -200,6 +218,20 @@ function ProductsTab({ products }: { products: ProductItem[] }) {
             <input name="name" required maxLength={80} className="input" />
           </Field>
         </div>
+
+        <Field
+          label="Sits under"
+          hint="Leave blank for a top-level product. Two levels only — a sub-product cannot have its own."
+        >
+          <select name="parentId" className="input" defaultValue="">
+            <option value="">Top-level product</option>
+            {topLevel.map((parent) => (
+              <option key={parent.id} value={parent.id}>
+                {parent.name}
+              </option>
+            ))}
+          </select>
+        </Field>
 
         <Field label="Summary" hint="One line, shown on the chip and the card.">
           <input name="summary" maxLength={300} className="input" />

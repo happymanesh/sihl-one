@@ -75,6 +75,9 @@ export async function createProduct(_p: MasterState, formData: FormData): Promis
   const parsed = createProductSchema.safeParse({
     code: formData.get('code'),
     name: formData.get('name'),
+    // Blank means a top-level product. Only products that are not already
+    // sub-products can be chosen as a parent; the API enforces that.
+    parentId: formData.get('parentId') || undefined,
     summary: formData.get('summary') || undefined,
     description: formData.get('description') || undefined,
     keyBenefits: String(formData.get('keyBenefits') ?? '')
