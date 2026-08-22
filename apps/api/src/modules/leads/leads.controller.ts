@@ -14,6 +14,7 @@ import {
   assignLeadSchema,
   bulkAssignLeadSchema,
   changeLeadStatusSchema,
+  verifyLeadMobileSchema,
   convertLeadSchema,
   createLeadSchema,
   leadCaptureSchema,
@@ -22,6 +23,7 @@ import {
   type AssignLeadInput,
   type BulkAssignLeadInput,
   type ChangeLeadStatusInput,
+  type VerifyLeadMobileInput,
   type ConvertLeadInput,
   type CreateLeadInput,
   type LeadCaptureInput,
@@ -138,6 +140,36 @@ export class LeadsController {
     @ZodBody(updateLeadSchema) body: UpdateLeadInput,
   ) {
     return this.leads.update(user, id, body);
+  }
+
+  @Post(':id/verify-mobile')
+  @RequirePermissions('lead:update')
+  @ApiOperation({
+    summary: 'Record that the mobile number reaches this person',
+    description:
+      'Only the lead owner may do this: it records that they made contact themselves. The ' +
+      'verification is cleared automatically if the number is later edited.',
+  })
+  @ApiZodBody(verifyLeadMobileSchema)
+  verifyMobile(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(verifyLeadMobileSchema) body: VerifyLeadMobileInput,
+  ) {
+    return this.leads.verifyMobile(user, id, body);
+  }
+
+  @Delete(':id/verify-mobile')
+  @RequirePermissions('lead:update')
+  @ApiOperation({
+    summary: 'Withdraw a mobile verification',
+    description: 'For a mistake. Audited, like recording one.',
+  })
+  unverifyMobile(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+  ) {
+    return this.leads.unverifyMobile(user, id);
   }
 
   @Post(':id/status')

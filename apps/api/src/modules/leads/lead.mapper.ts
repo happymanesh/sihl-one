@@ -3,6 +3,7 @@ import {
   scoreBandFor,
   scoreLead,
   type LeadListItem,
+  type MobileVerificationMethod,
   type ScoringFeatures,
 } from '@sihl-one/contracts';
 
@@ -24,6 +25,8 @@ export interface LeadRow {
   estimatedValue: unknown;
   nextFollowUpAt: Date | null;
   lastActivityAt: Date | null;
+  mobileVerifiedAt?: Date | null;
+  mobileVerificationMethod?: string | null;
   createdAt: Date;
   campaignId?: string | null;
   owner?: { id: string; firstName: string; lastName: string } | null;
@@ -76,6 +79,9 @@ export function toLeadListItem(lead: LeadRow): LeadListItem {
     nextFollowUpAt: lead.nextFollowUpAt?.toISOString() ?? null,
     isOverdue: Boolean(lead.nextFollowUpAt && lead.nextFollowUpAt < now),
     lastActivityAt: lead.lastActivityAt?.toISOString() ?? null,
+    mobileVerifiedAt: lead.mobileVerifiedAt?.toISOString() ?? null,
+    mobileVerificationMethod:
+      (lead.mobileVerificationMethod as MobileVerificationMethod | null) ?? null,
     createdAt: lead.createdAt.toISOString(),
   };
 }

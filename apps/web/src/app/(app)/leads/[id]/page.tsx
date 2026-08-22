@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { MeetingModeItem } from '@sihl-one/contracts';
+import type { MeetingModeItem, MobileVerificationMethod } from '@sihl-one/contracts';
 import type { Route } from 'next';
 
 import { Badge, LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
@@ -7,6 +7,7 @@ import { DocumentPanel } from '@/components/documents/DocumentPanel';
 import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
 import { Timeline } from '@/components/leads/Timeline';
+import { VerifyMobile } from '@/components/leads/VerifyMobile';
 import { apiFetch } from '@/lib/api';
 import { can, requireUser } from '@/lib/auth';
 import { formatCurrency, formatDate, formatDateTime, formatRelative, humanise } from '@/lib/format';
@@ -16,6 +17,9 @@ interface LeadDetail {
   reference: string;
   fullName: string;
   mobile: string;
+  mobileVerifiedAt: string | null;
+  mobileVerificationMethod: MobileVerificationMethod | null;
+  mobileVerifiedBy: { id: string; fullName: string } | null;
   email: string | null;
   panMasked: string;
   city: string | null;
@@ -153,6 +157,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 </a>
               ) : null}
               {lead.city ? <span>{[lead.city, lead.state].filter(Boolean).join(', ')}</span> : null}
+            </div>
+
+            <div className="mt-2.5">
+              <VerifyMobile
+                leadId={lead.id}
+                verifiedAt={lead.mobileVerifiedAt}
+                method={lead.mobileVerificationMethod}
+                verifiedByName={lead.mobileVerifiedBy?.fullName ?? null}
+                canVerify={lead.owner?.id === user.id}
+              />
             </div>
 
             <div className="mt-3 flex flex-wrap gap-1.5">

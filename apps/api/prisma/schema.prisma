@@ -220,6 +220,7 @@ model User {
   mfaRecoveryCodes MfaRecoveryCode[]
   sessions       Session[]
   ownedLeads     Lead[]     @relation("LeadOwner")
+  verifiedLeads  Lead[]     @relation("LeadMobileVerifier")
   ownedEvents    Event[]    @relation("EventOwner")
   managedCustomers Customer[] @relation("CustomerRM")
   activities     Activity[] @relation("ActivityActor")
@@ -576,6 +577,19 @@ model Lead {
   score        Int      @default(0)
   scoreFactors Json?
   scoredAt     DateTime?
+
+  /// Whether anyone has actually reached the person behind this number.
+  ///
+  /// Null means unverified, which is the honest default for every lead that
+  /// existed before this was introduced. It is cleared automatically when the
+  /// number is edited — otherwise a rep could verify the number they really
+  /// did call and then change it, keeping a mark of confidence on a number
+  /// nobody has ever dialled.
+  mobileVerifiedAt         DateTime?
+  mobileVerificationMethod String?   @db.VarChar(20)
+  mobileVerificationNote   String?   @db.VarChar(200)
+  mobileVerifiedById       String?
+  mobileVerifiedBy         User?     @relation("LeadMobileVerifier", fields: [mobileVerifiedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   ownerId String?
   owner   User?   @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull, onUpdate: Cascade)

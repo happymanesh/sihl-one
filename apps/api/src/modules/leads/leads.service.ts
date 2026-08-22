@@ -11,6 +11,7 @@ import {
   nextBestActions,
   scoreBandFor,
   STRONG_LEAD_SCORE,
+  verificationSurvivesEdit,
   type AssignLeadInput,
   type BulkAssignLeadInput,
   type ChangeLeadStatusInput,
@@ -21,6 +22,7 @@ import {
   type LeadQuery,
   type LeadStatus,
   type UpdateLeadInput,
+  type VerifyLeadMobileInput,
 } from '@sihl-one/contracts';
 
 import { AuditService, diffRecords } from '../../common/audit.service';
@@ -58,6 +60,8 @@ const LIST_SELECT = {
   estimatedValue: true,
   nextFollowUpAt: true,
   lastActivityAt: true,
+  mobileVerifiedAt: true,
+  mobileVerificationMethod: true,
   createdAt: true,
   campaignId: true,
   owner: { select: { id: true, firstName: true, lastName: true } },
@@ -186,6 +190,7 @@ export class LeadsService {
         orgUnit: { select: { id: true, name: true } },
         statusHistory: { orderBy: { changedAt: 'desc' }, take: 50 },
         customer: { select: { id: true, reference: true, clientCode: true } },
+        mobileVerifiedBy: { select: { id: true, firstName: true, lastName: true } },
       },
     });
 
@@ -225,6 +230,16 @@ export class LeadsService {
       lastName: lead.lastName,
       fullName: `${lead.firstName} ${lead.lastName ?? ''}`.trim(),
       mobile: lead.mobile,
+      mobileVerifiedAt: lead.mobileVerifiedAt?.toISOString() ?? null,
+      mobileVerificationMethod: lead.mobileVerificationMethod,
+      mobileVerificationNote: lead.mobileVerificationNote,
+      mobileVerifiedBy: lead.mobileVerifiedBy
+        ? {
+            id: lead.mobileVerifiedBy.id,
+            fullName:
+              `${lead.mobileVerifiedBy.firstName} ${lead.mobileVerifiedBy.lastName}`.trim(),
+          }
+        : null,
       email: lead.email,
       panMasked: maskPan(lead.pan),
       city: lead.city,
@@ -577,14 +592,40 @@ export class LeadsService {
       });
     }
 
+    // Editing the number voids any verification against it. Without this the
+    // feature is worse than nothing: a rep verifies the number they genuinely
+    // called, edits the lead to a different one, and the tick stays — a mark of
+    // confidence on a number nobody has ever dialled.
+    const keepsVerification = verificationSurvivesEdit(before.mobile, rest.mobile);
+
     const updated = await this.prisma.lead.update({
       where: { id },
       data: {
         ...rest,
         estimatedValue: rest.estimatedValue ?? undefined,
         updatedById: user.id,
+        ...(keepsVerification
+          ? {}
+          : {
+              mobileVerifiedAt: null,
+              mobileVerificationMethod: null,
+              mobileVerificationNote: null,
+              mobileVerifiedById: null,
+            }),
       },
     });
+
+    if (!keepsVerification && before.mobileVerifiedAt) {
+      // Recorded separately from the edit itself: losing a verification is the
+      // sort of thing a manager asks about later, and "the number changed" is
+      // the answer.
+      await this.audit.record({
+        action: 'UPDATE',
+        resource: 'lead.mobile_verification',
+        resourceId: id,
+        changes: { cleared: true, reason: 'The mobile number was changed' },
+      });
+    }
 
     const activityCount = await this.prisma.activity.count({
       where: { entityType: 'LEAD', entityId: id },
@@ -1069,6 +1110,15 @@ export class LeadsService {
     if (query.campaignId) and.push({ campaignId: query.campaignId });
     if (query.minScore !== undefined) and.push({ score: { gte: query.minScore } });
     if (query.overdueOnly) and.push({ nextFollowUpAt: { lt: new Date() } });
+    // Unverified is the side worth hunting for, and it is the NULL side, so it
+    // cannot be expressed as an equality.
+    if (query.mobileVerified !== undefined) {
+      and.push(
+        query.mobileVerified
+          ? { mobileVerifiedAt: { not: null } }
+          : { mobileVerifiedAt: null },
+      );
+    }
     if (query.createdFrom || query.createdTo) {
       and.push({
         createdAt: {
@@ -1079,6 +1129,92 @@ export class LeadsService {
     }
 
     return { deletedAt: null, AND: and };
+  }
+
+  /**
+   * Record that someone has actually reached the person behind this number.
+   *
+   * Only the lead's owner may do it, and that restriction is the point rather
+   * than an oversight: this is a statement that *you* made contact, and a
+   * manager ticking it on someone else's lead would record a conversation that
+   * never happened. It also keeps the unverified rate attributable to the
+   * person whose leads they are.
+   */
+  async verifyMobile(user: AuthenticatedPrincipal, id: string, input: VerifyLeadMobileInput) {
+    const lead = await this.mustFindInScope(user, id);
+
+    if (lead.ownerId !== user.id) {
+      throw new ForbiddenException({
+        title: 'Only the lead owner can confirm the number',
+        detail:
+          'This records that you reached the client yourself. Ask the assigned relationship manager to confirm it.',
+      });
+    }
+
+    if (lead.status === 'CONVERTED') {
+      throw new BadRequestException({
+        title: 'Converted leads are read-only',
+        detail: 'The number is confirmed at account opening.',
+      });
+    }
+
+    await this.prisma.lead.update({
+      where: { id },
+      data: {
+        mobileVerifiedAt: new Date(),
+        mobileVerificationMethod: input.method,
+        mobileVerificationNote: input.note ?? null,
+        mobileVerifiedById: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'lead.mobile_verification',
+      resourceId: id,
+      // The number itself is deliberately not written here: the lead row holds
+      // it, and the audit table is read by more people than the lead is.
+      changes: { method: input.method, verified: true },
+    });
+
+    return this.findOne(user, id);
+  }
+
+  /**
+   * Withdraw a verification.
+   *
+   * Allowed because people make mistakes, and a tick that cannot be undone is a
+   * tick nobody trusts. Audited, so withdrawing one is not a way to quietly
+   * rewrite history.
+   */
+  async unverifyMobile(user: AuthenticatedPrincipal, id: string) {
+    const lead = await this.mustFindInScope(user, id);
+
+    if (lead.ownerId !== user.id) {
+      throw new ForbiddenException({
+        title: 'Only the lead owner can change this',
+        detail: 'Ask the assigned relationship manager.',
+      });
+    }
+
+    await this.prisma.lead.update({
+      where: { id },
+      data: {
+        mobileVerifiedAt: null,
+        mobileVerificationMethod: null,
+        mobileVerificationNote: null,
+        mobileVerifiedById: null,
+      },
+    });
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'lead.mobile_verification',
+      resourceId: id,
+      changes: { verified: false, reason: 'Withdrawn by the owner' },
+    });
+
+    return this.findOne(user, id);
   }
 
   private async mustFindInScope(user: AuthenticatedPrincipal, id: string) {

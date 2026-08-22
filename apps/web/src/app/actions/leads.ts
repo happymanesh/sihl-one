@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   changeLeadStatusSchema,
+  verifyLeadMobileSchema,
   convertLeadSchema,
   createActivitySchema,
   createLeadSchema,
@@ -115,6 +116,49 @@ export async function changeLeadStatus(
   revalidatePath(`/leads/${leadId}`);
   revalidatePath('/leads');
   return { status: 'success', message: 'Status updated.' };
+}
+
+export async function verifyLeadMobile(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+
+  const parsed = verifyLeadMobileSchema.safeParse({
+    method: formData.get('method'),
+    note: formData.get('note') || undefined,
+  });
+
+  if (!parsed.success) {
+    return { status: 'error', message: 'Choose how you reached the client.' };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}/verify-mobile`, { method: 'POST', body: parsed.data });
+  } catch (error) {
+    return toErrorState(error, 'That could not be recorded.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return { status: 'success', message: 'Mobile confirmed.' };
+}
+
+export async function unverifyLeadMobile(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+
+  try {
+    await apiFetch(`/leads/${leadId}/verify-mobile`, { method: 'DELETE' });
+  } catch (error) {
+    return toErrorState(error, 'That could not be undone.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return { status: 'success', message: 'Confirmation withdrawn.' };
 }
 
 export async function logActivity(

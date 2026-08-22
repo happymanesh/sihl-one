@@ -137,6 +137,15 @@ export const leadQuerySchema = paginationQuerySchema.extend({
   createdFrom: z.coerce.date().optional(),
   createdTo: z.coerce.date().optional(),
   minScore: z.coerce.number().int().min(0).max(100).optional(),
+  /**
+   * `false` restricts to leads whose mobile has not been confirmed. This is the
+   * view a manager actually wants — the unverified pile — so it has to be
+   * reachable in one click rather than by sorting.
+   */
+  mobileVerified: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 export type LeadQuery = z.infer<typeof leadQuerySchema>;
 
@@ -161,7 +170,63 @@ export interface LeadListItem {
   nextFollowUpAt: string | null;
   isOverdue: boolean;
   lastActivityAt: string | null;
+  /** Null until someone confirms the number reaches this person. */
+  mobileVerifiedAt: string | null;
+  mobileVerificationMethod: MobileVerificationMethod | null;
   createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Mobile verification
+
+/**
+ * How a rep confirmed the number reaches the person it claims to.
+ *
+ * Recorded rather than inferred, and deliberately a short closed list: an
+ * open text box would fill with "verified", which says nothing a checkbox did
+ * not already say. Each value describes a thing that actually happened.
+ */
+export const MOBILE_VERIFICATION_METHODS = ['CALL', 'IN_PERSON', 'WHATSAPP'] as const;
+export type MobileVerificationMethod = (typeof MOBILE_VERIFICATION_METHODS)[number];
+
+export const MOBILE_VERIFICATION_METHOD_LABELS: Record<MobileVerificationMethod, string> = {
+  CALL: 'Spoke on this number',
+  IN_PERSON: 'Confirmed in person',
+  WHATSAPP: 'Confirmed on WhatsApp',
+};
+
+export const verifyLeadMobileSchema = z.object({
+  method: z.enum(MOBILE_VERIFICATION_METHODS),
+  /** Optional context: who answered, where they were met. */
+  note: z.string().trim().max(200).optional(),
+});
+export type VerifyLeadMobileInput = z.infer<typeof verifyLeadMobileSchema>;
+
+/**
+ * Whether an edit to a lead invalidates an existing mobile verification.
+ *
+ * This is the rule the whole feature rests on. Without it a rep verifies the
+ * number they really did call, then edits the lead to a different number, and
+ * the tick stays — which is precisely the fake-number route the verification
+ * was introduced to close, only now with a mark of confidence on it.
+ *
+ * Comparison ignores spacing and punctuation so that reformatting the same
+ * number does not throw away a genuine verification.
+ */
+export function verificationSurvivesEdit(
+  current: string | null | undefined,
+  next: string | null | undefined,
+): boolean {
+  if (next === undefined) return true; // The number was not part of this edit.
+  return normaliseMobile(current) === normaliseMobile(next);
+}
+
+function normaliseMobile(value: string | null | undefined): string {
+  if (!value) return '';
+  // Digits only, and only the last ten: +91 98765 43210, 09876543210 and
+  // 9876543210 are the same person, and reps type all three.
+  const digits = value.replace(/\D/g, '');
+  return digits.slice(-10);
 }
 
 export type LeadScoreBand = 'COLD' | 'WARM' | 'HOT';

@@ -16,6 +16,7 @@ const OWNED_KEYS = [
   'priority',
   'overdueOnly',
   'minScore',
+  'mobileVerified',
 ] as const;
 
 export function LeadFilters({
@@ -40,6 +41,7 @@ function LeadFiltersInner({
   products: ProductItem[];
 }) {
   const { searchParams, apply, clear, pending, activeCount, values } = useFilters(OWNED_KEYS);
+  const unverifiedOnly = searchParams.get('mobileVerified') === 'false';
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
 
   // Keep the box in step when the URL changes from elsewhere — a dashboard
@@ -126,6 +128,16 @@ function LeadFiltersInner({
 
       <ToggleChip active={hotOnly} onClick={() => apply({ minScore: hotOnly ? null : '70' })}>
         Hot leads
+      </ToggleChip>
+
+      {/* The unverified pile is the view a manager actually wants, so it is one
+          click rather than a sort. There is deliberately no "verified only"
+          chip: nobody goes looking for the numbers that are fine. */}
+      <ToggleChip
+        active={unverifiedOnly}
+        onClick={() => apply({ mobileVerified: unverifiedOnly ? null : 'false' })}
+      >
+        Mobile unverified
       </ToggleChip>
     </FilterBar>
   );
