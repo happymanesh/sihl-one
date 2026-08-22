@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { PRIORITIES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
+import { LeadProfileFields } from '@/components/leads/LeadProfileFields';
 import { createLead, type ActionState } from '@/app/actions/leads';
 import { humanise } from '@/lib/format';
 
@@ -244,6 +245,8 @@ export function NewLeadForm({
           placeholder="What did they ask for? Anything the next person needs to know?"
         />
       </div>
+
+      <LeadProfileFields />
 
       <div className="flex gap-2 border-t border-[var(--color-border)] pt-4">
         <SubmitButton />
