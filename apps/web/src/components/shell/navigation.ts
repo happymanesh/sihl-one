@@ -44,10 +44,14 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Customers', href: '/customers', icon: 'users', permissions: ['customer:read'], section: 'work' },
   { label: 'Products', href: '/products', icon: 'grid', permissions: ['lead:read'], section: 'work' },
   { label: 'Tasks', href: '/tasks', icon: 'check', permissions: ['task:read'], section: 'work' },
+  // Directly under Tasks, and in Work rather than Grow: a field visit is a
+  // rep's daily work alongside their task list, not a growth activity like a
+  // campaign. It sat under a separate heading further down the menu, which is
+  // not where anyone looked for it.
+  { label: 'Visits', href: '/visits', icon: 'pin', permissions: ['visit:read'], section: 'work' },
 
   { label: 'My performance', href: '/performance', icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
 
-  { label: 'Visits', href: '/visits', icon: 'pin', permissions: ['visit:read'], section: 'grow' },
   {
     // The partner's own portal. Gated on the partner analytics permission,
     // which only the PARTNER role holds — staff see the Partners directory
