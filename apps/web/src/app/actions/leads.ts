@@ -136,6 +136,49 @@ export async function updateLeadProfile(
   return { status: 'success', message: 'Saved.' };
 }
 
+/**
+ * Changes the products a lead is interested in.
+ *
+ * Its own action rather than part of a general lead edit, which the web app
+ * still does not offer. This is the field that genuinely changes mid-journey:
+ * a client asks about a second product on the third call, and until now that
+ * could only be recorded against the interaction — leaving the lead itself
+ * invisible to a filter for that product.
+ */
+export async function updateLeadProducts(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+
+  // An empty selection is a real answer, not a missing one. The hidden marker
+  // distinguishes "the rep unticked everything" from "the form never carried
+  // this field", which would otherwise look identical.
+  const touched = formData.get('productsTouched') === '1';
+  if (!touched) return { status: 'idle' };
+
+  const parsed = updateLeadSchema.safeParse({
+    productInterest: formData.getAll('productInterest').map(String),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: 'error',
+      message: parsed.error.issues[0]?.message ?? 'That selection could not be saved.',
+    };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}`, { method: 'PATCH', body: parsed.data });
+  } catch (error) {
+    return toErrorState(error, 'The products could not be saved.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return { status: 'success', message: 'Saved.' };
+}
+
 export async function createLead(_previous: ActionState, formData: FormData): Promise<ActionState> {
   const estimatedValue = formData.get('estimatedValue');
 

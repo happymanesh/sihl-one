@@ -7,11 +7,12 @@ import type {
 } from '@sihl-one/contracts';
 import type { Route } from 'next';
 
-import { Badge, LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
+import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
 import { DocumentPanel } from '@/components/documents/DocumentPanel';
 import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
 import { Timeline } from '@/components/leads/Timeline';
+import { LeadProductsPanel } from '@/components/leads/LeadProductsPanel';
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
 import { apiFetch } from '@/lib/api';
@@ -183,13 +184,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               />
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {lead.productInterest.map((product) => (
-                <Badge key={product} tone="navy">
-                  {humanise(product)}
-                </Badge>
-              ))}
-            </div>
+            <LeadProductsPanel
+              leadId={lead.id}
+              selected={lead.productInterest}
+              products={products}
+              canEdit={can(user, 'lead:update')}
+            />
           </div>
 
           <div className="text-right">
