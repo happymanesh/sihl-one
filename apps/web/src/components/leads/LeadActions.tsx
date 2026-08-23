@@ -46,7 +46,7 @@ interface Props {
  * read most — below the fold.
  */
 /**
- * Which products were discussed, and what the rep expects each to earn.
+ * Which products were discussed, and what the rep expects the client to invest.
  *
  * The amount only appears once a product is ticked, so the form stays short for
  * the majority of interactions that are not a pitch. Leaving an amount blank is
@@ -64,38 +64,69 @@ function ProductValueFields({ products }: { products: ProductItem[] }) {
       current.includes(code) ? current.filter((value) => value !== code) : [...current, code],
     );
 
+  const topLevel = products.filter((product) => !product.parentId);
+  const childrenOf = (parentId: string) =>
+    products.filter((product) => product.parentId === parentId);
+
+  const chip = (product: ProductItem, sub = false) => (
+    <label
+      key={product.code}
+      className={`cursor-pointer rounded-lg border px-2.5 py-1 font-semibold transition-colors has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white ${
+        sub
+          ? 'border-dashed border-[var(--color-border-strong)] text-[0.6875rem]'
+          : 'border-[var(--color-border-strong)] text-xs'
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={picked.includes(product.code)}
+        onChange={() => toggle(product.code)}
+        aria-label={sub ? `${product.parentName ?? ''} ${product.name}`.trim() : product.name}
+        className="sr-only"
+      />
+      {product.name}
+    </label>
+  );
+
   return (
     <div>
       <span className="label">Products discussed</span>
 
-      <div className="flex flex-wrap gap-1.5">
-        {products.map((product) => (
-          <label
-            key={product.code}
-            className="cursor-pointer rounded-lg border border-[var(--color-border-strong)] px-2.5 py-1 text-xs font-semibold transition-colors has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white"
-          >
-            <input
-              type="checkbox"
-              checked={picked.includes(product.code)}
-              onChange={() => toggle(product.code)}
-              aria-label={product.name}
-              className="sr-only"
-            />
-            {product.name}
-          </label>
-        ))}
+      {/* Sub-products sit beside their parent rather than in one flat run.
+          Alphabetically, "Equity intraday" lands nowhere near "Equity", and a
+          rep scanning for the specific thing they discussed would have to read
+          the whole list. Dashed outline marks them as narrower choices; either
+          can be picked, and picking both is legitimate — a conversation can
+          cover the product in general and one variant in particular. */}
+      <div className="flex flex-col gap-1.5">
+        {topLevel.map((parent) => {
+          const children = childrenOf(parent.id);
+          return (
+            <div key={parent.id} className="flex flex-wrap items-center gap-1.5">
+              {chip(parent)}
+              {children.length > 0 ? (
+                <>
+                  <span aria-hidden className="text-xs text-[var(--color-text-subtle)]">
+                    &rsaquo;
+                  </span>
+                  {children.map((child) => chip(child, true))}
+                </>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       {picked.length > 0 ? (
         <div className="mt-2.5 space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
-          <p className="text-xs font-semibold">Expected brokerage</p>
+          <p className="text-xs font-semibold">Expected investment</p>
 
           {picked.map((code) => {
             const product = products.find((item) => item.code === code);
             return (
               <div key={code} className="flex items-center gap-2">
                 <label className="flex-1 text-xs" htmlFor={`productValue.${code}`}>
-                  {product?.name ?? code}
+                  {product?.parentName ? `${product.parentName} › ${product.name}` : (product?.name ?? code)}
                 </label>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-[var(--color-text-subtle)]">₹</span>
@@ -112,7 +143,7 @@ function ProductValueFields({ products }: { products: ProductItem[] }) {
           })}
 
           <p className="text-xs text-[var(--color-text-subtle)]">
-            Your estimate, for the pipeline. Actual brokerage comes from the back office.
+            Your estimate of what they will invest. Actual figures come from the back office.
           </p>
         </div>
       ) : null}

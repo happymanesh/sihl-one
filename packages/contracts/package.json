@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test test/contracts.test.ts test/phase2.test.ts test/phase3.test.ts test/hierarchy.test.ts test/performance.test.ts test/allocation.test.ts test/lead-verification.test.ts test/identity-codes.test.ts test/expected-brokerage.test.ts test/lead-profile.test.ts test/audit.test.ts test/campaign.test.ts test/event.test.ts test/merge.test.ts test/mfa.test.ts test/org-unit.test.ts test/messaging.test.ts test/task-status.test.ts test/meeting-link.test.ts test/visit-expense.test.ts",
+    "test": "node --import tsx --test test/contracts.test.ts test/phase2.test.ts test/phase3.test.ts test/hierarchy.test.ts test/performance.test.ts test/allocation.test.ts test/lead-verification.test.ts test/identity-codes.test.ts test/expected-investment.test.ts test/lead-profile.test.ts test/audit.test.ts test/campaign.test.ts test/event.test.ts test/merge.test.ts test/mfa.test.ts test/org-unit.test.ts test/messaging.test.ts test/task-status.test.ts test/meeting-link.test.ts test/visit-expense.test.ts",
     "lint": "eslint ."
   },
   "dependencies": {

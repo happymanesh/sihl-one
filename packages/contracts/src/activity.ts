@@ -11,22 +11,24 @@ export type EntityType = (typeof ENTITY_TYPES)[number];
 // Expected brokerage, per product
 
 /**
- * The ceiling on a single product line.
+ * The ceiling on a single product line: one hundred crore.
  *
- * Not a business rule so much as a typo guard: a rep who means 25,000 and types
- * an extra zero should be stopped at the form, not discovered in a pipeline
- * report three weeks later.
+ * A typo guard rather than a business rule, and deliberately set at the same
+ * limit as a lead's estimated value. It was ten times smaller when this field
+ * meant brokerage — the fee SIHL earns — and had to rise when it came to mean
+ * the investment itself, which is the larger number by an order of magnitude.
  */
-export const MAX_EXPECTED_BROKERAGE = 10_000_000;
+export const MAX_EXPECTED_INVESTMENT = 1_000_000_000;
 
 /**
- * What a rep expects this conversation to earn, for one product.
+ * What a rep expects the client to invest, for one product.
  *
- * An estimate, and named one everywhere it appears. ADR-0002 puts brokerage in
- * the back office: that system knows what was actually charged, and this one
- * knows what a salesperson believed on a Tuesday. Letting the two wear the same
- * word is how a forecast ends up quoted as revenue in a meeting, so nothing
- * here is ever called "brokerage" alone.
+ * The investment, not the fee SIHL earns on it — those differ by an order of
+ * magnitude and the business chose the former. An estimate either way, and
+ * named one everywhere it appears: ADR-0002 puts the real numbers in the back
+ * office, which knows what was actually placed, while this system knows what a
+ * salesperson believed on a Tuesday. Letting the two wear the same word is how
+ * a forecast ends up quoted as revenue in a meeting.
  */
 export const activityProductValueSchema = z.object({
   /** Code into the product master. */
@@ -35,14 +37,14 @@ export const activityProductValueSchema = z.object({
    * Sent as a string so the rupee value never passes through a float, matching
    * how money is handled everywhere else in the system.
    */
-  expectedBrokerage: z
+  expectedInvestment: z
     .string()
     .trim()
-    .regex(/^\d{1,9}(\.\d{1,2})?$/, 'Enter an amount like 5000 or 12500.50')
+    .regex(/^\d{1,9}(\.\d{1,2})?$/, 'Enter an amount like 500000 or 250000.50')
     .refine((value) => Number(value) >= 0, 'An expected amount cannot be negative')
     .refine(
-      (value) => Number(value) <= MAX_EXPECTED_BROKERAGE,
-      `Above ${MAX_EXPECTED_BROKERAGE.toLocaleString('en-IN')} this is almost certainly a typo`,
+      (value) => Number(value) <= MAX_EXPECTED_INVESTMENT,
+      `Above ${MAX_EXPECTED_INVESTMENT.toLocaleString('en-IN')} this is almost certainly a typo`,
     ),
 });
 export type ActivityProductValueInput = z.infer<typeof activityProductValueSchema>;
@@ -51,7 +53,7 @@ export interface ActivityProductValueItem {
   productCode: string;
   productName: string | null;
   /** String, as stored. Formatting is the caller's business. */
-  expectedBrokerage: string;
+  expectedInvestment: string;
 }
 
 /**
@@ -60,7 +62,7 @@ export interface ActivityProductValueItem {
  * Sums paise as integers: 0.1 + 0.2 is not 0.3 in binary floating point, and
  * this figure is read as money.
  */
-export function totalExpectedBrokerage(amounts: readonly string[]): string {
+export function totalExpectedInvestment(amounts: readonly string[]): string {
   const paise = amounts.reduce((sum, amount) => sum + Math.round(Number(amount) * 100), 0);
   return (paise / 100).toFixed(2);
 }
@@ -81,9 +83,9 @@ export const createActivitySchema = z
     meetingMode: codeSchema.optional(),
     meetingLink: z.string().trim().max(500).optional(),
     /**
-     * Which products were discussed, and what the rep expects each to earn.
-     * Optional throughout: most interactions are not a pitch, and forcing a
-     * number produces invented ones.
+     * Which products were discussed, and what the rep expects the client to put
+     * into each. Optional throughout: most interactions are not a pitch, and
+     * forcing a number produces invented ones.
      */
     productValues: z.array(activityProductValueSchema).max(12).optional(),
   })
