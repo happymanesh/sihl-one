@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { VISIT_STATUSES } from './enums';
 import { ENTITY_TYPES } from './activity';
 import { idSchema, paginationQuerySchema } from './common';
-import { MAX_ACCEPTABLE_ACCURACY_METRES } from './geo';
 
 /**
  * Field-visit contracts.
@@ -23,21 +22,6 @@ const longitudeSchema = z.number().min(-180).max(180);
  * column default in the database. All three have to agree.
  */
 export const DEFAULT_VISIT_MODE = 'CLIENT_SITE';
-
-/**
- * Accuracy is required, not optional.
- *
- * A coordinate without its uncertainty is not evidence — it looks identical
- * whether it came from GPS or from a cell tower five kilometres away. The
- * browser always provides it, so requiring it costs the client nothing.
- */
-const accuracySchema = z
-  .number()
-  .positive('Location accuracy must be a positive number of metres')
-  .max(
-    MAX_ACCEPTABLE_ACCURACY_METRES,
-    `Location accuracy is worse than ${MAX_ACCEPTABLE_ACCURACY_METRES} m, which is too imprecise to record a visit`,
-  );
 
 /**
  * The mode a visit is planned in.
