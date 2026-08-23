@@ -105,6 +105,17 @@ export function UserMenu({
             </dl>
           </div>
 
+          {/* Help lives here rather than as a sixth icon in the top bar: on a
+              375-pixel screen that bar already carries five, and help is not
+              tapped often enough mid-task to earn permanent space. This is
+              where people look for things about themselves and the app. */}
+          <a
+            href="/help"
+            role="menuitem"
+            className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--color-surface-muted)]"
+          >
+            Help
+          </a>
           <a
             href="/settings/security"
             role="menuitem"
