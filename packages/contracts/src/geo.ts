@@ -54,8 +54,13 @@ export function locationQuality(accuracyMetres: number | null | undefined): Loca
 }
 
 /**
- * Beyond this the fix carries no useful information and is rejected outright,
- * rather than being stored as though it meant something.
+ * Beyond this a fix carries no useful information.
+ *
+ * Retained as a documented bound, but nothing rejects on it any more. A check-in
+ * with no location at all is now a legitimate outcome — a basement, a rural
+ * gap — so refusing merely-vague coordinates while accepting none would have
+ * been backwards. `locationQuality` bands the fix and `assessCheckInLocation`
+ * decides whether it confirms presence; both classify rather than reject.
  */
 export const MAX_ACCEPTABLE_ACCURACY_METRES = 5000;
 

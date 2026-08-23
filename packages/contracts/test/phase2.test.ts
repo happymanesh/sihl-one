@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  assessVisitIntegrity,
-  distanceInMetres,
-  locationQuality,
-  MAX_ACCEPTABLE_ACCURACY_METRES,
-} from '../src/geo';
+import { assessVisitIntegrity, distanceInMetres, locationQuality } from '../src/geo';
 import {
   assessCheckInLocation,
   canTransitionVisit,
