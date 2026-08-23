@@ -10,6 +10,8 @@ import { AuditService } from '../../common/audit.service';
 import { ScopeService } from '../../common/scope.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ReferenceService } from '../../common/reference.service';
+import { createFollowUpTask } from '../tasks/follow-up-task';
 import { rescore } from '../leads/lead.mapper';
 
 @Injectable()
@@ -18,6 +20,7 @@ export class ActivitiesService {
     private readonly prisma: PrismaService,
     private readonly scope: ScopeService,
     private readonly audit: AuditService,
+    private readonly references: ReferenceService,
   ) {}
 
   async list(
@@ -166,6 +169,11 @@ export class ActivitiesService {
       }
     }
 
+    // Drawn before the transaction opens: the counter is its own write on its
+    // own connection, so pulling it inside would burn the number anyway if the
+    // transaction rolled back.
+    const followUpReference = input.nextFollowUpAt ? await this.references.next('TK') : null;
+
     const activity = await this.prisma.$transaction(async (tx) => {
       const created = await tx.activity.create({
         data: {
@@ -215,6 +223,22 @@ export class ActivitiesService {
           where: { id: input.entityId },
           data: rescore(lead, activityCount) as never,
         });
+
+        // The date alone only moved the pipeline's overdue count. The rep who
+        // promised to call back never saw it on their own Tasks screen, which
+        // is where they look. Assigned to the lead's owner rather than to the
+        // caller — a manager logging a call is booking the owner's follow-up.
+        if (input.nextFollowUpAt && followUpReference) {
+          await createFollowUpTask(tx, {
+            reference: followUpReference,
+            entityType: 'LEAD',
+            entityId: input.entityId,
+            dueAt: input.nextFollowUpAt,
+            context: input.subject,
+            assigneeId: lead.ownerId ?? user.id,
+            createdById: user.id,
+          });
+        }
       } else if (input.entityType === 'CUSTOMER') {
         await tx.customer.update({
           where: { id: input.entityId },

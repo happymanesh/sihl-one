@@ -24,6 +24,7 @@ import {
 import { AuditService } from '../../common/audit.service';
 import { OutboxService } from '../../common/outbox.service';
 import { ReferenceService } from '../../common/reference.service';
+import { createFollowUpTask } from '../tasks/follow-up-task';
 import { ScopeService } from '../../common/scope.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -237,6 +238,12 @@ export class VisitsService {
     // Africa and then flagged the drift as suspicious.
     const rules = visitEvidenceRules(await this.findMode(visit.mode));
 
+    // Drawn before the transaction opens: the counter is its own write on its
+    // own connection, so pulling it inside would burn the number anyway if the
+    // transaction rolled back. A gap in the sequence is harmless; a reference
+    // reused across two tasks would not be.
+    const followUpReference = input.nextFollowUpAt ? await this.references.next('TK') : null;
+
     const integrity = assessVisitIntegrity({
       checkIn:
         visit.checkInLatitude !== null && visit.checkInLongitude !== null
@@ -303,6 +310,26 @@ export class VisitsService {
         await tx.customer.update({
           where: { id: visit.entityId },
           data: { lastActivityAt: now },
+        });
+      }
+
+      // A follow-up booked at the door has to land somewhere the rep looks.
+      // Writing the date onto the lead alone put it in the pipeline's overdue
+      // count and nowhere else, so the commitment made at the end of a visit
+      // never reached the Tasks screen.
+      //
+      // Assigned to whoever owns the visit rather than to the caller: a manager
+      // closing out a visit on a rep's behalf is booking the rep's follow-up,
+      // not their own.
+      if (input.nextFollowUpAt && followUpReference) {
+        await createFollowUpTask(tx, {
+          reference: followUpReference,
+          entityType: visit.entityType,
+          entityId: visit.entityId,
+          dueAt: input.nextFollowUpAt,
+          context: visit.purpose,
+          assigneeId: visit.userId,
+          createdById: user.id,
         });
       }
 
