@@ -4,13 +4,13 @@ import { describe, it } from 'node:test';
 import {
   activityProductValueSchema,
   createActivitySchema,
-  MAX_EXPECTED_BROKERAGE,
-  totalExpectedBrokerage,
+  MAX_EXPECTED_INVESTMENT,
+  totalExpectedInvestment,
 } from '../src/activity';
 
-const line = (productCode: string, expectedBrokerage: string) => ({ productCode, expectedBrokerage });
+const line = (productCode: string, expectedInvestment: string) => ({ productCode, expectedInvestment });
 
-describe('expected brokerage per product', () => {
+describe('expected investment per product', () => {
   it('accepts whole rupees and paise', () => {
     assert.equal(activityProductValueSchema.safeParse(line('EQ', '5000')).success, true);
     assert.equal(activityProductValueSchema.safeParse(line('EQ', '12500.50')).success, true);
@@ -34,28 +34,28 @@ describe('expected brokerage per product', () => {
 
   it('refuses an amount above the typo ceiling', () => {
     assert.equal(
-      activityProductValueSchema.safeParse(line('EQ', String(MAX_EXPECTED_BROKERAGE + 1))).success,
+      activityProductValueSchema.safeParse(line('EQ', String(MAX_EXPECTED_INVESTMENT + 1))).success,
       false,
     );
   });
 });
 
-describe('totalling expected brokerage', () => {
+describe('totalling expected investment', () => {
   it('sums to two decimal places', () => {
-    assert.equal(totalExpectedBrokerage(['5000', '2500.50']), '7500.50');
+    assert.equal(totalExpectedInvestment(['5000', '2500.50']), '7500.50');
   });
 
   it('does not lose a paisa to floating point', () => {
     // 0.1 + 0.2 is not 0.3 in binary floating point, and this figure is money.
-    assert.equal(totalExpectedBrokerage(['0.10', '0.20']), '0.30');
+    assert.equal(totalExpectedInvestment(['0.10', '0.20']), '0.30');
   });
 
   it('keeps the trailing zero, because it is printed as money', () => {
-    assert.equal(totalExpectedBrokerage(['450.50', '0']), '450.50');
+    assert.equal(totalExpectedInvestment(['450.50', '0']), '450.50');
   });
 
   it('is zero for nothing at all', () => {
-    assert.equal(totalExpectedBrokerage([]), '0.00');
+    assert.equal(totalExpectedInvestment([]), '0.00');
   });
 });
 

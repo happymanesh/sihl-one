@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import {
   checkMeetingLink,
-  totalExpectedBrokerage,
+  totalExpectedInvestment,
   type ActivityQuery,
   type CreateActivityInput,
 } from '@sihl-one/contracts';
@@ -91,10 +91,10 @@ export class ActivitiesService {
           // Two decimals forced: String(Decimal) drops a trailing zero, so
           // 5000.50 comes back as '5000.5' — numerically right and wrong on a
           // page of money.
-          expectedBrokerage: entry.expectedBrokerage.toFixed(2),
+          expectedInvestment: entry.expectedInvestment.toFixed(2),
         })),
-        expectedBrokerageTotal: totalExpectedBrokerage(
-          activity.productValues.map((entry) => entry.expectedBrokerage.toFixed(2)),
+        expectedInvestmentTotal: totalExpectedInvestment(
+          activity.productValues.map((entry) => entry.expectedInvestment.toFixed(2)),
         ),
       })),
       total,
@@ -191,7 +191,7 @@ export class ActivitiesService {
             productCode: entry.productCode,
             // The string crosses the wire and Prisma converts it to Decimal.
             // It is never turned into a JavaScript number on the way through.
-            expectedBrokerage: entry.expectedBrokerage,
+            expectedInvestment: entry.expectedInvestment,
           })),
         });
       }

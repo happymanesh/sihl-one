@@ -312,14 +312,14 @@ export async function unverifyLeadMobile(
  */
 function readProductValues(
   formData: FormData,
-): Array<{ productCode: string; expectedBrokerage: string }> | undefined {
-  const values: Array<{ productCode: string; expectedBrokerage: string }> = [];
+): Array<{ productCode: string; expectedInvestment: string }> | undefined {
+  const values: Array<{ productCode: string; expectedInvestment: string }> = [];
 
   for (const [key, raw] of formData.entries()) {
     if (!key.startsWith('productValue.')) continue;
     const amount = String(raw).trim();
     if (!amount) continue;
-    values.push({ productCode: key.slice('productValue.'.length), expectedBrokerage: amount });
+    values.push({ productCode: key.slice('productValue.'.length), expectedInvestment: amount });
   }
 
   return values.length > 0 ? values : undefined;

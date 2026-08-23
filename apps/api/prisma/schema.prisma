@@ -1214,7 +1214,7 @@ model ActivityProductValue {
   product     Product @relation(fields: [productCode], references: [code], onDelete: Restrict, onUpdate: Cascade)
 
   /// Decimal, never Float — this is summed and reported as money.
-  expectedBrokerage Decimal @default(0) @db.Decimal(18, 2)
+  expectedInvestment Decimal @default(0) @db.Decimal(18, 2)
 
   createdAt DateTime @default(now())
 
