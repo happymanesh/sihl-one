@@ -50,8 +50,15 @@ export function MultiSelectFilter({
         <span aria-hidden className="text-[0.625rem] opacity-70">▾</span>
       </summary>
 
+      {/* Anchored to the left of the trigger, not the right.
+          Right-aligning a fixed 15rem panel to a trigger that sits at the start
+          of the filter bar hangs most of it off the left edge of the content,
+          under the navigation — product names arrived as "odities" and "funds".
+          A filter bar reads left to right, so the panel should grow the same
+          way. The viewport clamp keeps it on screen on a phone, where the
+          trigger can sit closer to the right than the panel is wide. */}
       <div
-        className="absolute right-0 z-30 mt-1 max-h-72 w-60 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-card"
+        className="absolute left-0 z-30 mt-1 max-h-72 w-60 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-card"
         role="group"
         aria-label={label}
       >
