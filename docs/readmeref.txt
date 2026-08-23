@@ -34,10 +34,11 @@ Key Pair:
 Client id: 96dHZVzsAutijGxY29RzqCuqEfd90jHmE-yM2cLdrSFpz_VfK9hvdXkBeUwO6sTwirZpf8G5sU6vb8yTEfBuhQ==
 Client Secret: lrFxI-iSEg9T5ixwl6mpkVaBsK-OGu002ymrNCOAHC0IaVbXdpczpS-2_apyPI0NLUQ-znUZ6seGP-z49nxcnU8wT2EXP_Ph
 
+Release Plan
+https://claude.ai/code/artifact/483d4ff8-7582-4305-848f-7872127e6513
 
-https://claude.ai/code/artifact/483d4ff8-7582-4305-848f-7872127e6513
-https://claude.ai/code/artifact/483d4ff8-7582-4305-848f-7872127e6513
 https://claude.ai/code/artifact/73c950d8-766a-4277-a451-0c32812be124
+Help
 https://claude.ai/code/artifact/57ecf9a2-635a-4750-b10f-922cc5e10a5f
 
 SIHL ONE update — [DATE], [TIME]
