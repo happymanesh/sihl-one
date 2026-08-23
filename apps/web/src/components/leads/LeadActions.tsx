@@ -92,27 +92,35 @@ function ProductValueFields({ products }: { products: ProductItem[] }) {
     <div>
       <span className="label">Products discussed</span>
 
-      {/* Sub-products sit beside their parent rather than in one flat run.
-          Alphabetically, "Equity intraday" lands nowhere near "Equity", and a
-          rep scanning for the specific thing they discussed would have to read
-          the whole list. Dashed outline marks them as narrower choices; either
-          can be picked, and picking both is legitimate — a conversation can
-          cover the product in general and one variant in particular. */}
-      <div className="flex flex-col gap-1.5">
+      {/* Chips flow and wrap as they always did; what changed is that a parent
+          and its sub-products form one unit, so a line break can never separate
+          "Equity" from "Equity intraday". A first attempt gave every product its
+          own row, which turned twelve chips into twelve lines — the grouping was
+          right and the layout was wrong.
+
+          Dashed outline marks a sub-product as the narrower choice. Either can
+          be picked, and picking both is legitimate: a conversation can cover the
+          product in general and one variant in particular. */}
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
         {topLevel.map((parent) => {
           const children = childrenOf(parent.id);
+
+          if (children.length === 0) return chip(parent);
+
           return (
-            <div key={parent.id} className="flex flex-wrap items-center gap-1.5">
+            <span
+              key={parent.id}
+              // Wraps inside the group as well: a parent with five sub-products
+              // would otherwise run off the side of a phone. The tinted
+              // background keeps them read as one unit even across two lines.
+              className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[var(--color-surface-muted)] px-1.5 py-1"
+            >
               {chip(parent)}
-              {children.length > 0 ? (
-                <>
-                  <span aria-hidden className="text-xs text-[var(--color-text-subtle)]">
-                    &rsaquo;
-                  </span>
-                  {children.map((child) => chip(child, true))}
-                </>
-              ) : null}
-            </div>
+              <span aria-hidden className="text-xs text-[var(--color-text-subtle)]">
+                &rsaquo;
+              </span>
+              {children.map((child) => chip(child, true))}
+            </span>
           );
         })}
       </div>
