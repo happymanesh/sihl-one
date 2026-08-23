@@ -20,6 +20,34 @@
 
 set -euo pipefail
 
+# Resolve the CLI rather than trusting PATH. Task Scheduler runs with a much
+# barer environment than a login shell, and the npm global bin directory is not
+# on it — the first scheduled run died with `railway: command not found` after
+# the same script had just succeeded by hand.
+RAILWAY="${RAILWAY_BIN:-}"
+# A path handed in from cmd.exe arrives as C:\Users\... , which bash cannot
+# resolve. Translate before testing it, or the check below reports the CLI
+# missing when it is sitting right there.
+if [ -n "$RAILWAY" ] && command -v cygpath >/dev/null 2>&1; then
+  RAILWAY="$(cygpath -u "$RAILWAY" 2>/dev/null || printf '%s' "$RAILWAY")"
+fi
+if [ -n "$RAILWAY" ] && [ ! -f "$RAILWAY" ]; then
+  echo "    RAILWAY_BIN=$RAILWAY does not exist; falling back to PATH" >&2
+  RAILWAY=""
+fi
+if [ -z "$RAILWAY" ]; then
+  if command -v railway >/dev/null 2>&1; then
+    RAILWAY="$(command -v railway)"
+  elif [ -f "$APPDATA/npm/railway" ]; then
+    RAILWAY="$APPDATA/npm/railway"
+  elif [ -f "$HOME/AppData/Roaming/npm/railway" ]; then
+    RAILWAY="$HOME/AppData/Roaming/npm/railway"
+  else
+    echo "!!! railway CLI not found. Set RAILWAY_BIN to its full path." >&2
+    exit 127
+  fi
+fi
+
 PROJECT="${RAILWAY_PROJECT:-8c812c44-bfdb-4fc8-a259-14b13991d660}"
 ENVIRONMENT="${RAILWAY_ENV:-production}"
 DB_SERVICE="${DB_SERVICE:-Postgres}"
@@ -37,7 +65,7 @@ REMOTE="/tmp/sihl-prod-${STAMP}.dump"
 LOCAL="${DEST_DIR}/sihl-prod-${STAMP}.dump"
 
 rsh() {
-  railway ssh --project "$PROJECT" --environment "$ENVIRONMENT" \
+  "$RAILWAY" ssh --project "$PROJECT" --environment "$ENVIRONMENT" \
     --service "$DB_SERVICE" -i "$SSH_KEY" "$1" </dev/null
 }
 
@@ -48,7 +76,7 @@ REMOTE_SHA="$(rsh "pg_dump --format=custom --compress=9 --file=${REMOTE} && sha2
 echo "    remote sha256 ${REMOTE_SHA}"
 
 echo "==> Downloading"
-railway service files --project "$PROJECT" --environment "$ENVIRONMENT" --service "$DB_SERVICE" \
+"$RAILWAY" service files --project "$PROJECT" --environment "$ENVIRONMENT" --service "$DB_SERVICE" \
   download --overwrite "$REMOTE" "$(cygpath -w "$LOCAL" 2>/dev/null || echo "$LOCAL")" >/dev/null
 
 LOCAL_SHA="$(sha256sum "$LOCAL" | cut -d' ' -f1)"
@@ -76,6 +104,25 @@ fi
 
 # The container copy is PII sitting on a shared host with no reason to persist.
 rsh "rm -f ${REMOTE}" >/dev/null
+
+# Prune, but never to nothing. A run that somehow produced only broken archives
+# should not also delete the last good one, so the newest MIN_KEEP files survive
+# regardless of age.
+RETAIN_DAYS="${RETAIN_DAYS:-30}"
+MIN_KEEP="${MIN_KEEP:-7}"
+mapfile -t ALL < <(ls -1t "${DEST_DIR}"/sihl-prod-*.dump 2>/dev/null || true)
+if [ "${#ALL[@]}" -gt "$MIN_KEEP" ]; then
+  for old in "${ALL[@]:$MIN_KEEP}"; do
+    if [ -n "$(find "$old" -mtime +"$RETAIN_DAYS" 2>/dev/null)" ]; then
+      rm -f "$old"
+      echo "    pruned $(basename "$old")"
+    fi
+  done
+fi
+
+# A one-line ledger the scheduled task appends to. The point is that a silent
+# failure is visible the next morning without reading a whole log.
+printf '%s\tOK\t%s\t%s\n' "$(date -Iseconds)" "$(basename "$LOCAL")" "$LOCAL_SHA" >> "${DEST_DIR}/backup-log.tsv"
 
 echo
 echo "Backup: ${LOCAL}"
