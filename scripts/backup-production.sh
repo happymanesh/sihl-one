@@ -48,8 +48,8 @@ REMOTE_SHA="$(rsh "pg_dump --format=custom --compress=9 --file=${REMOTE} && sha2
 echo "    remote sha256 ${REMOTE_SHA}"
 
 echo "==> Downloading"
-railway service --project "$PROJECT" --environment "$ENVIRONMENT" --service "$DB_SERVICE" \
-  files download --overwrite "$REMOTE" "$(cygpath -w "$LOCAL" 2>/dev/null || echo "$LOCAL")" >/dev/null
+railway service files --project "$PROJECT" --environment "$ENVIRONMENT" --service "$DB_SERVICE" \
+  download --overwrite "$REMOTE" "$(cygpath -w "$LOCAL" 2>/dev/null || echo "$LOCAL")" >/dev/null
 
 LOCAL_SHA="$(sha256sum "$LOCAL" | cut -d' ' -f1)"
 if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
