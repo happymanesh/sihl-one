@@ -64,5 +64,19 @@ Feedback welcome.
 
 set the variables and let me know when done
 yes, snapshot is ready. proceed with production release
+take the backup again
+
+update artifacts for guidance, tech document, production release plan, steps and procedures for releasing it on SIHL environment, changes done pdf for emailing to Sales team and CEO. how to restore backup.
+
+remove all the dummy data from production. should admin have option to delete leads and its related details ?
+
+
+--------------------------------------------
+Production web: https://web-production-97dc7.up.railway.app
+Production API: https://api-production-c405d.up.railway.app
+
+Railway-generated domains persist across deploys, so railway up replaces the running image but never the address. Staging is still https://web-staging-faea.up.railway.app.
+
+
 
 

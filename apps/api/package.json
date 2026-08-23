@@ -10,7 +10,7 @@
     "start": "node dist/main.js",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test test/unit/scope.test.ts test/unit/audit.test.ts test/unit/storage.test.ts test/unit/clamav.test.ts test/unit/geocoding.test.ts test/unit/speech.test.ts",
+    "test": "node --import tsx --test test/unit/*.test.ts",
     "test:e2e": "node --import tsx --test test/e2e/*.e2e-test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
