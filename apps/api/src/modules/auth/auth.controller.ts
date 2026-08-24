@@ -116,14 +116,22 @@ export class AuthController {
     return this.mfa.disable(user.id, body);
   }
 
+  // Public, necessarily: this endpoint exists to be called when the access
+  // token has expired, so requiring one is a contradiction. It was missing that
+  // decorator and answered every call with "No bearer token was supplied",
+  // which meant refresh had never once succeeded — the moment an access token
+  // aged out, the session was effectively over. The refresh token in the body
+  // is the credential, and it is verified against the session table.
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Exchange a refresh token for a new token pair',
     description:
-      'Rotates the refresh token. Presenting an already-rotated token revokes every session ' +
-      'for that user, on the assumption the token leaked.',
+      'Rotates the refresh token. Presenting an already-rotated token is tolerated for a few ' +
+      'seconds, since a browser can race itself; later reuse revokes every session for that ' +
+      'user, on the assumption the token leaked.',
   })
   @ApiZodBody(refreshSchema)
   refresh(@ZodBody(refreshSchema) body: RefreshInput) {
