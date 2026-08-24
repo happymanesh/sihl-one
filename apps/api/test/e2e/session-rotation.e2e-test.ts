@@ -62,17 +62,27 @@ describe('refresh token rotation', () => {
     ]);
 
     const ok = responses.filter((response) => response.ok);
-    assert.ok(ok.length >= 1, 'at least one racing refresh must succeed');
+    assert.equal(ok.length, responses.length, 'every racing refresh should be answered, not rejected');
 
-    // The point of the fix. Before it, the losers tripped reuse detection and
-    // every session for the user was revoked — including the one that had just
-    // been issued to the winner.
-    const winner = (await ok[0]!.json()) as { accessToken: string };
-    assert.equal(
-      await stillSignedIn(winner.accessToken),
-      true,
-      'the session issued by the winning refresh was revoked by the losers',
+    // The property that matters, and the one that failed before: the user is
+    // still signed in afterwards. Previously the losers tripped reuse detection
+    // and every session for the user was revoked, including the one issued to
+    // the winner a moment earlier — the whole team, mid-task.
+    const pairs = await Promise.all(ok.map((response) => response.json() as Promise<Tokens>));
+    const usable = await Promise.all(pairs.map((pair) => stillSignedIn(pair.accessToken)));
+
+    assert.ok(
+      usable.some(Boolean),
+      'a burst of refreshes left the user with no working session at all',
     );
+
+    // Known and accepted: each racing request rotates again, so only the last
+    // pair issued stays live. A browser that acted on an earlier response holds
+    // a dead token and has to sign in once more. That is a single re-login
+    // rather than a mass revocation, and the middleware now refreshes only on
+    // document navigations so the burst should not arise outside multi-tab use.
+    // Making every racer converge on one pair needs deterministic rotation,
+    // which is a larger change than this fix.
   });
 
   it('still rejects a token reused long after it was rotated', async () => {
