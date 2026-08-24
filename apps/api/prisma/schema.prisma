@@ -492,6 +492,14 @@ model Session {
   lastSeenAt       DateTime  @default(now())
   createdAt        DateTime  @default(now())
 
+  /// The session this one was rotated into, set when a refresh succeeds.
+  ///
+  /// Exists so a refresh token presented moments after it was legitimately
+  /// rotated can be followed forward to the live session instead of being read
+  /// as theft. Without it the only available response to a client racing itself
+  /// was to revoke every session the user had.
+  replacedById String? @db.VarChar(30)
+
   @@index([userId])
   @@index([expiresAt])
   @@map("session")

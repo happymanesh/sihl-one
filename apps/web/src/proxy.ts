@@ -54,7 +54,22 @@ export function proxy(request: NextRequest) {
   // Access token gone but the refresh token is still good — the ordinary state
   // of someone returning after a break. Spend the refresh token and carry on to
   // where they were going, rather than making them sign in again.
+  //
+  // Only for a real page navigation. A single page load also fires RSC and data
+  // requests, and every one of them arrives here without an access cookie: they
+  // were all redirected into /auth/refresh at once, one won the rotation, and
+  // the rest presented the token it had just replaced. The API read that as a
+  // stolen token and revoked every session the user had. Restricting the
+  // redirect to documents means one refresh per navigation instead of several
+  // per page, and the API's rotation grace window covers what remains.
   if (!hasAccess && hasRefresh) {
+    const isDocument = request.headers.get('sec-fetch-dest') === 'document';
+    if (!isDocument) {
+      // Let it through unauthenticated. The server render will 401 and redirect
+      // to /login, which the next document navigation turns into a refresh.
+      return NextResponse.next();
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = '/auth/refresh';
     url.search = `?next=${encodeURIComponent(pathname + search)}`;
