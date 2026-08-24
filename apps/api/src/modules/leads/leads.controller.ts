@@ -7,8 +7,9 @@ import {
   Param,
   Patch,
   Post,
-  } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+  Query,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import {
   assignLeadSchema,
@@ -115,6 +116,24 @@ export class LeadsController {
     @ZodQuery(leadQuerySchema) query: LeadQuery,
   ) {
     return this.leads.productPipeline(user, query);
+  }
+
+  @Get('pipeline/products/column')
+  @RequirePermissions('lead:read')
+  @ApiOperation({
+    summary: 'One column of the per-product board',
+    description:
+      'Returns lead-products rather than leads, so a client interested in three products ' +
+      'appears in whichever three columns those products have reached.',
+  })
+  @ApiQuery({ name: 'status', required: true })
+  @ApiZodQuery(leadQuerySchema)
+  productBoardColumn(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query('status') status: string,
+    @ZodQuery(leadQuerySchema) query: LeadQuery,
+  ) {
+    return this.leads.productBoardColumn(user, status, query);
   }
 
   @Get('check-mobile')
