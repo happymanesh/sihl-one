@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import {
   canTransferLeads,
+  isOpenLeadProductStatus,
+  OPEN_LEAD_PRODUCT_STATUSES,
+  rollUpLeadStatus,
   canTransitionLead,
   LEAD_STATUS_TRANSITIONS,
   maskPan,
@@ -14,7 +17,10 @@ import {
   STRONG_LEAD_SCORE,
   verificationSurvivesEdit,
   type AssignLeadInput,
+  type ChangeLeadProductStatusInput,
   type CheckLeadMobileInput,
+  type LeadProductStatus,
+  type LeadProductView,
   type DuplicateLeadMatch,
   type TransferLeadInput,
   type BulkAssignLeadInput,
@@ -155,6 +161,50 @@ export class LeadsService {
       query.page,
       query.pageSize,
     );
+  }
+
+  /**
+   * The board, one card per lead-product.
+   *
+   * A lead interested in equity, F&O and mutual funds appears three times and
+   * each moves independently, which is the whole point of the change: a manager
+   * looking at PROPOSAL wants three proposals, not one lead standing in for
+   * them. Counting leads instead would put that client in whichever column
+   * their furthest product reached and hide the other two conversations.
+   *
+   * Leads with no products still appear once, under their own status. A lead is
+   * a name and a number for its first few days and dropping it off the board
+   * until somebody ticks a product is how leads get forgotten.
+   */
+  async productPipeline(user: AuthenticatedPrincipal, query: LeadQuery) {
+    const expanded = await this.withSubProducts(query);
+    const where = this.buildWhere(user, { ...expanded, status: undefined });
+
+    const [byProduct, withoutProducts] = await Promise.all([
+      this.prisma.leadProduct.groupBy({
+        by: ['status'],
+        where: { lead: where as Prisma.LeadWhereInput },
+        _count: { _all: true },
+      }),
+      this.prisma.lead.groupBy({
+        by: ['status'],
+        where: { ...(where as Prisma.LeadWhereInput), products: { none: {} } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const counts = new Map<string, number>();
+    for (const row of [...byProduct, ...withoutProducts]) {
+      counts.set(row.status, (counts.get(row.status) ?? 0) + row._count._all);
+    }
+
+    return {
+      columns: (Object.keys(LEAD_STATUS_TRANSITIONS) as LeadStatus[]).map((status) => ({
+        status,
+        count: counts.get(status) ?? 0,
+      })),
+      total: [...counts.values()].reduce((sum, n) => sum + n, 0),
+    };
   }
 
   /**
@@ -391,6 +441,10 @@ export class LeadsService {
       await tx.leadStatusHistory.create({
         data: { leadId: created.id, fromStatus: null, toStatus: 'NEW', changedById: user.id },
       });
+
+      // Rows for each product the lead came in wanting. Inside the transaction
+      // so a lead never exists with an interest array and no outcomes to match.
+      await this.syncLeadProducts(tx, created.id, input.productInterest);
 
       await this.writeProfile(tx, created.id, user.id, input.profile);
 
@@ -645,6 +699,15 @@ export class LeadsService {
         resource: 'lead.mobile_verification',
         resourceId: id,
         changes: { cleared: true, reason: 'The mobile number was changed' },
+      });
+    }
+
+    // Products edited on the lead reconcile into their own rows, and the lead's
+    // status is rolled back up from them. Only when the caller actually sent a
+    // list — a PATCH that touches only the city must not wipe outcomes.
+    if (input.productInterest) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.syncLeadProducts(tx, id, input.productInterest!);
       });
     }
 
@@ -994,12 +1057,22 @@ export class LeadsService {
         },
       });
 
+      // Close the product that was taken up, or all of them when no product was
+      // named. The lead's own status is not set here: it is rolled up from the
+      // products below, so a lead with equity converted and F&O still at
+      // proposal correctly stays open instead of vanishing from the pipeline.
+      await tx.leadProduct.updateMany({
+        where: {
+          leadId: id,
+          status: { in: [...OPEN_LEAD_PRODUCT_STATUSES] },
+          ...(input.productCode ? { productCode: input.productCode } : {}),
+        },
+        data: { status: 'CONVERTED', closedAt: new Date() },
+      });
+
       await tx.lead.update({
         where: { id },
         data: {
-          status: 'CONVERTED',
-          convertedAt: new Date(),
-          closedAt: new Date(),
           customerId: customer.id,
           pan: input.pan,
           email: input.email,
@@ -1008,12 +1081,32 @@ export class LeadsService {
         },
       });
 
+      // Roll the lead up from its products, then stamp the conversion dates only
+      // if that actually made it converted. A lead still working two other
+      // products has not converted, however much of a milestone this was.
+      await this.rollUpLead(tx, id);
+
+      const rolled = await tx.lead.findUniqueOrThrow({
+        where: { id },
+        select: { status: true },
+      });
+      if (rolled.status === 'CONVERTED') {
+        await tx.lead.update({
+          where: { id },
+          data: { convertedAt: new Date(), closedAt: new Date() },
+        });
+      }
+
       await tx.leadStatusHistory.create({
         data: {
           leadId: id,
           fromStatus: lead.status,
-          toStatus: 'CONVERTED',
-          note: input.note ?? `Converted to customer ${reference}`,
+          toStatus: rolled.status,
+          note:
+            input.note ??
+            (input.productCode
+              ? `${input.productCode} converted — customer ${reference}`
+              : `Converted to customer ${reference}`),
           changedById: user.id,
         },
       });
@@ -1543,6 +1636,167 @@ export class LeadsService {
     });
 
     return { id, ownerId: owner.id };
+  }
+
+
+  /**
+   * Bring a lead's product rows in line with its `productInterest` array, then
+   * roll the lead's own status up from them.
+   *
+   * Called wherever the array is written. Two sources for the same fact is a
+   * drift waiting to happen; this is the one place that reconciles them, and it
+   * runs inside the caller's transaction so a lead is never left with an array
+   * saying one thing and rows saying another.
+   *
+   * Removing a product deletes its row only while nothing has happened to it. A
+   * product already closed — converted, lost, disqualified — is left in place:
+   * that is a recorded outcome, and un-ticking a checkbox should not erase the
+   * fact that a client bought something.
+   */
+  private async syncLeadProducts(
+    tx: Prisma.TransactionClient,
+    leadId: string,
+    codes: readonly string[],
+  ): Promise<void> {
+    const wanted = [...new Set(codes)];
+    const existing = await tx.leadProduct.findMany({
+      where: { leadId },
+      select: { productCode: true, status: true },
+    });
+
+    const have = new Set(existing.map((row) => row.productCode));
+    const toAdd = wanted.filter((code) => !have.has(code));
+
+    const removable = existing
+      .filter(
+        (row) =>
+          !wanted.includes(row.productCode) &&
+          isOpenLeadProductStatus(row.status as LeadProductStatus),
+      )
+      .map((row) => row.productCode);
+
+    if (removable.length > 0) {
+      await tx.leadProduct.deleteMany({ where: { leadId, productCode: { in: removable } } });
+    }
+
+    if (toAdd.length > 0) {
+      await tx.leadProduct.createMany({
+        data: toAdd.map((productCode) => ({ leadId, productCode })),
+        skipDuplicates: true,
+      });
+    }
+
+    await this.rollUpLead(tx, leadId);
+  }
+
+  /**
+   * Recompute the lead's own status from its products.
+   *
+   * Stored rather than derived on read: the pipeline groups and counts by it.
+   * The rule itself lives in the contracts so both apps agree on what a lead
+   * with one converted and two open products actually is.
+   */
+  private async rollUpLead(tx: Prisma.TransactionClient, leadId: string): Promise<void> {
+    const rows = await tx.leadProduct.findMany({ where: { leadId }, select: { status: true } });
+    const rolled = rollUpLeadStatus(rows.map((row) => row.status as LeadProductStatus));
+    if (!rolled) return;
+
+    const lead = await tx.lead.findUnique({ where: { id: leadId }, select: { status: true } });
+    if (!lead || lead.status === rolled) return;
+
+    await tx.lead.update({ where: { id: leadId }, data: { status: rolled } });
+    await tx.leadStatusHistory.create({
+      data: {
+        leadId,
+        fromStatus: lead.status,
+        toStatus: rolled,
+        note: 'Rolled up from product outcomes',
+      },
+    });
+  }
+
+  /**
+   * Record what happened to one product on a lead.
+   *
+   * The lead's own status follows, so a rep marking mutual funds disqualified
+   * does not have to think about what that means for the lead overall — and
+   * cannot get it wrong.
+   */
+  async changeProductStatus(
+    user: AuthenticatedPrincipal,
+    id: string,
+    input: ChangeLeadProductStatusInput,
+  ) {
+    await this.mustFindInScope(user, id);
+
+    const row = await this.prisma.leadProduct.findUnique({
+      where: { leadId_productCode: { leadId: id, productCode: input.productCode } },
+    });
+    if (!row) {
+      throw new BadRequestException({
+        title: 'Not an interest on this lead',
+        detail: 'Add the product to the lead before recording an outcome for it.',
+      });
+    }
+
+    const closing = !isOpenLeadProductStatus(input.status);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.leadProduct.update({
+        where: { id: row.id },
+        data: {
+          status: input.status,
+          lostReason: input.status === 'LOST' ? (input.lostReason ?? null) : null,
+          note: input.note ?? row.note,
+          closedAt: closing ? new Date() : null,
+        },
+      });
+
+      await tx.activity.create({
+        data: {
+          entityType: 'LEAD',
+          entityId: id,
+          type: 'STATUS_CHANGE',
+          direction: 'INTERNAL',
+          subject: `${input.productCode}: ${row.status} → ${input.status}`,
+          body: input.note ?? null,
+          actorId: user.id,
+          isSystemGenerated: true,
+        },
+      });
+
+      await this.rollUpLead(tx, id);
+    });
+
+    await this.audit.record({
+      action: 'STATUS_CHANGE',
+      resource: 'lead',
+      resourceId: id,
+      reason: `${input.productCode} → ${input.status}`,
+    });
+
+    return this.productsFor(user, id);
+  }
+
+  /** The lead's products with their outcomes, for the detail panel and board. */
+  async productsFor(user: AuthenticatedPrincipal, id: string): Promise<LeadProductView[]> {
+    await this.mustFindInScope(user, id);
+
+    const rows = await this.prisma.leadProduct.findMany({
+      where: { leadId: id },
+      include: { product: { select: { name: true } } },
+      orderBy: [{ createdAt: 'asc' }],
+    });
+
+    return rows.map((row) => ({
+      productCode: row.productCode,
+      productName: row.product?.name ?? null,
+      status: row.status as LeadProductStatus,
+      isOpen: isOpenLeadProductStatus(row.status as LeadProductStatus),
+      lostReason: row.lostReason,
+      closedAt: row.closedAt?.toISOString() ?? null,
+      updatedAt: row.updatedAt.toISOString(),
+    }));
   }
 
   private async assertNoOpenDuplicate(mobile: string): Promise<void> {

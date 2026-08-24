@@ -12,6 +12,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@ne
 import { Throttle } from '@nestjs/throttler';
 import {
   assignLeadSchema,
+  changeLeadProductStatusSchema,
   checkLeadMobileSchema,
   transferLeadSchema,
   bulkAssignLeadSchema,
@@ -23,6 +24,7 @@ import {
   leadQuerySchema,
   updateLeadSchema,
   type AssignLeadInput,
+  type ChangeLeadProductStatusInput,
   type CheckLeadMobileInput,
   type TransferLeadInput,
   type BulkAssignLeadInput,
@@ -99,6 +101,22 @@ export class LeadsController {
   // A GET so it can be called on every keystroke-settled change of the mobile
   // field without writing anything. Scoped inside the service, which decides
   // how much of the match the caller is allowed to be told.
+  @Get('pipeline/products')
+  @RequirePermissions('lead:read')
+  @ApiOperation({
+    summary: 'Board counts with one card per lead-product',
+    description:
+      'A lead interested in three products counts three times, each at its own stage. Leads ' +
+      'with no products yet count once, under their own status.',
+  })
+  @ApiZodQuery(leadQuerySchema)
+  productPipeline(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodQuery(leadQuerySchema) query: LeadQuery,
+  ) {
+    return this.leads.productPipeline(user, query);
+  }
+
   @Get('check-mobile')
   @RequirePermissions('lead:create')
   @ApiOperation({ summary: 'Ask whether a mobile number is already on the book' })
@@ -205,6 +223,30 @@ export class LeadsController {
     @ZodBody(changeLeadStatusSchema) body: ChangeLeadStatusInput,
   ) {
     return this.leads.changeStatus(user, id, body);
+  }
+
+  @Get(':id/products')
+  @RequirePermissions('lead:read')
+  @ApiOperation({ summary: "A lead's products and where each one stands" })
+  products(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
+    return this.leads.productsFor(user, id);
+  }
+
+  @Post(':id/products/status')
+  @RequirePermissions('lead:update')
+  @ApiOperation({
+    summary: 'Record the outcome of one product on a lead',
+    description:
+      "The lead's own status is rolled up from its products afterwards, so a rep marking one " +
+      'product lost does not have to work out what that means for the lead.',
+  })
+  @ApiZodBody(changeLeadProductStatusSchema)
+  changeProductStatus(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(changeLeadProductStatusSchema) body: ChangeLeadProductStatusInput,
+  ) {
+    return this.leads.changeProductStatus(user, id, body);
   }
 
   @Post(':id/transfer')

@@ -185,6 +185,15 @@ export const convertLeadSchema = z.object({
   pan: panSchema,
   email: emailSchema,
   note: z.string().trim().max(1000).optional(),
+  /**
+   * The product being taken up, when only one of several is closing.
+   *
+   * Omitted means the whole lead converts, which is what conversion meant
+   * before outcomes were tracked per product and what the bulk paths still do.
+   * Supplied, only that product closes and the lead stays open for the rest —
+   * a client can take equity in March and still be mid-conversation about F&O.
+   */
+  productCode: codeSchema.optional(),
 });
 export type ConvertLeadInput = z.infer<typeof convertLeadSchema>;
 

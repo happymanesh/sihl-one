@@ -10,6 +10,7 @@ export * from './mfa';
 export * from './lead';
 export * from './lead-scoring';
 export * from './lead-profile';
+export * from './lead-product';
 export * from './customer';
 export * from './activity';
 export * from './geo';
