@@ -93,6 +93,19 @@ export const HELP_TOPICS: HelpTopic[] = [
     note: 'Additional information — occupation, income, family — is optional and collapsed. Open it only when you actually know something.',
   },
   {
+    id: 'duplicate-warning',
+    title: 'When the mobile number is already on the book',
+    permission: 'lead:create',
+    area: 'Leads',
+    steps: [
+      'Type the mobile. The check runs on its own once ten digits are in.',
+      'If it is already ours, a note appears under the field with the name, who owns it and when it came in.',
+      'Choose View details to see the record, then Open the lead to go there.',
+      'Talk to whoever owns it rather than creating a second lead.',
+    ],
+    note: 'If the lead belongs to a team outside your access you are told only that the number is taken, not whose it is. An open duplicate is refused when you save; a closed one is only a warning, and reopening the old lead is usually better than starting a twin.',
+  },
+  {
     id: 'import-leads',
     title: 'Importing leads from a spreadsheet',
     permission: 'lead:import',
@@ -127,6 +140,19 @@ export const HELP_TOPICS: HelpTopic[] = [
     note: 'Do this when a client asks about something new mid-conversation. Until you do, the lead will not appear in filters or reports for that product.',
   },
   {
+    id: 'product-outcome',
+    title: 'Recording the outcome of one product',
+    permission: 'lead:update',
+    area: 'Leads',
+    steps: [
+      'Open the lead and find the Products panel. Open ones are listed first.',
+      'Choose Change beside the product whose situation has moved.',
+      'Pick the new stage. Lost asks for a reason; the others do not.',
+      'Add a note if there is anything worth saying, then Record outcome.',
+    ],
+    note: "Each product closes on its own, so a client can take equity, still be considering F&O and have declined mutual funds. You never set the lead's own stage — it follows the products: the furthest-along one while anything is open, and once everything is closed, the best outcome reached. Somebody who bought equity and declined the rest reads as converted, not lost.",
+  },
+  {
     id: 'lead-profile',
     title: 'Recording the client profile',
     permission: 'lead:update',
@@ -143,6 +169,19 @@ export const HELP_TOPICS: HelpTopic[] = [
     permission: 'lead:assign',
     area: 'Leads',
     steps: ['Open the lead, then Assign.', 'Choose the person. Suggestions appear based on the branch and workload.'],
+  },
+  {
+    id: 'transfer-lead',
+    title: 'Transferring a lead to another team',
+    permission: 'lead:assign',
+    area: 'Leads',
+    steps: [
+      'Open the lead and choose Transfer — a separate tab from Assign.',
+      'Pick who takes it on. This list is wider than the Assign one and reaches outside your own team.',
+      'Say why it is moving. A few words will not be accepted.',
+      'Choose Transfer lead.',
+    ],
+    note: "Assign moves work inside your team; Transfer hands the lead somewhere else entirely, which is why the reason is required. It is written to the lead's timeline and the audit trail, so the next person to open it can see why they have it. Sales executives cannot transfer.",
   },
   {
     id: 'bulk-assign',
