@@ -335,6 +335,9 @@ model Product {
   parent   Product?  @relation("ProductHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   children Product[] @relation("ProductHierarchy")
 
+  /// Lead interest in this product, one row per lead, each with its own outcome.
+  leadInterest LeadProduct[]
+
   /// One line, for the dropdown and the card.
   summary String? @db.VarChar(300)
   /// What the salesperson actually reads out. Markdown.
@@ -577,7 +580,13 @@ model Lead {
   priority        Priority          @default(MEDIUM)
   /// Codes into `product`. Postgres cannot put a foreign key on array
   /// elements, so these are validated against the master on write.
+  /// The codes only. `products` carries the same set with an outcome each, and
+  /// is kept in step on every write — this stays because filters, chips and
+  /// scoring all read it, and a join for those is not worth the cost.
   productInterest String[]          @db.VarChar(40)
+
+  /// One row per product the lead is interested in, each with its own status.
+  products LeadProduct[]
 
   estimatedValue Decimal? @db.Decimal(18, 2)
 
@@ -708,6 +717,39 @@ model Lead {
 /// better not carried by the common query.
 ///
 /// ADR-0002: this is what a client told a salesperson, not verified financials.
+/// A lead's interest in one product, with its own outcome.
+///
+/// Added because a single status on the lead could not describe a client who
+/// takes equity in March, F&O in May and declines mutual funds entirely. The
+/// lead's own status is now rolled up from these rows — see rollUpLeadStatus in
+/// the contracts, which is the only definition of how.
+model LeadProduct {
+  id     String @id @default(cuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  /// Code into `product`. Validated on write; the foreign key is the last word.
+  productCode String  @db.VarChar(40)
+  product     Product @relation(fields: [productCode], references: [code], onDelete: Restrict, onUpdate: Cascade)
+
+  /// Same vocabulary as the lead's own status, on purpose.
+  status String @default("NEW") @db.VarChar(40)
+
+  /// Set when the status becomes one the product does not come back from.
+  closedAt   DateTime?
+  lostReason String?   @db.VarChar(40)
+  note       String?   @db.VarChar(1000)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One row per product per lead. Without this a double-submit silently
+  /// doubles a lead's pipeline on the per-product board.
+  @@unique([leadId, productCode])
+  @@index([status])
+  @@map("lead_product")
+}
+
 model LeadProfile {
   id     String @id @default(cuid())
   leadId String @unique
