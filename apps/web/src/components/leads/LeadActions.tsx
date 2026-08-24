@@ -6,6 +6,7 @@ import { LEAD_LOST_REASONS, type MeetingModeItem, type ProductItem } from '@sihl
 
 import {
   assignLead,
+  transferLead,
   changeLeadStatus,
   convertLead,
   logActivity,
@@ -18,7 +19,7 @@ import { SendMessagePanel } from '@/components/messaging/SendMessagePanel';
 
 const INITIAL: ActionState = { status: 'idle' };
 
-type Tab = 'log' | 'status' | 'assign' | 'message' | 'convert';
+type Tab = 'log' | 'status' | 'assign' | 'transfer' | 'message' | 'convert';
 
 interface Props {
   leadId: string;
@@ -26,6 +27,8 @@ interface Props {
   allowedTransitions: string[];
   currentOwnerId: string | null;
   assignableUsers: Array<{ id: string; fullName: string; orgUnit: string | null }>;
+  /** Everyone the caller may transfer to — wider than assignableUsers, and empty for a rep who may not transfer. */
+  transferTargets: Array<{ id: string; fullName: string; orgUnit: string | null }>;
   email: string | null;
   /** Active templates this lead could be sent. Empty hides the tab entirely. */
   templates: Array<{ code: string; name: string; channel: string; purpose: string; body: string }>;
@@ -35,6 +38,7 @@ interface Props {
   meetingModes: MeetingModeItem[];
   products: ProductItem[];
   canAssign: boolean;
+  canTransfer: boolean;
   canConvert: boolean;
 }
 
@@ -167,6 +171,7 @@ export function LeadActions(props: Props) {
     { id: 'log', label: 'Log interaction', show: !isClosed },
     { id: 'status', label: 'Change status', show: props.canUpdate && props.allowedTransitions.length > 0 },
     { id: 'assign', label: 'Assign', show: props.canAssign && !isClosed },
+    { id: 'transfer', label: 'Transfer', show: props.canTransfer && !isClosed },
     { id: 'message', label: 'Send message', show: props.templates.length > 0 && !isClosed },
     { id: 'convert', label: 'Convert', show: canConvertNow },
   ];
@@ -219,6 +224,14 @@ export function LeadActions(props: Props) {
         {active === 'status' ? (
           <StatusForm leadId={props.leadId} allowed={props.allowedTransitions} />
         ) : null}
+        {active === 'transfer' ? (
+          <TransferForm
+            leadId={props.leadId}
+            currentOwnerId={props.currentOwnerId}
+            users={props.transferTargets}
+          />
+        ) : null}
+
         {active === 'assign' ? (
           <AssignForm
             leadId={props.leadId}
@@ -591,6 +604,74 @@ function AssignForm({
       </div>
 
       <Submit label="Assign lead" pendingLabel="Assigning…" />
+    </form>
+  );
+}
+
+/**
+ * Moving a lead out of this team altogether.
+ *
+ * Deliberately a separate tab from Assign rather than a checkbox inside it.
+ * The two actions have different consequences — one shuffles work inside a
+ * team, the other takes a lead off somebody's numbers — and a checkbox is the
+ * kind of thing people tick without reading.
+ */
+function TransferForm({
+  leadId,
+  currentOwnerId,
+  users,
+}: {
+  leadId: string;
+  currentOwnerId: string | null;
+  users: Array<{ id: string; fullName: string; orgUnit: string | null }>;
+}) {
+  const [state, action] = useActionState(transferLead, INITIAL);
+
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="leadId" value={leadId} />
+      <Feedback state={state} />
+
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Use this to hand a lead to another branch or another manager&rsquo;s team. The reason is
+        recorded on the lead and in the audit trail.
+      </p>
+
+      <div>
+        <label className="label" htmlFor="transfer-owner">Transfer to</label>
+        <select id="transfer-owner" name="ownerId" className="input" defaultValue="" required>
+          <option value="" disabled>Choose who takes it on</option>
+          {users
+            .filter((person) => person.id !== currentOwnerId)
+            .map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.fullName}
+                {person.orgUnit ? ` — ${person.orgUnit}` : ''}
+              </option>
+            ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="label" htmlFor="transfer-reason">
+          Why is it moving? <span className="text-danger-500">*</span>
+        </label>
+        <textarea
+          id="transfer-reason"
+          name="reason"
+          rows={2}
+          required
+          minLength={10}
+          className="input resize-none"
+          placeholder="Client has moved to Surat and is now handled by that branch"
+          aria-invalid={Boolean(state.errors?.reason)}
+        />
+        {state.errors?.reason ? (
+          <p className="mt-1 text-xs text-danger-500">{state.errors.reason[0]}</p>
+        ) : null}
+      </div>
+
+      <Submit label="Transfer lead" pendingLabel="Transferring…" />
     </form>
   );
 }

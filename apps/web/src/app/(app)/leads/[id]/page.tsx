@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import type {
-  LeadProfileView,
-  MeetingModeItem,
-  MobileVerificationMethod,
-  ProductItem,
+import {
+  canTransferLeads,
+  type LeadProfileView,
+  type MeetingModeItem,
+  type MobileVerificationMethod,
+  type ProductItem,
 } from '@sihl-one/contracts';
 import type { Route } from 'next';
 
@@ -125,6 +126,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     ? await apiFetch<AssignableUser[]>('/users/assignable').catch(() => [])
     : [];
 
+  // A wider list, fetched only for someone who may actually transfer. The API
+  // ignores the flag for anyone else, so this cannot become a staff directory
+  // for a rep who happens to call it.
+  const canTransfer = can(user, 'lead:assign') && canTransferLeads(user.dataScope);
+  const transferTargets = canTransfer
+    ? await apiFetch<AssignableUser[]>('/users/assignable?for=transfer').catch(() => [])
+    : [];
+
   // Active modes only: one switched off yesterday must not be selectable today,
   // though interactions already carrying it still read correctly.
   const meetingModes = await apiFetch<MeetingModeItem[]>('/masters/meeting-modes').catch(
@@ -228,6 +237,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             allowedTransitions={lead.allowedTransitions}
             currentOwnerId={lead.owner?.id ?? null}
             assignableUsers={assignable}
+            transferTargets={transferTargets}
+            canTransfer={canTransfer}
             templates={templates}
             email={lead.email}
             canUpdate={can(user, 'lead:update')}

@@ -406,6 +406,41 @@ export async function logActivity(
   };
 }
 
+/**
+ * Hand a lead to someone outside the caller's own team.
+ *
+ * Separate action rather than a flag on assign, because the two differ in what
+ * they demand: a transfer will not go through without a reason, and that reason
+ * is what the next person to open the lead reads first.
+ */
+export async function transferLead(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  const ownerId = String(formData.get('ownerId') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+
+  if (!ownerId) return { status: 'error', message: 'Choose who the lead is moving to.' };
+  if (reason.length < 10) {
+    return {
+      status: 'error',
+      message: 'Say why this lead is moving — a few words is not enough.',
+      errors: { reason: ['A reason of at least 10 characters is required'] },
+    };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}/transfer`, { method: 'POST', body: { ownerId, reason } });
+  } catch (error) {
+    return toErrorState(error, 'The lead could not be transferred.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return { status: 'success', message: 'Lead transferred.' };
+}
+
 export async function assignLead(_previous: ActionState, formData: FormData): Promise<ActionState> {
   const leadId = String(formData.get('leadId'));
   const ownerId = String(formData.get('ownerId'));

@@ -27,8 +27,12 @@ export class UsersController {
   assignable(
     @CurrentUser() user: AuthenticatedPrincipal,
     @Query('q', new ZodValidationPipe(searchSchema)) q?: string,
+    // 'transfer' widens the list beyond the caller's team. Honoured in the
+    // service only for someone who may transfer, so passing it changes nothing
+    // for anyone else.
+    @Query('for') target?: string,
   ) {
-    return this.users.assignable(user, q);
+    return this.users.assignable(user, q, target === 'transfer');
   }
 
   @Get('me/sessions')

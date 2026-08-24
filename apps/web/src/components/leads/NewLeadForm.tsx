@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { PRIORITIES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
+import { DuplicateMobileNotice } from '@/components/leads/DuplicateMobileNotice';
 import { LeadProfileFields } from '@/components/leads/LeadProfileFields';
 import { createLead, type ActionState } from '@/app/actions/leads';
 import { humanise } from '@/lib/format';
@@ -142,6 +143,9 @@ export function NewLeadForm({
               aria-invalid={Boolean(state.errors?.mobile)}
             />
             <FieldError errors={state.errors?.mobile} />
+            <DuplicateMobileNotice
+              productLabels={Object.fromEntries(products.map((p) => [p.code, p.name]))}
+            />
             <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
               One open lead per mobile number — a duplicate will be rejected.
             </p>
