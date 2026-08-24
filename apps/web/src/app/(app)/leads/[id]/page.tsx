@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   canTransferLeads,
+  type LeadProductView,
   type LeadProfileView,
   type MeetingModeItem,
   type MobileVerificationMethod,
@@ -13,6 +14,7 @@ import { DocumentPanel } from '@/components/documents/DocumentPanel';
 import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
 import { Timeline } from '@/components/leads/Timeline';
+import { LeadProductOutcomes } from '@/components/leads/LeadProductOutcomes';
 import { LeadProductsPanel } from '@/components/leads/LeadProductsPanel';
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
@@ -125,6 +127,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const assignable = can(user, 'lead:assign')
     ? await apiFetch<AssignableUser[]>('/users/assignable').catch(() => [])
     : [];
+
+  // Where each product stands. Empty for a lead nobody has ticked a product on
+  // yet, which the panel handles by not rendering.
+  const productOutcomes = await apiFetch<LeadProductView[]>(`/leads/${id}/products`).catch(
+    () => [] as LeadProductView[],
+  );
 
   // A wider list, fetched only for someone who may actually transfer. The API
   // ignores the flag for anyone else, so this cannot become a staff directory
@@ -247,6 +255,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             voiceInputEnabled={voiceInputEnabled()}
             meetingModes={meetingModes}
             products={products}
+          />
+
+          <LeadProductOutcomes
+            leadId={lead.id}
+            outcomes={productOutcomes}
+            canEdit={can(user, 'lead:update')}
           />
 
           <LeadProfilePanel

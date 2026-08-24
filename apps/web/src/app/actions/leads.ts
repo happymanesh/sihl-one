@@ -413,6 +413,53 @@ export async function logActivity(
  * they demand: a transfer will not go through without a reason, and that reason
  * is what the next person to open the lead reads first.
  */
+/**
+ * Record what happened to one product on a lead.
+ *
+ * The lead's own status follows from this on the server, so nothing here needs
+ * to work out what "mutual funds declined" means for the lead overall — and
+ * cannot get it wrong.
+ */
+export async function changeLeadProductStatus(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  const productCode = String(formData.get('productCode') ?? '');
+  const status = String(formData.get('status') ?? '');
+  const lostReason = String(formData.get('lostReason') ?? '').trim();
+
+  if (!productCode || !status) {
+    return { status: 'error', message: 'Choose a product and an outcome.' };
+  }
+  if (status === 'LOST' && !lostReason) {
+    return {
+      status: 'error',
+      message: 'Say why this product was lost.',
+      errors: { lostReason: ['A reason is required'] },
+    };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}/products/status`, {
+      method: 'POST',
+      body: {
+        productCode,
+        status,
+        lostReason: status === 'LOST' ? lostReason : undefined,
+        note: formData.get('note') || undefined,
+      },
+    });
+  } catch (error) {
+    return toErrorState(error, 'That outcome could not be recorded.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  revalidatePath('/pipeline');
+  return { status: 'success', message: 'Outcome recorded.' };
+}
+
 export async function transferLead(
   _previous: ActionState,
   formData: FormData,

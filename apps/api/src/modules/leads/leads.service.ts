@@ -208,6 +208,77 @@ export class LeadsService {
   }
 
   /**
+   * One column of the per-product board.
+   *
+   * Returns lead-products, not leads: the same client appears once for equity
+   * and once for F&O, each in whichever column that product has reached. Scoped
+   * through the lead, so a rep sees their own book and nobody else's.
+   */
+  async productBoardColumn(
+    user: AuthenticatedPrincipal,
+    status: string,
+    query: LeadQuery,
+  ) {
+    const expanded = await this.withSubProducts(query);
+    const leadWhere = this.buildWhere(user, {
+      ...expanded,
+      status: undefined,
+    }) as Prisma.LeadWhereInput;
+
+    const where: Prisma.LeadProductWhereInput = {
+      status,
+      lead: leadWhere,
+      ...(expanded.productInterest?.length
+        ? { productCode: { in: expanded.productInterest } }
+        : {}),
+    };
+
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.leadProduct.findMany({
+        where,
+        take: query.pageSize,
+        skip: (query.page - 1) * query.pageSize,
+        orderBy: [{ lead: { score: 'desc' } }, { createdAt: 'desc' }],
+        include: {
+          product: { select: { name: true } },
+          lead: {
+            select: {
+              id: true,
+              reference: true,
+              firstName: true,
+              lastName: true,
+              score: true,
+              priority: true,
+              nextFollowUpAt: true,
+              owner: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.leadProduct.count({ where }),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        leadId: row.leadId,
+        reference: row.lead.reference,
+        name: [row.lead.firstName, row.lead.lastName].filter(Boolean).join(' ').trim(),
+        productCode: row.productCode,
+        productName: row.product?.name ?? row.productCode,
+        status: row.status,
+        score: row.lead.score,
+        priority: row.lead.priority,
+        nextFollowUpAt: row.lead.nextFollowUpAt?.toISOString() ?? null,
+        ownerName: row.lead.owner
+          ? `${row.lead.owner.firstName} ${row.lead.owner.lastName}`.trim()
+          : null,
+      })),
+      total,
+    };
+  }
+
+  /**
    * Kanban column counts.
    *
    * Computed with a grouped count rather than by loading the board, because a
