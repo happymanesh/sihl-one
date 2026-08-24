@@ -12,6 +12,8 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@ne
 import { Throttle } from '@nestjs/throttler';
 import {
   assignLeadSchema,
+  checkLeadMobileSchema,
+  transferLeadSchema,
   bulkAssignLeadSchema,
   changeLeadStatusSchema,
   verifyLeadMobileSchema,
@@ -21,6 +23,8 @@ import {
   leadQuerySchema,
   updateLeadSchema,
   type AssignLeadInput,
+  type CheckLeadMobileInput,
+  type TransferLeadInput,
   type BulkAssignLeadInput,
   type ChangeLeadStatusInput,
   type VerifyLeadMobileInput,
@@ -90,6 +94,20 @@ export class LeadsController {
   @ApiZodQuery(leadQuerySchema)
   pipeline(@CurrentUser() user: AuthenticatedPrincipal, @ZodQuery(leadQuerySchema) query: LeadQuery) {
     return this.leads.pipeline(user, query);
+  }
+
+  // A GET so it can be called on every keystroke-settled change of the mobile
+  // field without writing anything. Scoped inside the service, which decides
+  // how much of the match the caller is allowed to be told.
+  @Get('check-mobile')
+  @RequirePermissions('lead:create')
+  @ApiOperation({ summary: 'Ask whether a mobile number is already on the book' })
+  @ApiZodQuery(checkLeadMobileSchema)
+  checkMobile(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodQuery(checkLeadMobileSchema) query: CheckLeadMobileInput,
+  ) {
+    return this.leads.checkMobile(user, query);
   }
 
   @Get(':id')
@@ -188,6 +206,24 @@ export class LeadsController {
   ) {
     return this.leads.changeStatus(user, id, body);
   }
+
+  @Post(':id/transfer')
+  @RequirePermissions('lead:assign')
+  @ApiOperation({
+    summary: 'Transfer a lead to someone outside your own team',
+    description:
+      'Unlike assign, the new owner may be any active user and the reason is mandatory. ' +
+      'Refused for callers who can only see their own leads.',
+  })
+  @ApiZodBody(transferLeadSchema)
+  transfer(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(transferLeadSchema) body: TransferLeadInput,
+  ) {
+    return this.leads.transfer(user, id, body);
+  }
+
 
   @Post(':id/assign')
   @RequirePermissions('lead:assign')

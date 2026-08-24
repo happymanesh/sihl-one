@@ -5,6 +5,8 @@ import {
   LEAD_LOST_REASONS,
   LEAD_STATUSES,
   PRIORITIES,
+  type DataScope,
+  type LeadStatus,
 } from './enums';
 import {
   attributionSchema,
@@ -108,6 +110,75 @@ export const bulkAssignLeadSchema = z.object({
   ownerId: idSchema,
 });
 export type BulkAssignLeadInput = z.infer<typeof bulkAssignLeadSchema>;
+
+/**
+ * What a rep is told when the number they are typing is already on the book.
+ *
+ * Two shapes, and the difference is deliberate. If the existing lead is inside
+ * the rep's own scope they get the whole picture — who it is, who owns it, when
+ * it came in, what they wanted — because that is enough to pick up the phone to
+ * a colleague and sort it out.
+ *
+ * If it is outside their scope they are told only that the number is taken.
+ * Naming the client and the owner would hand any rep a lookup tool for the
+ * entire firm's book: type a number, learn who holds that relationship. The
+ * whole point of the data scopes is that this is not possible, and a duplicate
+ * check is exactly the sort of helpful screen that quietly undoes them.
+ */
+export interface DuplicateLeadMatch {
+  exists: boolean;
+  /** Whether the caller's scope allows them to see whose lead it is. */
+  visible: boolean;
+  lead: {
+    id: string;
+    reference: string;
+    name: string;
+    status: LeadStatus;
+    ownerName: string | null;
+    createdAt: string;
+    productInterest: string[];
+    /** Closed leads are shown too, since reopening one beats creating a twin. */
+    isOpen: boolean;
+  } | null;
+}
+
+export const checkLeadMobileSchema = z.object({
+  mobile: indianMobileSchema,
+  /** Set when editing, so a lead does not report itself as its own duplicate. */
+  excludeLeadId: idSchema.optional(),
+});
+export type CheckLeadMobileInput = z.infer<typeof checkLeadMobileSchema>;
+
+/**
+ * Handing a lead to someone outside your own team.
+ *
+ * Separate from `assign`, which stays what a manager does inside their team and
+ * where a note is optional. A transfer crosses a boundary — another branch,
+ * another manager's book — and the question afterwards is always why. Making
+ * the reason optional would mean it is usually absent exactly when it matters,
+ * so it is required and long enough to be a sentence rather than "ok".
+ */
+export const transferLeadSchema = z.object({
+  ownerId: idSchema,
+  reason: z
+    .string()
+    .trim()
+    .min(10, 'Say why this lead is moving — a few words is not enough')
+    .max(500),
+});
+export type TransferLeadInput = z.infer<typeof transferLeadSchema>;
+
+/**
+ * Who may move a lead out of their own book.
+ *
+ * A rep who can only see their own leads cannot hand one to somebody else and
+ * quietly lose it from the numbers; anyone with sight of a team or wider can.
+ * Expressed against the data scope rather than a role name so a new role does
+ * not silently gain or lose it.
+ */
+export function canTransferLeads(dataScope: DataScope): boolean {
+  return dataScope !== 'SELF';
+}
 
 export const convertLeadSchema = z.object({
   /** Mandatory at conversion — a customer without a PAN cannot be onboarded. */
