@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  canTransferLeads,
   canTransitionLead,
   LEAD_STATUS_TRANSITIONS,
   maskPan,
@@ -13,6 +14,9 @@ import {
   STRONG_LEAD_SCORE,
   verificationSurvivesEdit,
   type AssignLeadInput,
+  type CheckLeadMobileInput,
+  type DuplicateLeadMatch,
+  type TransferLeadInput,
   type BulkAssignLeadInput,
   type ChangeLeadStatusInput,
   type ConvertLeadInput,
@@ -81,6 +85,9 @@ const SORTABLE_COLUMNS = new Set([
   'status',
   'firstName',
 ]);
+
+/** The three statuses a lead does not come back from without being reopened. */
+const CLOSED_LEAD_STATUSES = new Set(['CONVERTED', 'LOST', 'DISQUALIFIED']);
 
 @Injectable()
 export class LeadsService {
@@ -1373,6 +1380,169 @@ export class LeadsService {
       });
     }
     return lead;
+  }
+
+  /**
+   * Tell a rep, while they are still typing, that this number is already ours.
+   *
+   * Read-only and deliberately not a guard: creating an open duplicate is still
+   * refused by `assertNoOpenDuplicate` on write. This exists so the refusal is
+   * not the first they hear of it, and so they can see who to talk to rather
+   * than being told "no".
+   *
+   * Closed leads are reported too. A number belonging to a lead marked lost six
+   * months ago is not a blocker, but it is worth knowing before the same
+   * conversation is started from scratch.
+   */
+  async checkMobile(
+    user: AuthenticatedPrincipal,
+    input: CheckLeadMobileInput,
+  ): Promise<DuplicateLeadMatch> {
+    const existing = await this.prisma.lead.findFirst({
+      where: {
+        mobile: input.mobile,
+        deletedAt: null,
+        ...(input.excludeLeadId ? { id: { not: input.excludeLeadId } } : {}),
+      },
+      // An open lead is the one worth surfacing, so prefer it over a closed one
+      // that happens to be newer.
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        reference: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        createdAt: true,
+        productInterest: true,
+        owner: { select: { firstName: true, lastName: true } },
+        ownerId: true,
+        orgUnitId: true,
+      },
+    });
+
+    if (!existing) return { exists: false, visible: false, lead: null };
+
+    // Same scope filter the list uses, applied to this one row. Re-deriving the
+    // rule here would be a second place for it to drift.
+    const visible = await this.prisma.lead.findFirst({
+      where: { id: existing.id, AND: [this.scope.leadScope(user)] },
+      select: { id: true },
+    });
+
+    if (!visible) {
+      // Everything identifying is withheld. See the note on DuplicateLeadMatch:
+      // the alternative turns this into a directory of the whole firm's book.
+      return { exists: true, visible: false, lead: null };
+    }
+
+    return {
+      exists: true,
+      visible: true,
+      lead: {
+        id: existing.id,
+        reference: existing.reference,
+        name: [existing.firstName, existing.lastName].filter(Boolean).join(' ').trim(),
+        status: existing.status as LeadStatus,
+        ownerName: existing.owner
+          ? `${existing.owner.firstName} ${existing.owner.lastName}`.trim()
+          : null,
+        createdAt: existing.createdAt.toISOString(),
+        productInterest: existing.productInterest,
+        isOpen: !CLOSED_LEAD_STATUSES.has(existing.status),
+      },
+    };
+  }
+
+  /**
+   * Move a lead out of one book and into another, on the record.
+   *
+   * `assign` stays what a manager does inside their own team. This is the
+   * crossing-a-boundary case the sales head asked for: it accepts any active
+   * user rather than only the caller's reports, and in exchange the reason is
+   * mandatory and lands on the lead's timeline where the next person to open it
+   * will see it.
+   */
+  async transfer(user: AuthenticatedPrincipal, id: string, input: TransferLeadInput) {
+    const lead = await this.mustFindInScope(user, id);
+
+    if (!canTransferLeads(user.dataScope)) {
+      throw new ForbiddenException({
+        title: 'Cannot transfer this lead',
+        detail: 'Transferring a lead to another team is done by your manager.',
+      });
+    }
+
+    const owner = await this.prisma.user.findFirst({
+      where: { id: input.ownerId, deletedAt: null, status: 'ACTIVE' },
+      select: { id: true, firstName: true, lastName: true, orgUnitId: true },
+    });
+    if (!owner) {
+      throw new BadRequestException({
+        title: 'Unknown user',
+        detail: 'The selected owner is not an active user.',
+      });
+    }
+    if (owner.id === lead.ownerId) {
+      throw new BadRequestException({
+        title: 'Already owned by that person',
+        detail: 'Choose someone else, or close this dialog.',
+      });
+    }
+
+    const previousOwner = lead.ownerId
+      ? await this.prisma.user.findUnique({
+          where: { id: lead.ownerId },
+          select: { firstName: true, lastName: true },
+        })
+      : null;
+    const fromName = previousOwner
+      ? `${previousOwner.firstName} ${previousOwner.lastName}`.trim()
+      : 'nobody';
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lead.update({
+        where: { id },
+        data: {
+          ownerId: owner.id,
+          // The lead follows its owner, so branch reporting stays consistent.
+          orgUnitId: owner.orgUnitId ?? lead.orgUnitId,
+          lastActivityAt: new Date(),
+          updatedById: user.id,
+        },
+      });
+      await tx.activity.create({
+        data: {
+          entityType: 'LEAD',
+          entityId: id,
+          type: 'ASSIGNMENT',
+          direction: 'INTERNAL',
+          subject: `Transferred from ${fromName} to ${owner.firstName} ${owner.lastName}`.trim(),
+          body: input.reason,
+          actorId: user.id,
+          isSystemGenerated: true,
+        },
+      });
+      await this.outbox.publish(tx, {
+        aggregateType: 'lead',
+        aggregateId: id,
+        eventType: 'lead.transferred',
+        payload: { reference: lead.reference, from: lead.ownerId, to: owner.id },
+      });
+    });
+
+    // Recorded as ASSIGN rather than a new action: a transfer is an assignment
+    // that crossed a team boundary, and the distinction is already carried by
+    // the reason and by the activity subject. A new enum value would have meant
+    // migrating a live column for a label.
+    await this.audit.record({
+      action: 'ASSIGN',
+      resource: 'lead',
+      resourceId: id,
+      reason: input.reason,
+    });
+
+    return { id, ownerId: owner.id };
   }
 
   private async assertNoOpenDuplicate(mobile: string): Promise<void> {
