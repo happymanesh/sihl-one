@@ -28,6 +28,8 @@ interface TaskRow {
   assignee: { id: string; fullName: string } | null;
   /** From the linked lead, so a rep can triage without opening each task. */
   productInterest: string[];
+  /** Who the task is about. Null when it hangs off something other than a lead. */
+  about: { name: string; mobileMasked: string; reference: string } | null;
 }
 
 export default async function TasksPage({
@@ -121,6 +123,19 @@ export default async function TasksPage({
                 >
                   {task.title}
                 </p>
+                {/* Who to call, directly under the title. A follow-up reading
+                    only "Follow up: collect document" left the rep opening the
+                    task to find out who it was about. Number is masked, as on
+                    every list. */}
+                {task.about ? (
+                  <p className="mt-0.5 truncate text-sm">
+                    <span className="font-medium">{task.about.name}</span>
+                    <span className="text-[var(--color-text-muted)]">
+                      {' · '}
+                      <span className="font-mono tabular-nums">{task.about.mobileMasked}</span>
+                    </span>
+                  </p>
+                ) : null}
                 {task.description ? (
                   <p className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                     {task.description}

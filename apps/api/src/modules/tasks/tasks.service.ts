@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { CreateTaskInput, TaskQuery, UpdateTaskInput } from '@sihl-one/contracts';
+import {
+  maskMobile,
+  type CreateTaskInput,
+  type TaskQuery,
+  type UpdateTaskInput,
+} from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
 import { ReferenceService } from '../../common/reference.service';
@@ -57,20 +62,40 @@ export class TasksService {
       this.prisma.task.count({ where }),
     ]);
 
-    // Product interest for the leads these tasks hang off, fetched once for the
-    // page rather than per row. A rep triaging a task list wants to know what
-    // the client is after before opening anything.
+    // Who each task is about, fetched once for the page rather than per row. A
+    // rep triaging a list needs the client's name and number without opening
+    // anything — a row reading only "Follow up: collect document" says nothing
+    // about who to call.
     const leadIds = rows
       .filter((task) => task.entityType === 'LEAD' && task.entityId)
       .map((task) => task.entityId as string);
 
-    const productsByLead = new Map<string, string[]>();
+    const leadById = new Map<
+      string,
+      { name: string; mobileMasked: string; reference: string; productInterest: string[] }
+    >();
     if (leadIds.length) {
       const leads = await this.prisma.lead.findMany({
         where: { id: { in: [...new Set(leadIds)] } },
-        select: { id: true, productInterest: true },
+        select: {
+          id: true,
+          reference: true,
+          firstName: true,
+          lastName: true,
+          mobile: true,
+          productInterest: true,
+        },
       });
-      for (const lead of leads) productsByLead.set(lead.id, lead.productInterest);
+      for (const lead of leads) {
+        leadById.set(lead.id, {
+          name: [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim(),
+          // Masked, as on every other list surface. The full number is on the
+          // lead itself, one tap away, for whoever's scope allows it.
+          mobileMasked: maskMobile(lead.mobile),
+          reference: lead.reference,
+          productInterest: lead.productInterest,
+        });
+      }
     }
 
     const now = new Date();
@@ -91,8 +116,12 @@ export class TasksService {
         entityId: task.entityId,
         productInterest:
           task.entityType === 'LEAD' && task.entityId
-            ? (productsByLead.get(task.entityId) ?? [])
+            ? (leadById.get(task.entityId)?.productInterest ?? [])
             : [],
+        // Null when the task hangs off something else, or off a lead the caller
+        // cannot see — the task list is already scoped, but a task can outlive
+        // a lead being reassigned out of scope.
+        about: task.entityId ? (leadById.get(task.entityId) ?? null) : null,
         assignee: task.assignee
           ? { id: task.assignee.id, fullName: `${task.assignee.firstName} ${task.assignee.lastName}`.trim() }
           : null,
