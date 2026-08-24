@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { canTransferLeads } from '@sihl-one/contracts';
 
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -14,14 +15,23 @@ export class UsersService {
    * directory: an owner picker showing 400 names the caller cannot actually
    * assign to is both a bad experience and an org-chart leak.
    */
-  async assignable(user: AuthenticatedPrincipal, search?: string) {
+  /**
+   * Users this caller may hand work to.
+   *
+   * `forTransfer` widens the list past the caller's own team, and is honoured
+   * only for someone who may actually transfer. A rep who cannot would
+   * otherwise get a picker full of names the API will refuse — and, worse, a
+   * roster of the firm they have no business reading.
+   */
+  async assignable(user: AuthenticatedPrincipal, search?: string, forTransfer = false) {
     const where: Record<string, unknown> = {
       deletedAt: null,
       status: 'ACTIVE',
       userType: 'INTERNAL',
     };
 
-    if (user.dataScope !== 'ALL') {
+    const widen = forTransfer && canTransferLeads(user.dataScope);
+    if (user.dataScope !== 'ALL' && !widen) {
       where.id = { in: [user.id, ...user.teamUserIds] };
     }
 
