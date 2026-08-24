@@ -42,6 +42,21 @@ const GENERIC_LOGIN_FAILURE = {
   detail: 'The credentials you entered are incorrect.',
 } as const;
 
+/**
+ * How long after a legitimate rotation a superseded refresh token is still
+ * followed forward rather than read as theft.
+ *
+ * Sized to cover one page load racing itself, not to be a grace period in any
+ * broader sense. A stolen token surfacing seconds after the victim refreshed is
+ * indistinguishable from the race and is accepted; one surfacing later is not.
+ * That trade is the standard one for refresh-token rotation, and the
+ * alternative was signing the whole team out every fifteen minutes.
+ */
+const ROTATION_GRACE_MS = 30_000;
+
+/** Bound on chain-walking, so a corrupt or looping chain cannot spin. */
+const ROTATION_CHAIN_MAX_HOPS = 10;
+
 /** The user row `login` loads, shared with `completeSignIn` so the two cannot drift. */
 type UserWithRoles = Prisma.UserGetPayload<{
   include: {
@@ -288,9 +303,36 @@ export class AuthService {
 
     if (!session || session.revokedAt || session.expiresAt < new Date()) {
       if (session?.revokedAt) {
-        // Reuse of an already-rotated token. Either the client raced itself or
-        // the token leaked; the safe response to both is to kill every session
-        // for that user and force a fresh sign-in.
+        // A token presented moments after its own rotation is the client racing
+        // itself, not a theft. The browser middleware sends every protected
+        // request that lacks an access cookie to /auth/refresh, and a page load
+        // is several requests, so one wins the rotation and the others arrive
+        // holding the token it just replaced.
+        //
+        // Treating that as reuse revoked every session the user had, which is
+        // how an entire team got signed out mid-task. Inside the grace window
+        // the chain is followed forward to the live session instead.
+        //
+        // The security property survives: a token that surfaces after the
+        // window, or one whose chain has already been revoked, still trips
+        // detection below and still revokes everything.
+        const rotatedRecently =
+          session.revokedReason === 'ROTATED' &&
+          Date.now() - session.revokedAt.getTime() <= ROTATION_GRACE_MS;
+
+        if (rotatedRecently && session.replacedById) {
+          const successor = await this.followRotationChain(session.replacedById);
+          if (successor) {
+            this.logger.log(
+              `Refresh raced itself for user ${session.userId}; followed the rotation chain rather than revoking.`,
+            );
+            return this.rotate(successor.id);
+          }
+        }
+
+        // Either the client raced itself outside the window or the token
+        // leaked; the safe response to both is to kill every session for that
+        // user and force a fresh sign-in.
         this.logger.warn(`Refresh token reuse detected for user ${session.userId}; revoking all sessions.`);
         await this.prisma.session.updateMany({
           where: { userId: session.userId, revokedAt: null },
@@ -322,6 +364,53 @@ export class AuthService {
       });
     }
 
+    return this.rotate(session.id);
+  }
+
+  /**
+   * Walk forward from a rotated session to the live one at the end of the chain.
+   *
+   * Bounded rather than unbounded: a corrupt or looping chain must not spin. A
+   * page load produces a handful of racing refreshes, never hundreds, so a short
+   * bound is generous and still terminates.
+   */
+  private async followRotationChain(startId: string): Promise<{ id: string } | null> {
+    let id: string | null = startId;
+
+    for (let hop = 0; hop < ROTATION_CHAIN_MAX_HOPS && id; hop += 1) {
+      const next: { id: string; revokedAt: Date | null; replacedById: string | null } | null =
+        await this.prisma.session.findUnique({
+          where: { id },
+          select: { id: true, revokedAt: true, replacedById: true },
+        });
+
+      if (!next) return null;
+      if (!next.revokedAt) return { id: next.id };
+      id = next.replacedById;
+    }
+
+    return null;
+  }
+
+  /**
+   * Issue a new token pair for a live session, retiring the one it replaces.
+   *
+   * Split out of `refresh` so the raced-itself path can reach it without
+   * re-running the checks that path has already satisfied.
+   */
+  private async rotate(sessionId: string): Promise<AuthTokens> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { user: { include: { roles: { include: { role: true } } } } },
+    });
+
+    if (!session || session.revokedAt || session.expiresAt < new Date()) {
+      throw new UnauthorizedException({
+        title: 'Session expired',
+        detail: 'Sign in again to continue.',
+      });
+    }
+
     const roles = session.user.roles.map((assignment) => assignment.role.code as Role);
     const permissions = [
       ...new Set(session.user.roles.flatMap((a) => a.role.permissions as Permission[])),
@@ -329,11 +418,7 @@ export class AuthService {
     const rotated = this.tokens.createRefreshToken();
 
     const newSession = await this.prisma.$transaction(async (tx) => {
-      await tx.session.update({
-        where: { id: session.id },
-        data: { revokedAt: new Date(), revokedReason: 'ROTATED' },
-      });
-      return tx.session.create({
+      const created = await tx.session.create({
         data: {
           userId: session.userId,
           refreshTokenHash: rotated.hash,
@@ -344,6 +429,14 @@ export class AuthService {
           expiresAt: rotated.expiresAt,
         },
       });
+      // Created before the old one is retired, so `replacedById` is never null
+      // on a revoked row — a racing request that reads between the two writes
+      // would otherwise find a dead end and fall through to mass revocation.
+      await tx.session.update({
+        where: { id: session.id },
+        data: { revokedAt: new Date(), revokedReason: 'ROTATED', replacedById: created.id },
+      });
+      return created;
     });
 
     const access = await this.tokens.issueAccessToken({
