@@ -28,6 +28,12 @@ export default async function ImportLeadsPage() {
 
   const history = await apiFetch<BatchRow[]>('/leads/import').catch(() => [] as BatchRow[]);
 
+  // Offered only to someone who can assign; everyone else gets the routing
+  // rules, which is what they would have got anyway.
+  const assignable = can(user, 'lead:assign')
+    ? await apiFetch<Array<{ id: string; fullName: string }>>('/users/assignable').catch(() => [])
+    : [];
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <nav className="text-xs text-[var(--color-text-muted)]">
@@ -48,7 +54,7 @@ export default async function ImportLeadsPage() {
         </p>
       </header>
 
-      <ImportWizard />
+      <ImportWizard assignableUsers={assignable} />
 
       {history.length > 0 ? (
         <section className="card p-5">

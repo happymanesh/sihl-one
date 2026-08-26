@@ -46,11 +46,20 @@ const STEPS: Array<{ id: Step; label: string }> = [
  * them that *before* committing is the difference between a usable tool and one
  * that quietly pollutes the book.
  */
-export function ImportWizard() {
+export function ImportWizard({
+  assignableUsers = [],
+}: {
+  assignableUsers?: Array<{ id: string; fullName: string }>;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('declare');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Both default to the cautious answer: nobody has confirmed these numbers,
+  // and the routing rules decide who gets them.
+  const [markMobileVerified, setMarkMobileVerified] = useState(false);
+  const [assignToUserId, setAssignToUserId] = useState('');
 
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<Array<ImportableField | null>>([]);
@@ -152,7 +161,11 @@ export function ImportWizard() {
       const response = await fetch(`/api/import?step=commit&batchId=${parsed.batchId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decisions }),
+        body: JSON.stringify({
+          decisions,
+          markMobileVerified,
+          assignToUserId: assignToUserId || undefined,
+        }),
       });
       const data = (await response.json()) as {
         imported: number;
@@ -489,6 +502,50 @@ export function ImportWizard() {
             Leads already in SIHL stay with their current owner. Importing them again would move
             a colleague&rsquo;s lead, so they are skipped and the claim is recorded against this
             import.
+          </div>
+
+          <div className="card space-y-3 p-4">
+            <h2 className="text-sm font-bold">Before you import</h2>
+
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={markMobileVerified}
+                onChange={(event) => setMarkMobileVerified(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-teal-600"
+              />
+              <span className="text-sm">
+                <span className="font-semibold">These numbers have already been spoken to</span>
+                <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
+                  Marks every row as mobile-confirmed, recorded against your name. Leave this
+                  off for a bought or scraped list &mdash; ticking it puts a confirmation
+                  against numbers nobody has called, and the unverified rate is how anyone
+                  knows whether reps are actually reaching people.
+                </span>
+              </span>
+            </label>
+
+            {assignableUsers.length > 0 ? (
+              <div>
+                <label className="label" htmlFor="assignToUserId">Give every lead to</label>
+                <select
+                  id="assignToUserId"
+                  className="input"
+                  value={assignToUserId}
+                  onChange={(event) => setAssignToUserId(event.target.value)}
+                >
+                  <option value="">Use the assignment rules</option>
+                  {assignableUsers.map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.fullName}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                  Overrides the routing rules for this file only.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex gap-2">

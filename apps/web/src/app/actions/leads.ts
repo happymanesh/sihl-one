@@ -381,14 +381,29 @@ export async function logActivity(
   const nextStatus = formData.get('nextStatus');
   if (entityType === 'LEAD' && nextStatus) {
     try {
-      await apiFetch(`/leads/${entityId}/status`, {
-        method: 'POST',
-        body: {
-          status: String(nextStatus),
-          lostReason: formData.get('lostReason') || undefined,
-          nextFollowUpAt: parsed.data.nextFollowUpAt?.toISOString(),
-        },
-      });
+      // Converting is a different call from a status move, because conversion
+      // is per product now: it closes the one product the rep picked and rolls
+      // the lead up from there, rather than declaring the whole lead won.
+      if (String(nextStatus) === 'CONVERTED') {
+        await apiFetch(`/leads/${entityId}/products/convert`, {
+          method: 'POST',
+          body: {
+            productCode: String(formData.get('convertProductCode') ?? ''),
+            identifier: String(formData.get('identifier') ?? '').trim(),
+            identifierKind: String(formData.get('identifierKind') ?? 'CLIENT_CODE'),
+            finalAmount: formData.get('finalAmount') || undefined,
+          },
+        });
+      } else {
+        await apiFetch(`/leads/${entityId}/status`, {
+          method: 'POST',
+          body: {
+            status: String(nextStatus),
+            lostReason: formData.get('lostReason') || undefined,
+            nextFollowUpAt: parsed.data.nextFollowUpAt?.toISOString(),
+          },
+        });
+      }
     } catch (error) {
       const failed = toErrorState(error, 'The status could not be changed.');
       revalidatePath(`/leads/${entityId}`);
