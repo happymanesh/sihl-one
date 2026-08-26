@@ -2,7 +2,13 @@
 
 import { useActionState, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { LEAD_LOST_REASONS, type MeetingModeItem, type ProductItem } from '@sihl-one/contracts';
+import {
+  guessIdentifierKind,
+  LEAD_LOST_REASONS,
+  type LeadProductView,
+  type MeetingModeItem,
+  type ProductItem,
+} from '@sihl-one/contracts';
 
 import {
   assignLead,
@@ -39,6 +45,8 @@ interface Props {
   products: ProductItem[];
   canAssign: boolean;
   canTransfer: boolean;
+  /** The lead's products with their outcomes — conversion is per product now. */
+  leadProducts: LeadProductView[];
   canConvert: boolean;
 }
 
@@ -217,6 +225,7 @@ export function LeadActions(props: Props) {
             allowedTransitions={props.allowedTransitions}
             canUpdate={props.canUpdate}
             voiceInputEnabled={props.voiceInputEnabled}
+            leadProducts={props.leadProducts}
             meetingModes={props.meetingModes}
             products={props.products}
           />
@@ -287,6 +296,7 @@ function LogInteractionForm({
   allowedTransitions,
   canUpdate,
   voiceInputEnabled,
+  leadProducts,
   meetingModes,
   products,
 }: {
@@ -294,6 +304,7 @@ function LogInteractionForm({
   allowedTransitions: string[];
   canUpdate: boolean;
   voiceInputEnabled: boolean;
+  leadProducts: LeadProductView[];
   meetingModes: MeetingModeItem[];
   products: ProductItem[];
 }) {
@@ -302,12 +313,28 @@ function LogInteractionForm({
   const [missing, setMissing] = useState<string[]>([]);
   const [nextStatus, setNextStatus] = useState('');
   const [mode, setMode] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [kindOverride, setKindOverride] = useState<'PAN' | 'CLIENT_CODE' | null>(null);
+
+  // The guess follows what is typed until the rep overrides it, and the
+  // override then sticks — retyping a character should not undo their choice.
+  const identifierKind = kindOverride ?? guessIdentifierKind(identifier);
 
   const selectedMode = meetingModes.find((item) => item.code === mode);
 
-  // Statuses a rep may move to from here. CONVERTED is deliberately absent:
-  // conversion needs PAN and its own confirmation, so it keeps its own tab.
-  const transitions = allowedTransitions.filter((value) => value !== 'CONVERTED');
+  const openProducts = leadProducts.filter((row) => row.isOpen);
+
+  // CONVERTED used to be stripped out here, on the grounds that conversion
+  // needs a PAN and its own confirmation. That sent a rep who had just closed
+  // a deal off to a different tab to re-enter what they were already typing,
+  // so it is offered inline — asking for the product, the reference and the
+  // amount rather than for a PAN specifically.
+  //
+  // Still hidden when the lead has no open product, because there would be
+  // nothing to convert.
+  const transitions = allowedTransitions.filter(
+    (value) => value !== 'CONVERTED' || openProducts.length > 0,
+  );
 
   const validate = (event: React.FormEvent<HTMLFormElement>) => {
     const form = event.currentTarget;
@@ -485,6 +512,77 @@ function LogInteractionForm({
             <div className="mt-2">
               <label className="label" htmlFor="lostReason">Why was it lost?</label>
               <input id="lostReason" name="lostReason" className="input" />
+            </div>
+          ) : null}
+
+          {nextStatus === 'CONVERTED' ? (
+            <div className="mt-3 space-y-2 rounded-lg border border-teal-500/40 bg-teal-50/60 p-3 dark:bg-teal-500/10">
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Each product closes on its own. Only the one you pick is converted — anything
+                else stays open.
+              </p>
+
+              <div>
+                <label className="label" htmlFor="convertProductCode">Which product?</label>
+                <select
+                  id="convertProductCode"
+                  name="convertProductCode"
+                  className="input"
+                  defaultValue={openProducts[0]?.productCode ?? ''}
+                  required
+                >
+                  {openProducts.map((row) => (
+                    <option key={row.productCode} value={row.productCode}>
+                      {row.productName ?? row.productCode}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="label" htmlFor="identifier">PAN or client code</label>
+                  <input
+                    id="identifier"
+                    name="identifier"
+                    className="input"
+                    required
+                    autoCapitalize="characters"
+                    placeholder="ABCDE1234F or R0018"
+                    value={identifier}
+                    onChange={(event) => setIdentifier(event.target.value)}
+                  />
+                  {/* Guessed from what was typed, and overridable. A client code
+                      that happens to be PAN-shaped is still a client code if the
+                      rep says so. */}
+                  <input type="hidden" name="identifierKind" value={identifierKind} />
+                  <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                    Recorded as {identifierKind === 'PAN' ? 'a PAN' : 'a client code'}.{' '}
+                    <button
+                      type="button"
+                      className="font-semibold underline underline-offset-2"
+                      onClick={() => setKindOverride(identifierKind === 'PAN' ? 'CLIENT_CODE' : 'PAN')}
+                    >
+                      Use {identifierKind === 'PAN' ? 'client code' : 'PAN'} instead
+                    </button>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="label" htmlFor="finalAmount">Final amount</label>
+                  <input
+                    id="finalAmount"
+                    name="finalAmount"
+                    className="input"
+                    inputMode="decimal"
+                    placeholder="250000"
+                  />
+                  <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                    What the client actually put in. Optional, and recorded as your figure —
+                    the back office owns the ledger.
+                  </p>
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

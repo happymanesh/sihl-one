@@ -246,6 +246,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             currentOwnerId={lead.owner?.id ?? null}
             assignableUsers={assignable}
             transferTargets={transferTargets}
+            leadProducts={productOutcomes}
             canTransfer={canTransfer}
             templates={templates}
             email={lead.email}
