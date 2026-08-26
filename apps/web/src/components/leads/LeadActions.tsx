@@ -2,9 +2,9 @@
 
 import { useActionState, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
+import { ProductPicker } from '@/components/leads/ProductPicker';
 import {
   guessIdentifierKind,
-  LEAD_LOST_REASONS,
   type LeadProductView,
   type MeetingModeItem,
   type ProductItem,
@@ -13,7 +13,6 @@ import {
 import {
   assignLead,
   transferLead,
-  changeLeadStatus,
   convertLead,
   logActivity,
   type ActionState,
@@ -25,7 +24,7 @@ import { SendMessagePanel } from '@/components/messaging/SendMessagePanel';
 
 const INITIAL: ActionState = { status: 'idle' };
 
-type Tab = 'log' | 'status' | 'assign' | 'transfer' | 'message' | 'convert';
+type Tab = 'log' | 'assign' | 'transfer' | 'message' | 'convert';
 
 interface Props {
   leadId: string;
@@ -76,29 +75,6 @@ function ProductValueFields({ products }: { products: ProductItem[] }) {
       current.includes(code) ? current.filter((value) => value !== code) : [...current, code],
     );
 
-  const topLevel = products.filter((product) => !product.parentId);
-  const childrenOf = (parentId: string) =>
-    products.filter((product) => product.parentId === parentId);
-
-  const chip = (product: ProductItem, sub = false) => (
-    <label
-      key={product.code}
-      className={`cursor-pointer rounded-lg border px-2.5 py-1 font-semibold transition-colors has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white ${
-        sub
-          ? 'border-dashed border-[var(--color-border-strong)] text-[0.6875rem]'
-          : 'border-[var(--color-border-strong)] text-xs'
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={picked.includes(product.code)}
-        onChange={() => toggle(product.code)}
-        aria-label={sub ? `${product.parentName ?? ''} ${product.name}`.trim() : product.name}
-        className="sr-only"
-      />
-      {product.name}
-    </label>
-  );
 
   return (
     <div>
@@ -113,29 +89,7 @@ function ProductValueFields({ products }: { products: ProductItem[] }) {
           Dashed outline marks a sub-product as the narrower choice. Either can
           be picked, and picking both is legitimate: a conversation can cover the
           product in general and one variant in particular. */}
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
-        {topLevel.map((parent) => {
-          const children = childrenOf(parent.id);
-
-          if (children.length === 0) return chip(parent);
-
-          return (
-            <span
-              key={parent.id}
-              // Wraps inside the group as well: a parent with five sub-products
-              // would otherwise run off the side of a phone. The tinted
-              // background keeps them read as one unit even across two lines.
-              className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[var(--color-surface-muted)] px-1.5 py-1"
-            >
-              {chip(parent)}
-              <span aria-hidden className="text-xs text-[var(--color-text-subtle)]">
-                &rsaquo;
-              </span>
-              {children.map((child) => chip(child, true))}
-            </span>
-          );
-        })}
-      </div>
+      <ProductPicker products={products} selected={picked} onToggle={toggle} />
 
       {picked.length > 0 ? (
         <div className="mt-2.5 space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
@@ -177,7 +131,6 @@ export function LeadActions(props: Props) {
 
   const tabs: Array<{ id: Tab; label: string; show: boolean }> = [
     { id: 'log', label: 'Log interaction', show: !isClosed },
-    { id: 'status', label: 'Change status', show: props.canUpdate && props.allowedTransitions.length > 0 },
     { id: 'assign', label: 'Assign', show: props.canAssign && !isClosed },
     { id: 'transfer', label: 'Transfer', show: props.canTransfer && !isClosed },
     { id: 'message', label: 'Send message', show: props.templates.length > 0 && !isClosed },
@@ -229,9 +182,6 @@ export function LeadActions(props: Props) {
             meetingModes={props.meetingModes}
             products={props.products}
           />
-        ) : null}
-        {active === 'status' ? (
-          <StatusForm leadId={props.leadId} allowed={props.allowedTransitions} />
         ) : null}
         {active === 'transfer' ? (
           <TransferForm
@@ -452,7 +402,7 @@ function LogInteractionForm({
           id="subject"
           name="subject"
           className="input"
-          placeholder="Discussed brokerage plan and margin funding"
+          placeholder="Enter discussion topic or agenda"
           aria-invalid={missing.includes('subject') || Boolean(state.errors?.subject)}
           aria-describedby={missing.includes('subject') ? 'subject-error' : undefined}
         />
@@ -593,64 +543,6 @@ function LogInteractionForm({
   );
 }
 
-function StatusForm({ leadId, allowed }: { leadId: string; allowed: string[] }) {
-  const [state, action] = useActionState(changeLeadStatus, INITIAL);
-  const [status, setStatus] = useState(allowed.find((value) => value !== 'CONVERTED') ?? '');
-
-  return (
-    <form action={action} className="space-y-3">
-      <input type="hidden" name="leadId" value={leadId} />
-      <Feedback state={state} />
-
-      <div>
-        <label className="label" htmlFor="status">Move to</label>
-        <select
-          id="status"
-          name="status"
-          className="input"
-          value={status}
-          onChange={(event) => setStatus(event.target.value)}
-        >
-          {/* Only transitions the API will accept are offered. The same table
-              drives both, so the UI can never present an impossible move. */}
-          {allowed
-            .filter((value) => value !== 'CONVERTED')
-            .map((value) => (
-              <option key={value} value={value}>{humanise(value)}</option>
-            ))}
-        </select>
-        {allowed.includes('CONVERTED') ? (
-          <p className="mt-1.5 text-xs text-[var(--color-text-subtle)]">
-            To convert this lead, use the Convert tab — it needs a PAN and email.
-          </p>
-        ) : null}
-      </div>
-
-      {status === 'LOST' ? (
-        <div>
-          <label className="label" htmlFor="lostReason">
-            Reason <span className="text-danger-500">*</span>
-          </label>
-          <select id="lostReason" name="lostReason" className="input" required>
-            {LEAD_LOST_REASONS.map((reason) => (
-              <option key={reason} value={reason}>{humanise(reason)}</option>
-            ))}
-          </select>
-          <p className="mt-1.5 text-xs text-[var(--color-text-subtle)]">
-            Required — lost reasons are what make the drop-off report useful.
-          </p>
-        </div>
-      ) : null}
-
-      <div>
-        <label className="label" htmlFor="note">Note</label>
-        <textarea id="note" name="note" rows={2} className="input resize-none" />
-      </div>
-
-      <Submit label="Update status" pendingLabel="Updating…" />
-    </form>
-  );
-}
 
 function AssignForm({
   leadId,

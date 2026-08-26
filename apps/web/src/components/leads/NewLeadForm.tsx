@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { PRIORITIES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
 import { DuplicateMobileNotice } from '@/components/leads/DuplicateMobileNotice';
+import { ProductPicker } from '@/components/leads/ProductPicker';
 import { LeadProfileFields } from '@/components/leads/LeadProfileFields';
 import { createLead, type ActionState } from '@/app/actions/leads';
 import { humanise } from '@/lib/format';
@@ -91,6 +92,7 @@ export function NewLeadForm({
   canAssign: boolean;
 }) {
   const [state, action] = useActionState(createLead, INITIAL);
+  const [pickedProducts, setPickedProducts] = useState<string[]>([]);
 
   return (
     <form action={action} className="space-y-5" noValidate>
@@ -220,22 +222,23 @@ export function NewLeadForm({
 
       <fieldset>
         <legend className="text-sm font-bold">What are they interested in?</legend>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {products.map((product) => (
-            <label
-              key={product.code}
-              title={product.summary ?? undefined}
-              className="cursor-pointer rounded-full border border-[var(--color-border-strong)] px-3 py-1.5 text-xs font-semibold transition-colors has-[:checked]:border-navy-500 has-[:checked]:bg-navy-500 has-[:checked]:text-white"
-            >
-              <input
-                type="checkbox"
-                name="productInterest"
-                value={product.code}
-                className="sr-only"
-              />
-              {product.name}
-            </label>
-          ))}
+        {/* The same picker the interaction form uses. Sub-products sit under
+            their parent rather than beside it, so a rep does not meet the same
+            fourteen products laid out two different ways within a minute. */}
+        <div className="mt-2">
+          <ProductPicker
+            products={products}
+            name="productInterest"
+            selected={pickedProducts}
+            onToggle={(code) =>
+              setPickedProducts((current) =>
+                current.includes(code)
+                  ? current.filter((value) => value !== code)
+                  : [...current, code],
+              )
+            }
+            tone="navy"
+          />
         </div>
       </fieldset>
 

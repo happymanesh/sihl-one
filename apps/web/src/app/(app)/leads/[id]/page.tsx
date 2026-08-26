@@ -15,6 +15,7 @@ import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
 import { Timeline } from '@/components/leads/Timeline';
 import { LeadProductOutcomes } from '@/components/leads/LeadProductOutcomes';
+import { LeadRecordTabs } from '@/components/leads/LeadRecordTabs';
 import { LeadProductsPanel } from '@/components/leads/LeadProductsPanel';
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
@@ -270,21 +271,19 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             canEdit={can(user, 'lead:update')}
           />
 
-          <DocumentPanel
-            entityType="LEAD"
-            entityId={lead.id}
-            canUpload={can(user, 'lead:update')}
+          {/* One card, two panes. Stacked, a long timeline pushed the
+              documents somewhere nobody scrolled to. */}
+          <LeadRecordTabs
+            activityCount={lead.activityCount}
+            activity={<Timeline entries={lead.timeline} />}
+            documents={
+              <DocumentPanel
+                entityType="LEAD"
+                entityId={lead.id}
+                canUpload={can(user, 'lead:update')}
+              />
+            }
           />
-
-          <section className="card p-5">
-            <div className="flex items-baseline justify-between">
-              <h2 className="font-bold">Activity timeline</h2>
-              <span className="text-xs text-[var(--color-text-subtle)]">
-                {lead.activityCount} interaction{lead.activityCount === 1 ? '' : 's'}
-              </span>
-            </div>
-            <Timeline entries={lead.timeline} />
-          </section>
         </div>
 
         <aside className="space-y-4">
