@@ -62,9 +62,7 @@ Feedback welcome.
 
 
 
-set the variables and let me know when done
-yes, snapshot is ready. proceed with production release
-take the backup again
+update the release plan
 
 update artifacts for guidance, tech document, production release plan, steps and procedures for releasing it on SIHL environment, changes done pdf for emailing to Sales team and CEO. how to restore backup.
 
@@ -78,5 +76,10 @@ Production API: https://api-production-c405d.up.railway.app
 Railway-generated domains persist across deploys, so railway up replaces the running image but never the address. Staging is still https://web-staging-faea.up.railway.app.
 
 
+Sravan prodution key : sk_svacoo1k_rfcjS6oaeZvUMHNzL3jjCimk
+Mappls production key pair :
+Client id :96dHZVzsAutijGxY29RzqCuqEfd90jHmE-yM2cLdrSHi4eGFvC4bSep8nGC4vgfYAzMa-qGS5_6A6AwsCzSnomSVhNDGQg08
+Client Secret: lrFxI-iSEg9T5ixwl6mpkVaBsK-OGu002ymrNCOAHC0IaVbXdpczpUa52qPoX6OtkBtZZpJprjh23_DLCkcKioRvsGs2n4VWQxzg5cJV4fQ=
 
 
+bigmile.in

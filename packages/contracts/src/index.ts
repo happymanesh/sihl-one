@@ -11,6 +11,7 @@ export * from './lead';
 export * from './lead-scoring';
 export * from './lead-profile';
 export * from './lead-product';
+export * from './lead-conversion';
 export * from './customer';
 export * from './activity';
 export * from './geo';

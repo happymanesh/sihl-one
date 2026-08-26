@@ -78,7 +78,8 @@ export interface Customer360 {
     id: string;
     reference: string;
     fullName: string;
-    email: string;
+    /** Absent when the conversion was recorded against a client code alone. */
+    email: string | null;
     mobileMasked: string;
     panMasked: string;
     city: string | null;

@@ -26,7 +26,15 @@ export default async function PlanVisitPage({
   // whole book and filtering in the browser would both leak names and be slow.
   const [leads, customers, meetingModes] = await Promise.all([
     apiFetch<{ items: LeadListItem[] }>(
-      '/leads?pageSize=50&status=CONTACTED&status=QUALIFIED&status=PROPOSAL',
+      // Every open stage, NEW included.
+      //
+      // This used to start at CONTACTED, on the reasoning that you do not visit
+      // somebody you have never spoken to. Per-product outcomes broke that: a
+      // lead whose only remaining open product sits at NEW rolls up to NEW, so a
+      // client mid-conversation about F&O disappeared from this list the moment
+      // their equity converted. The stage a lead happens to be at is a poor
+      // reason to refuse to plan a meeting with them.
+      '/leads?pageSize=50&status=NEW&status=CONTACTED&status=QUALIFIED&status=PROPOSAL',
     ).catch(() => ({ items: [] as LeadListItem[] })),
     apiFetch<{ items: CustomerRow[] }>('/customers?pageSize=50').catch(() => ({
       items: [] as CustomerRow[],

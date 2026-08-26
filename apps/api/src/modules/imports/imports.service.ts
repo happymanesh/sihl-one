@@ -338,7 +338,10 @@ export class ImportsService {
       }
 
       try {
-        const leadId = await this.createLeadFromRow(user, batch.id, row, mapping);
+        const leadId = await this.createLeadFromRow(user, batch.id, row, mapping, {
+          markMobileVerified: input.markMobileVerified,
+          assignToUserId: input.assignToUserId,
+        });
         imported += 1;
         await this.prisma.leadImportRow.update({
           where: { id: row.id },
@@ -602,13 +605,16 @@ export class ImportsService {
     batchId: string,
     row: { rowNumber: number; mapped: unknown },
     mapping: ImportMapping,
+    options: { markMobileVerified: boolean; assignToUserId?: string },
   ): Promise<string> {
     const mapped = row.mapped as Record<string, string | undefined>;
     const productInterest = parseProductInterest(mapped.productInterest);
     const estimatedValue = parseImportedAmount(mapped.estimatedValue);
 
     // Routing goes through the same engine the website and events use.
-    const routed = mapping.ownerId
+    const routed = options.assignToUserId
+      ? { ownerId: options.assignToUserId, ruleId: null }
+      : mapping.ownerId
       ? { ownerId: mapping.ownerId, ruleId: null }
       : await this.assignment.resolveOwner({
           source: mapping.source,
@@ -646,6 +652,19 @@ export class ImportsService {
         orgUnitId: owner?.orgUnitId ?? user.orgUnitId,
         campaignId: mapping.campaignId ?? null,
         importBatchId: batchId,
+        // Only when the importer said so, and defaulting to unverified.
+        //
+        // Recorded as CALL because that is what "we already spoke to these"
+        // means, and attributed to the person who ran the import — an
+        // unattributed tick is worse than none, since the unverified rate is
+        // the only measure of whether reps are actually reaching people.
+        ...(options.markMobileVerified
+          ? {
+              mobileVerifiedAt: new Date(),
+              mobileVerificationMethod: 'CALL' as const,
+              mobileVerifiedById: user.id,
+            }
+          : {}),
         // The heart of the DPDP position: imported people have not agreed to
         // hear from SIHL. They can be called — that call is how consent is
         // obtained — but no marketing goes out until someone records it.

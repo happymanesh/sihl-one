@@ -735,6 +735,15 @@ model LeadProduct {
   /// Same vocabulary as the lead's own status, on purpose.
   status String @default("NEW") @db.VarChar(40)
 
+  /// What the client actually put in, recorded by the rep at conversion.
+  /// Distinct from the expected investment on an interaction, which is a
+  /// forecast. Still not a ledger figure — the back office owns that.
+  finalAmount Decimal? @db.Decimal(18, 2)
+
+  /// The PAN or client code the conversion was recorded against.
+  conversionRef     String? @db.VarChar(30)
+  conversionRefKind String? @db.VarChar(20)
+
   /// Set when the status becomes one the product does not come back from.
   closedAt   DateTime?
   lostReason String?   @db.VarChar(40)
@@ -864,10 +873,18 @@ model Customer {
 
   firstName   String    @db.VarChar(60)
   lastName    String?   @db.VarChar(60)
-  email       String    @db.VarChar(160)
+  /// Optional since conversion may be recorded from the interaction form, where
+  /// the rep has a client code and nothing else. The back office holds the
+  /// contact record; this is a pointer to theirs, not a copy (ADR-0002).
+  email       String?   @db.VarChar(160)
   mobile      String    @db.VarChar(15)
   /// PAN is the regulated identity key; unique across active customers.
-  pan         String    @unique @db.VarChar(10)
+  /// Optional, but not absent: a customer must carry a PAN or a client code,
+  /// enforced by a check constraint. Requiring the PAN meant a rep who had only
+  /// the client code could not record a conversion at all, so it went
+  /// unrecorded — which is worse than a customer row the back office can
+  /// reconcile on either reference.
+  pan         String?   @unique @db.VarChar(10)
   dateOfBirth DateTime? @db.Date
 
   addressLine1 String? @db.VarChar(160)

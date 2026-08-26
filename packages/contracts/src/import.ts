@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
-import {
-  codeSchema, idSchema } from './common';
+import { codeSchema, idSchema } from './common';
 
 /**
  * Bulk lead import.
@@ -323,6 +322,29 @@ export const commitImportSchema = z.object({
     )
     .max(10_000)
     .default([]),
+
+  /**
+   * Whether the numbers in this file have already been spoken to.
+   *
+   * Defaults to false, and the default is the important part. A list bought
+   * from a vendor or scraped from an event has not been verified by anyone, and
+   * marking it otherwise would put an unearned tick against every row and make
+   * the unverified rate — which is the only measure of whether reps are
+   * actually calling people — meaningless.
+   *
+   * True is for the case it exists for: a file the team built themselves from
+   * calls they made, where ticking each one afterwards is busywork.
+   */
+  markMobileVerified: z.boolean().default(false),
+
+  /**
+   * Who owns everything in this file.
+   *
+   * Absent means the existing behaviour — each row goes to whoever the
+   * assignment rules choose, or to the importer. Supplied, every row goes to
+   * that person, which is what a manager loading a territory list wants.
+   */
+  assignToUserId: idSchema.optional(),
 });
 export type CommitImportInput = z.infer<typeof commitImportSchema>;
 
