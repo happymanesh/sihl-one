@@ -169,11 +169,31 @@ export function LeadProductOutcomes({
                     is accepted — a rep who has the client code should not be
                     sent away to look up a PAN. */}
                 {status === 'CONVERTED' ? (
-                  <div className="space-y-2 rounded-lg border border-teal-500/40 bg-teal-50/60 p-2.5 dark:bg-teal-500/10">
-                    <div>
-                      <label className="label" htmlFor={`identifier-${row.productCode}`}>
-                        PAN or client code <span className="text-danger-500">*</span>
-                      </label>
+                  <div className="grid gap-2 rounded-lg border border-teal-500/40 bg-teal-50/60 p-2.5 sm:grid-cols-2 dark:bg-teal-500/10">
+                    <div className="min-w-0">
+                      {/* The kind sits on the label rather than under the field:
+                          it is one word plus a way to correct it, and a
+                          paragraph of explanation under every input pushed the
+                          two fields apart for no one's benefit. */}
+                      <div className="flex items-baseline justify-between gap-2">
+                        <label className="label" htmlFor={`identifier-${row.productCode}`}>
+                          PAN or client code <span className="text-danger-500">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-teal-700 underline underline-offset-2 dark:text-teal-300"
+                          onClick={() =>
+                            setKindOverride(identifierKind === 'PAN' ? 'CLIENT_CODE' : 'PAN')
+                          }
+                          aria-label={`Recorded as ${
+                            identifierKind === 'PAN' ? 'a PAN' : 'a client code'
+                          }. Record it as ${
+                            identifierKind === 'PAN' ? 'a client code' : 'a PAN'
+                          } instead.`}
+                        >
+                          Use {identifierKind === 'PAN' ? 'client code' : 'PAN'}
+                        </button>
+                      </div>
                       <input
                         id={`identifier-${row.productCode}`}
                         name="identifier"
@@ -186,21 +206,9 @@ export function LeadProductOutcomes({
                         aria-invalid={Boolean(state.errors?.identifier)}
                       />
                       <input type="hidden" name="identifierKind" value={identifierKind} />
-                      <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
-                        Recorded as {identifierKind === 'PAN' ? 'a PAN' : 'a client code'}.{' '}
-                        <button
-                          type="button"
-                          className="font-semibold underline underline-offset-2"
-                          onClick={() =>
-                            setKindOverride(identifierKind === 'PAN' ? 'CLIENT_CODE' : 'PAN')
-                          }
-                        >
-                          Use {identifierKind === 'PAN' ? 'client code' : 'PAN'} instead
-                        </button>
-                      </p>
                     </div>
 
-                    <div>
+                    <div className="min-w-0">
                       <label className="label" htmlFor={`finalAmount-${row.productCode}`}>
                         Final amount
                       </label>
@@ -211,10 +219,6 @@ export function LeadProductOutcomes({
                         inputMode="decimal"
                         placeholder="250000"
                       />
-                      <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
-                        What the client actually put in. Optional, and recorded as your
-                        figure — the back office owns the ledger.
-                      </p>
                     </div>
                   </div>
                 ) : null}
