@@ -4,7 +4,6 @@ import { useActionState, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 import {
-  guessIdentifierKind,
   type LeadProductView,
   type MeetingModeItem,
   type ProductItem,
@@ -17,6 +16,7 @@ import {
   logActivity,
   type ActionState,
 } from '@/app/actions/leads';
+import { ConversionFields } from '@/components/leads/ConversionFields';
 import { VoiceInputButton } from '@/components/leads/VoiceInputButton';
 import { humanise } from '@/lib/format';
 import { OwnerSuggestions } from './OwnerSuggestions';
@@ -263,28 +263,19 @@ function LogInteractionForm({
   const [missing, setMissing] = useState<string[]>([]);
   const [nextStatus, setNextStatus] = useState('');
   const [mode, setMode] = useState('');
-  const [identifier, setIdentifier] = useState('');
-  const [kindOverride, setKindOverride] = useState<'PAN' | 'CLIENT_CODE' | null>(null);
+  const [converting, setConverting] = useState(false);
 
   // The guess follows what is typed until the rep overrides it, and the
   // override then sticks — retyping a character should not undo their choice.
-  const identifierKind = kindOverride ?? guessIdentifierKind(identifier);
 
   const selectedMode = meetingModes.find((item) => item.code === mode);
 
   const openProducts = leadProducts.filter((row) => row.isOpen);
 
-  // CONVERTED used to be stripped out here, on the grounds that conversion
-  // needs a PAN and its own confirmation. That sent a rep who had just closed
-  // a deal off to a different tab to re-enter what they were already typing,
-  // so it is offered inline — asking for the product, the reference and the
-  // amount rather than for a PAN specifically.
-  //
-  // Still hidden when the lead has no open product, because there would be
-  // nothing to convert.
-  const transitions = allowedTransitions.filter(
-    (value) => value !== 'CONVERTED' || openProducts.length > 0,
-  );
+  // CONVERTED never belongs in this list: converting is per product and needs
+  // the reference and the amount, which the block below asks for. The filter
+  // stays because allowedTransitions comes from the API and may offer it.
+  const transitions = allowedTransitions.filter((value) => value !== 'CONVERTED');
 
   const validate = (event: React.FormEvent<HTMLFormElement>) => {
     const form = event.currentTarget;
@@ -446,8 +437,9 @@ function LogInteractionForm({
           any picked. Everywhere else the lead's stage is rolled up from the
           products, so a status set here was overwritten the moment any product
           moved: the control looked like it worked and quietly did not. Products
-          are closed from the Products panel instead, which is also where
-          converting asks for the amount and the reference. */}
+          are closed from the Products panel instead. Converting is the
+          exception and has its own block below, which does not depend on this
+          one being shown. */}
       {canUpdate && leadProducts.length === 0 && transitions.length > 0 ? (
         <div className="border-t border-[var(--color-border)] pt-3">
           <label className="label" htmlFor="nextStatus">Move the lead to</label>
@@ -471,12 +463,32 @@ function LogInteractionForm({
             </div>
           ) : null}
 
-          {nextStatus === 'CONVERTED' ? (
+        </div>
+      ) : null}
+
+      {/* Conversion is recorded here as well as in the Products panel. A rep
+          who has just written up the call that closed the deal should not have
+          to go somewhere else to say so, and both routes post to the same
+          endpoint — this one only reaches it with the checkbox ticked, so
+          saving an ordinary interaction can never convert anything by
+          accident. */}
+      {canUpdate && openProducts.length > 0 ? (
+        <div className="border-t border-[var(--color-border)] pt-3">
+          <label className="flex items-center gap-2 text-sm font-semibold">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-teal-600"
+              checked={converting}
+              onChange={(event) => setConverting(event.target.checked)}
+            />
+            This call converted a product
+          </label>
+
+          {converting ? (
             <div className="mt-3 space-y-2 rounded-lg border border-teal-500/40 bg-teal-50/60 p-3 dark:bg-teal-500/10">
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Each product closes on its own. Only the one you pick is converted — anything
-                else stays open.
-              </p>
+              {/* Drives the existing action path. Present only while the box is
+                  ticked, so an untouched form submits no status at all. */}
+              <input type="hidden" name="nextStatus" value="CONVERTED" />
 
               <div>
                 <label className="label" htmlFor="convertProductCode">Which product?</label>
@@ -493,57 +505,18 @@ function LogInteractionForm({
                     </option>
                   ))}
                 </select>
+                {openProducts.length > 1 ? (
+                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                    Only this one closes. The rest stay open.
+                  </p>
+                ) : null}
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <label className="label" htmlFor="identifier">PAN or client code</label>
-                  <input
-                    id="identifier"
-                    name="identifier"
-                    className="input"
-                    required
-                    autoCapitalize="characters"
-                    placeholder="ABCDE1234F or R0018"
-                    value={identifier}
-                    onChange={(event) => setIdentifier(event.target.value)}
-                  />
-                  {/* Guessed from what was typed, and overridable. A client code
-                      that happens to be PAN-shaped is still a client code if the
-                      rep says so. */}
-                  <input type="hidden" name="identifierKind" value={identifierKind} />
-                  <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
-                    Recorded as {identifierKind === 'PAN' ? 'a PAN' : 'a client code'}.{' '}
-                    <button
-                      type="button"
-                      className="font-semibold underline underline-offset-2"
-                      onClick={() => setKindOverride(identifierKind === 'PAN' ? 'CLIENT_CODE' : 'PAN')}
-                    >
-                      Use {identifierKind === 'PAN' ? 'client code' : 'PAN'} instead
-                    </button>
-                  </p>
-                </div>
-
-                <div>
-                  <label className="label" htmlFor="finalAmount">Final amount</label>
-                  <input
-                    id="finalAmount"
-                    name="finalAmount"
-                    className="input"
-                    inputMode="decimal"
-                    placeholder="250000"
-                  />
-                  <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
-                    What the client actually put in. Optional, and recorded as your figure —
-                    the back office owns the ledger.
-                  </p>
-                </div>
-              </div>
+              <ConversionFields idPrefix="log" />
             </div>
           ) : null}
         </div>
       ) : null}
-
       <Submit label="Save interaction" pendingLabel="Saving…" variant="accent" />
     </form>
   );
