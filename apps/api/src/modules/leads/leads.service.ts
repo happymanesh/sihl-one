@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   canTransferLeads,
+  closedSince,
   isOpenLeadProductStatus,
   OPEN_LEAD_PRODUCT_STATUSES,
   rollUpLeadStatus,
@@ -18,6 +19,8 @@ import {
   verificationSurvivesEdit,
   type AssignLeadInput,
   type ChangeLeadProductStatusInput,
+  type ClosedPeriod,
+  type ConvertProductInput,
   type CheckLeadMobileInput,
   type LeadProductStatus,
   type LeadProductView,
@@ -204,6 +207,86 @@ export class LeadsService {
         count: counts.get(status) ?? 0,
       })),
       total: [...counts.values()].reduce((sum, n) => sum + n, 0),
+    };
+  }
+
+  /**
+   * The Closed column: everything finished inside a window.
+   *
+   * Converted, Lost and Disqualified together rather than three more columns.
+   * The board is for work in progress and these are its exhaust; what a manager
+   * wants here is "what finished recently and how did it go", which is one list
+   * with an outcome on each card.
+   *
+   * Windowed because closed work is unbounded — every lost product since launch
+   * — and a column nobody can reach the bottom of is not a column.
+   */
+  async closedColumn(user: AuthenticatedPrincipal, period: ClosedPeriod, query: LeadQuery) {
+    const expanded = await this.withSubProducts(query);
+    const leadWhere = this.buildWhere(user, {
+      ...expanded,
+      status: undefined,
+    }) as Prisma.LeadWhereInput;
+
+    const where: Prisma.LeadProductWhereInput = {
+      status: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
+      closedAt: { gte: closedSince(period) },
+      lead: leadWhere,
+      ...(expanded.productInterest?.length
+        ? { productCode: { in: expanded.productInterest } }
+        : {}),
+    };
+
+    const [rows, total, byOutcome] = await Promise.all([
+      this.prisma.leadProduct.findMany({
+        where,
+        take: query.pageSize,
+        skip: (query.page - 1) * query.pageSize,
+        orderBy: [{ closedAt: 'desc' }],
+        include: {
+          product: { select: { name: true } },
+          lead: {
+            select: {
+              id: true,
+              reference: true,
+              firstName: true,
+              lastName: true,
+              owner: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.leadProduct.count({ where }),
+      // groupBy also insists on ordering by the grouped column.
+      this.prisma.leadProduct.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+        orderBy: { status: 'asc' },
+      }),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        leadId: row.leadId,
+        reference: row.lead.reference,
+        name: [row.lead.firstName, row.lead.lastName].filter(Boolean).join(' ').trim(),
+        productCode: row.productCode,
+        productName: row.product?.name ?? row.productCode,
+        status: row.status,
+        // Two decimals forced: String(Decimal) drops a trailing zero, so
+        // 250000.50 comes back as 250000.5 — right numerically, wrong on a page
+        // of money.
+        finalAmount: row.finalAmount ? row.finalAmount.toFixed(2) : null,
+        lostReason: row.lostReason,
+        closedAt: row.closedAt?.toISOString() ?? null,
+        ownerName: row.lead.owner
+          ? `${row.lead.owner.firstName} ${row.lead.owner.lastName}`.trim()
+          : null,
+      })),
+      total,
+      byOutcome: Object.fromEntries(byOutcome.map((r) => [r.status, r._count._all])),
     };
   }
 
@@ -1844,6 +1927,125 @@ export class LeadsService {
       resource: 'lead',
       resourceId: id,
       reason: `${input.productCode} → ${input.status}`,
+    });
+
+    return this.productsFor(user, id);
+  }
+
+  /**
+   * Close one product as won, recorded against whatever reference the rep has.
+   *
+   * The dedicated Convert tab still exists and still asks for a PAN and an
+   * email, because that path is where a customer record is opened properly.
+   * This one is for the far commoner case: the account already exists in the
+   * back office, the rep has the client code, and the alternative to accepting
+   * it is the conversion never being recorded at all.
+   */
+  async convertProduct(
+    user: AuthenticatedPrincipal,
+    id: string,
+    input: ConvertProductInput,
+  ) {
+    const lead = await this.mustFindInScope(user, id);
+
+    const row = await this.prisma.leadProduct.findUnique({
+      where: { leadId_productCode: { leadId: id, productCode: input.productCode } },
+    });
+    if (!row) {
+      throw new BadRequestException({
+        title: 'Not an interest on this lead',
+        detail: 'Add the product to the lead before recording it as converted.',
+      });
+    }
+    if (row.status === 'CONVERTED') {
+      throw new BadRequestException({
+        title: 'Already converted',
+        detail: `${input.productCode} is already recorded as converted on this lead.`,
+      });
+    }
+
+    const isPan = input.identifierKind === 'PAN';
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.leadProduct.update({
+        where: { id: row.id },
+        data: {
+          status: 'CONVERTED',
+          closedAt: new Date(),
+          finalAmount: input.finalAmount ?? null,
+          conversionRef: input.identifier,
+          conversionRefKind: input.identifierKind,
+          note: input.note ?? row.note,
+        },
+      });
+
+      // The customer record is opened by the first conversion and reused by
+      // every one after it. One client is one customer however many products
+      // they take; a second record would split their history where it matters.
+      let customerId = lead.customerId;
+      if (!customerId) {
+        const reference = await this.references.next('CU');
+        const created = await tx.customer.create({
+          data: {
+            reference,
+            firstName: lead.firstName,
+            lastName: lead.lastName,
+            mobile: lead.mobile,
+            email: lead.email,
+            pan: isPan ? input.identifier : null,
+            clientCode: isPan ? null : input.identifier,
+            city: lead.city,
+            state: lead.state,
+            status: 'ONBOARDING',
+            relationshipManagerId: lead.ownerId,
+            orgUnitId: lead.orgUnitId,
+          },
+        });
+        customerId = created.id;
+        await tx.lead.update({ where: { id }, data: { customerId } });
+      } else if (isPan) {
+        // A later conversion that arrives with a PAN fills in one the earlier
+        // client-code conversion could not supply. Never overwrites a PAN
+        // already on record.
+        await tx.customer.updateMany({
+          where: { id: customerId, pan: null },
+          data: { pan: input.identifier },
+        });
+      }
+
+      await tx.activity.create({
+        data: {
+          entityType: 'LEAD',
+          entityId: id,
+          type: 'STATUS_CHANGE',
+          direction: 'INTERNAL',
+          subject: `${input.productCode} converted`,
+          body: input.note ?? null,
+          actorId: user.id,
+          isSystemGenerated: true,
+          metadata: {
+            identifierKind: input.identifierKind,
+            finalAmount: input.finalAmount ?? null,
+          } as never,
+        },
+      });
+
+      await this.rollUpLead(tx, id);
+
+      const rolled = await tx.lead.findUniqueOrThrow({ where: { id }, select: { status: true } });
+      if (rolled.status === 'CONVERTED') {
+        await tx.lead.update({
+          where: { id },
+          data: { convertedAt: new Date(), closedAt: new Date() },
+        });
+      }
+    });
+
+    await this.audit.record({
+      action: 'STATUS_CHANGE',
+      resource: 'lead',
+      resourceId: id,
+      reason: `${input.productCode} converted against ${input.identifierKind}`,
     });
 
     return this.productsFor(user, id);

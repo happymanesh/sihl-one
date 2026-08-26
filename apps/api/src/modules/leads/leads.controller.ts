@@ -14,6 +14,9 @@ import { Throttle } from '@nestjs/throttler';
 import {
   assignLeadSchema,
   changeLeadProductStatusSchema,
+  convertProductSchema,
+  isClosedPeriod,
+  CLOSED_PERIODS,
   checkLeadMobileSchema,
   transferLeadSchema,
   bulkAssignLeadSchema,
@@ -26,6 +29,7 @@ import {
   updateLeadSchema,
   type AssignLeadInput,
   type ChangeLeadProductStatusInput,
+  type ConvertProductInput,
   type CheckLeadMobileInput,
   type TransferLeadInput,
   type BulkAssignLeadInput,
@@ -99,9 +103,6 @@ export class LeadsController {
     return this.leads.pipeline(user, query);
   }
 
-  // A GET so it can be called on every keystroke-settled change of the mobile
-  // field without writing anything. Scoped inside the service, which decides
-  // how much of the match the caller is allowed to be told.
   @Get('pipeline/products')
   @RequirePermissions('lead:read')
   @ApiOperation({
@@ -136,6 +137,29 @@ export class LeadsController {
     return this.leads.productBoardColumn(user, status, query);
   }
 
+  @Get('pipeline/closed')
+  @RequirePermissions('lead:read')
+  @ApiOperation({
+    summary: 'Products closed inside a window, for the Closed column',
+    description:
+      'Converted, lost and disqualified together, newest first, with a count of each. ' +
+      'Windowed because closed work is unbounded.',
+  })
+  @ApiQuery({ name: 'period', required: false, enum: CLOSED_PERIODS })
+  @ApiZodQuery(leadQuerySchema)
+  closedColumn(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query('period') period: string | undefined,
+    @ZodQuery(leadQuerySchema) query: LeadQuery,
+  ) {
+    // An unrecognised period falls back to the default rather than erroring:
+    // this backs a dropdown, and a bad value there is a bookmark, not an attack.
+    return this.leads.closedColumn(user, isClosedPeriod(period) ? period : '1M', query);
+  }
+
+  // A GET so it can be called on every settled keystroke in the mobile field
+  // without writing anything. Scoped inside the service, which decides how much
+  // of the match the caller is allowed to be told.
   @Get('check-mobile')
   @RequirePermissions('lead:create')
   @ApiOperation({ summary: 'Ask whether a mobile number is already on the book' })
@@ -249,6 +273,23 @@ export class LeadsController {
   @ApiOperation({ summary: "A lead's products and where each one stands" })
   products(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
     return this.leads.productsFor(user, id);
+  }
+
+  @Post(':id/products/convert')
+  @RequirePermissions('lead:convert')
+  @ApiOperation({
+    summary: 'Record one product as converted, against a PAN or a client code',
+    description:
+      'The lenient path, for when the account already exists in the back office and the rep ' +
+      'has the client code. The dedicated convert endpoint still requires a PAN and email.',
+  })
+  @ApiZodBody(convertProductSchema)
+  convertProduct(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(convertProductSchema) body: ConvertProductInput,
+  ) {
+    return this.leads.convertProduct(user, id, body);
   }
 
   @Post(':id/products/status')
