@@ -1,14 +1,9 @@
 import Link from 'next/link';
-import {
-  CLOSED_PERIOD_LABELS,
-  CLOSED_PERIODS,
-  isClosedPeriod,
-  scoreBandFor,
-  type ProductItem,
-} from '@sihl-one/contracts';
+import { isClosedPeriod, scoreBandFor, type ProductItem } from '@sihl-one/contracts';
 
 import { ScoreBadge } from '@/components/ui/Badge';
 
+import { ClosedPeriodSelect } from '@/components/leads/ClosedPeriodSelect';
 import { PipelineFilters } from '@/components/leads/PipelineFilters';
 import { apiFetch, toQuery } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
@@ -205,34 +200,16 @@ export default async function PipelinePage({
               </span>
             </div>
 
-            {/* A plain GET form, so the choice survives a bookmark and needs no
-                JavaScript to work. */}
-            <form method="GET" className="mt-1.5">
-              {/* Carried through, or changing the window would silently clear
-                  the product filter the rest of the board is showing. */}
-              {(Array.isArray(productInterest) ? productInterest : productInterest ? [productInterest] : []).map(
-                (code) => (
-                  <input key={code} type="hidden" name="productInterest" value={code} />
-                ),
-              )}
-              <select
-                name="period"
-                defaultValue={period}
-                aria-label="How far back to show closed work"
-                className="w-full rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-xs font-semibold"
-              >
-                {CLOSED_PERIODS.map((value) => (
-                  <option key={value} value={value}>
-                    {CLOSED_PERIOD_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-              <noscript>
-                <button type="submit" className="mt-1 w-full rounded-lg border px-2 py-1 text-xs">
-                  Apply
-                </button>
-              </noscript>
-            </form>
+            <ClosedPeriodSelect
+              period={period}
+              productInterest={
+                Array.isArray(productInterest)
+                  ? productInterest
+                  : productInterest
+                    ? [productInterest]
+                    : []
+              }
+            />
 
             {closed.total > 0 ? (
               <p className="mt-1.5 text-[0.6875rem] text-[var(--color-text-subtle)] tnum">
