@@ -17,6 +17,7 @@ import {
   convertProductSchema,
   isClosedPeriod,
   CLOSED_PERIODS,
+  DEFAULT_CLOSED_PERIOD,
   checkLeadMobileSchema,
   transferLeadSchema,
   bulkAssignLeadSchema,
@@ -154,7 +155,11 @@ export class LeadsController {
   ) {
     // An unrecognised period falls back to the default rather than erroring:
     // this backs a dropdown, and a bad value there is a bookmark, not an attack.
-    return this.leads.closedColumn(user, isClosedPeriod(period) ? period : '1M', query);
+    return this.leads.closedColumn(
+      user,
+      isClosedPeriod(period) ? period : DEFAULT_CLOSED_PERIOD,
+      query,
+    );
   }
 
   // A GET so it can be called on every settled keystroke in the mobile field

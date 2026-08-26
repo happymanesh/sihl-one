@@ -1,5 +1,10 @@
 import Link from 'next/link';
-import { isClosedPeriod, scoreBandFor, type ProductItem } from '@sihl-one/contracts';
+import {
+  DEFAULT_CLOSED_PERIOD,
+  isClosedPeriod,
+  scoreBandFor,
+  type ProductItem,
+} from '@sihl-one/contracts';
 
 import { ScoreBadge } from '@/components/ui/Badge';
 
@@ -70,7 +75,9 @@ export default async function PipelinePage({
   await requireUser();
   const params = await searchParams;
   const productInterest = params.productInterest as string | string[] | undefined;
-  const period = isClosedPeriod(params.period) ? params.period : '1M';
+  // An unrecognised period — including a bookmark from when these were
+  // months — falls back to the default rather than erroring.
+  const period = isClosedPeriod(params.period) ? params.period : DEFAULT_CLOSED_PERIOD;
 
   const products = await apiFetch<ProductItem[]>('/masters/products').catch(
     () => [] as ProductItem[],
