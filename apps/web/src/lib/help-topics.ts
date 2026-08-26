@@ -355,6 +355,69 @@ export const HELP_TOPICS: HelpTopic[] = [
 
   // ---- Reporting ----------------------------------------------------------
   {
+    id: 'lead-score',
+    title: 'How a lead score is worked out',
+    permission: 'lead:read',
+    area: 'Leads',
+    steps: [
+      'Open any lead. The score sits beside the name, and tapping it lists every factor that produced it.',
+      'Nothing is hidden — the list adds up to the number.',
+    ],
+    note:
+      'Out of 100, built from: where the lead came from (a referral is worth 22, an imported list 2); ' +
+      'which products they want, capped at 20 so ticking every box cannot inflate it; how reachable ' +
+      'they are (PAN 10, email 6, city 3); how much you have spoken to them, on a curve, because five ' +
+      'calls is not five times one call; a campaign attribution, 4; and the estimated value, on a log ' +
+      'scale so one large figure cannot dominate. Then it decays: after seven quiet days it loses ' +
+      'roughly 0.8 a day, down to 25, and a lead contacted within 48 hours gains 6. A score that fell ' +
+      'overnight usually means nothing happened, not that the lead got worse.',
+  },
+  {
+    id: 'score-bands',
+    title: 'What Cold, Warm and Hot mean',
+    permission: 'lead:read',
+    area: 'Leads',
+    steps: [
+      'The band is the score, banded. Nothing else feeds it.',
+      'Hot is 70 and above. Warm is 40 to 69. Cold is below 40.',
+    ],
+    note:
+      'Because decay is part of the score, a lead slides from Hot to Warm on its own if it is left ' +
+      'alone — the band is as much a measure of your attention as of the client. Nobody sets it by ' +
+      'hand, and it cannot be overridden: to move a lead up, do something with it.',
+  },
+  {
+    id: 'my-rating',
+    title: 'How your rating is worked out',
+    permission: 'analytics:sales:read',
+    area: 'Reporting',
+    steps: [
+      'My performance shows the rating, both halves that make it, and every metric underneath.',
+      'The coaching notes name the weakest metric rather than the score.',
+    ],
+    note:
+      'Two parts: outcomes 55 per cent, behaviour 45. Behaviour is weighted that heavily on purpose — ' +
+      'it is the part you control. It covers speed of first contact, follow-ups scheduled, follow-ups ' +
+      'kept on time, interactions logged, and lost reasons recorded.',
+  },
+  {
+    id: 'my-rating-fairness',
+    title: 'Why your rating does not just count conversions',
+    permission: 'analytics:sales:read',
+    area: 'Reporting',
+    steps: [
+      'Open My performance and read the outcome half.',
+      'It compares what you converted against what your leads were expected to convert.',
+    ],
+    note:
+      'Every lead carries an expected conversion rate from its score when it reached you. Someone ' +
+      'handed weak leads is measured against weak leads, so a good month on a poor book still reads ' +
+      'as a good month. Ratings are also pulled toward the average when there is little to go on, ' +
+      'which is why the panel marks confidence Low under 15 leads and High at 40 or more — a single ' +
+      'lucky conversion in a thin month does not make anyone exceptional. Bands: Exceptional 80+, ' +
+      'Strong 62, On track 45, Developing below that.',
+  },
+  {
     id: 'my-performance',
     title: 'Checking your own performance',
     permission: 'analytics:sales:read',
