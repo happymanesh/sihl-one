@@ -455,6 +455,40 @@ export async function changeLeadProductStatus(
     };
   }
 
+  // Converting is a different call: it opens the customer record and needs the
+  // reference the back office knows the client by, which the status endpoint
+  // has no way to accept and now refuses outright.
+  if (status === 'CONVERTED') {
+    const identifier = String(formData.get('identifier') ?? '').trim();
+    if (identifier.length < 4) {
+      return {
+        status: 'error',
+        message: 'Enter the PAN or the client code this was opened against.',
+        errors: { identifier: ['A PAN or client code is required'] },
+      };
+    }
+
+    try {
+      await apiFetch(`/leads/${leadId}/products/convert`, {
+        method: 'POST',
+        body: {
+          productCode,
+          identifier,
+          identifierKind: String(formData.get('identifierKind') ?? 'CLIENT_CODE'),
+          finalAmount: formData.get('finalAmount') || undefined,
+          note: formData.get('note') || undefined,
+        },
+      });
+    } catch (error) {
+      return toErrorState(error, 'The conversion could not be recorded.');
+    }
+
+    revalidatePath(`/leads/${leadId}`);
+    revalidatePath('/leads');
+    revalidatePath('/pipeline');
+    return { status: 'success', message: 'Converted.' };
+  }
+
   try {
     await apiFetch(`/leads/${leadId}/products/status`, {
       method: 'POST',
