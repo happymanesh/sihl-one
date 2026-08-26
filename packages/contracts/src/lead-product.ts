@@ -126,40 +126,41 @@ export interface LeadProductView {
 /**
  * How far back the Closed column reaches.
  *
- * Closed work is unbounded — every lost lead since launch — so the column needs
- * a window or it becomes a list nobody scrolls. One month is the default
- * because the question it answers is usually "what did we close recently",
- * not "what have we ever closed".
+ * Closed work is unbounded — every lost product since launch — so the column
+ * needs a window or it becomes a list nobody scrolls.
+ *
+ * Rolling days, not calendar months. "Last month" was the first wording and it
+ * was ambiguous in the worst way: to a reader it means the previous calendar
+ * month, so on 24 August it sounds like July. It actually meant the preceding
+ * thirty-odd days. Nobody would notice the difference until they reconciled a
+ * count against a report, which is exactly when it costs something.
+ *
+ * A day count says what it does and needs no month arithmetic, which also
+ * disposes of the end-of-month clamping the previous version needed.
  */
-export const CLOSED_PERIODS = ['1M', '3M', '6M'] as const;
+export const CLOSED_PERIODS = ['30D', '60D', '90D'] as const;
 export type ClosedPeriod = (typeof CLOSED_PERIODS)[number];
 
 export const CLOSED_PERIOD_LABELS: Record<ClosedPeriod, string> = {
-  '1M': 'Last month',
-  '3M': 'Last 3 months',
-  '6M': 'Last 6 months',
+  '30D': 'Last 30 days',
+  '60D': 'Last 60 days',
+  '90D': 'Last 90 days',
 };
 
-const PERIOD_MONTHS: Record<ClosedPeriod, number> = { '1M': 1, '3M': 3, '6M': 6 };
+const PERIOD_DAYS: Record<ClosedPeriod, number> = { '30D': 30, '60D': 60, '90D': 90 };
+
+/** The default: the question is usually "what closed recently". */
+export const DEFAULT_CLOSED_PERIOD: ClosedPeriod = '30D';
 
 /**
- * The earliest closing date the Closed column should show.
+ * The earliest closing time the Closed column should show.
  *
- * Uses calendar months rather than a fixed number of days, so "last 3 months"
- * on 30 May means since 28 February, which is what somebody asking the question
- * means. Date arithmetic on the last day of a long month rolls forward in
- * JavaScript — 31 March minus one month is 3 March, not 28 February — so the
- * day is clamped rather than left to overflow.
+ * Measured back from the moment it is called, not from midnight. A column that
+ * silently redrew itself at 00:00 would change its own count while somebody was
+ * looking at it.
  */
 export function closedSince(period: ClosedPeriod, now: Date = new Date()): Date {
-  const months = PERIOD_MONTHS[period];
-  const target = new Date(now.getTime());
-  const day = target.getDate();
-  target.setDate(1);
-  target.setMonth(target.getMonth() - months);
-  const lastDayOfTarget = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-  target.setDate(Math.min(day, lastDayOfTarget));
-  return target;
+  return new Date(now.getTime() - PERIOD_DAYS[period] * 24 * 60 * 60 * 1000);
 }
 
 export function isClosedPeriod(value: unknown): value is ClosedPeriod {
