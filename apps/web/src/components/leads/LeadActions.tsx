@@ -442,7 +442,13 @@ function LogInteractionForm({
         </div>
       </div>
 
-      {canUpdate && transitions.length > 0 ? (
+      {/* Only for a lead carrying no products at all — an import that never had
+          any picked. Everywhere else the lead's stage is rolled up from the
+          products, so a status set here was overwritten the moment any product
+          moved: the control looked like it worked and quietly did not. Products
+          are closed from the Products panel instead, which is also where
+          converting asks for the amount and the reference. */}
+      {canUpdate && leadProducts.length === 0 && transitions.length > 0 ? (
         <div className="border-t border-[var(--color-border)] pt-3">
           <label className="label" htmlFor="nextStatus">Move the lead to</label>
           <select
