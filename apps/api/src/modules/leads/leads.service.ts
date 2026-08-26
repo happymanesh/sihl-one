@@ -1893,6 +1893,22 @@ export class LeadsService {
       });
     }
 
+    // Converting is not just another status here.
+    //
+    // It opens the customer record, and it needs the reference the back office
+    // knows the client by. Letting this endpoint set CONVERTED produced a
+    // converted product with no customer behind it and no PAN or client code to
+    // reconcile against — a lead that looks won and is attached to nothing.
+    if (input.status === 'CONVERTED') {
+      throw new BadRequestException({
+        title: 'Use the conversion step',
+        detail:
+          'Converting a product records the amount and the PAN or client code, and opens the ' +
+          'customer record. Choose Converted from the product itself, which asks for them.',
+        code: 'USE_CONVERT_ENDPOINT',
+      });
+    }
+
     const closing = !isOpenLeadProductStatus(input.status);
 
     await this.prisma.$transaction(async (tx) => {

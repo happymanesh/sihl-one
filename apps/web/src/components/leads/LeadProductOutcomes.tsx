@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  guessIdentifierKind,
   LEAD_LOST_REASONS,
   LEAD_PRODUCT_STATUSES,
   type LeadProductView,
@@ -48,6 +49,12 @@ export function LeadProductOutcomes({
   const [state, action] = useActionState(changeLeadProductStatus, INITIAL);
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [kindOverride, setKindOverride] = useState<'PAN' | 'CLIENT_CODE' | null>(null);
+
+  // Guessed from what is typed until the rep overrides it, and the override
+  // then sticks: retyping a character should not undo a deliberate choice.
+  const identifierKind = kindOverride ?? guessIdentifierKind(identifier);
 
   useEffect(() => {
     if (state.status === 'success') {
@@ -157,6 +164,61 @@ export function LeadProductOutcomes({
                   ) : null}
                 </div>
 
+                {/* Converting opens the customer record, so it asks for the
+                    reference the back office knows the client by. Either kind
+                    is accepted — a rep who has the client code should not be
+                    sent away to look up a PAN. */}
+                {status === 'CONVERTED' ? (
+                  <div className="space-y-2 rounded-lg border border-teal-500/40 bg-teal-50/60 p-2.5 dark:bg-teal-500/10">
+                    <div>
+                      <label className="label" htmlFor={`identifier-${row.productCode}`}>
+                        PAN or client code <span className="text-danger-500">*</span>
+                      </label>
+                      <input
+                        id={`identifier-${row.productCode}`}
+                        name="identifier"
+                        className="input h-9 text-sm"
+                        required
+                        autoCapitalize="characters"
+                        placeholder="ABCDE1234F or R0018"
+                        value={identifier}
+                        onChange={(event) => setIdentifier(event.target.value)}
+                        aria-invalid={Boolean(state.errors?.identifier)}
+                      />
+                      <input type="hidden" name="identifierKind" value={identifierKind} />
+                      <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                        Recorded as {identifierKind === 'PAN' ? 'a PAN' : 'a client code'}.{' '}
+                        <button
+                          type="button"
+                          className="font-semibold underline underline-offset-2"
+                          onClick={() =>
+                            setKindOverride(identifierKind === 'PAN' ? 'CLIENT_CODE' : 'PAN')
+                          }
+                        >
+                          Use {identifierKind === 'PAN' ? 'client code' : 'PAN'} instead
+                        </button>
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="label" htmlFor={`finalAmount-${row.productCode}`}>
+                        Final amount
+                      </label>
+                      <input
+                        id={`finalAmount-${row.productCode}`}
+                        name="finalAmount"
+                        className="input h-9 text-sm"
+                        inputMode="decimal"
+                        placeholder="250000"
+                      />
+                      <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+                        What the client actually put in. Optional, and recorded as your
+                        figure — the back office owns the ledger.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
                 <input
                   name="note"
                   className="input h-9 text-sm"
@@ -165,7 +227,7 @@ export function LeadProductOutcomes({
                 />
 
                 <button type="submit" className="btn btn-primary h-9 px-3 text-sm">
-                  Record outcome
+                  {status === 'CONVERTED' ? 'Record conversion' : 'Record outcome'}
                 </button>
               </form>
             ) : null}
