@@ -3,13 +3,13 @@
 import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  guessIdentifierKind,
   LEAD_LOST_REASONS,
   LEAD_PRODUCT_STATUSES,
   type LeadProductView,
 } from '@sihl-one/contracts';
 
 import { changeLeadProductStatus, type ActionState } from '@/app/actions/leads';
+import { ConversionFields } from '@/components/leads/ConversionFields';
 import { humanise } from '@/lib/format';
 
 const INITIAL: ActionState = { status: 'idle' };
@@ -49,12 +49,6 @@ export function LeadProductOutcomes({
   const [state, action] = useActionState(changeLeadProductStatus, INITIAL);
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState('');
-  const [identifier, setIdentifier] = useState('');
-  const [kindOverride, setKindOverride] = useState<'PAN' | 'CLIENT_CODE' | null>(null);
-
-  // Guessed from what is typed until the rep overrides it, and the override
-  // then sticks: retyping a character should not undo a deliberate choice.
-  const identifierKind = kindOverride ?? guessIdentifierKind(identifier);
 
   useEffect(() => {
     if (state.status === 'success') {
@@ -169,57 +163,12 @@ export function LeadProductOutcomes({
                     is accepted — a rep who has the client code should not be
                     sent away to look up a PAN. */}
                 {status === 'CONVERTED' ? (
-                  <div className="grid gap-2 rounded-lg border border-teal-500/40 bg-teal-50/60 p-2.5 sm:grid-cols-2 dark:bg-teal-500/10">
-                    <div className="min-w-0">
-                      {/* The kind sits on the label rather than under the field:
-                          it is one word plus a way to correct it, and a
-                          paragraph of explanation under every input pushed the
-                          two fields apart for no one's benefit. */}
-                      <div className="flex items-baseline justify-between gap-2">
-                        <label className="label" htmlFor={`identifier-${row.productCode}`}>
-                          PAN or client code <span className="text-danger-500">*</span>
-                        </label>
-                        <button
-                          type="button"
-                          className="text-xs font-semibold text-teal-700 underline underline-offset-2 dark:text-teal-300"
-                          onClick={() =>
-                            setKindOverride(identifierKind === 'PAN' ? 'CLIENT_CODE' : 'PAN')
-                          }
-                          aria-label={`Recorded as ${
-                            identifierKind === 'PAN' ? 'a PAN' : 'a client code'
-                          }. Record it as ${
-                            identifierKind === 'PAN' ? 'a client code' : 'a PAN'
-                          } instead.`}
-                        >
-                          Use {identifierKind === 'PAN' ? 'client code' : 'PAN'}
-                        </button>
-                      </div>
-                      <input
-                        id={`identifier-${row.productCode}`}
-                        name="identifier"
-                        className="input h-9 text-sm"
-                        required
-                        autoCapitalize="characters"
-                        placeholder="ABCDE1234F or R0018"
-                        value={identifier}
-                        onChange={(event) => setIdentifier(event.target.value)}
-                        aria-invalid={Boolean(state.errors?.identifier)}
-                      />
-                      <input type="hidden" name="identifierKind" value={identifierKind} />
-                    </div>
-
-                    <div className="min-w-0">
-                      <label className="label" htmlFor={`finalAmount-${row.productCode}`}>
-                        Final amount
-                      </label>
-                      <input
-                        id={`finalAmount-${row.productCode}`}
-                        name="finalAmount"
-                        className="input h-9 text-sm"
-                        inputMode="decimal"
-                        placeholder="250000"
-                      />
-                    </div>
+                  <div className="rounded-lg border border-teal-500/40 bg-teal-50/60 p-2.5 dark:bg-teal-500/10">
+                    <ConversionFields
+                      idPrefix={`panel-${row.productCode}`}
+                      inputClassName="input h-9 text-sm"
+                      invalid={Boolean(state.errors?.identifier)}
+                    />
                   </div>
                 ) : null}
 
