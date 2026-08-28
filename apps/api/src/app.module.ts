@@ -20,6 +20,7 @@ import { LeadsModule } from './modules/leads/leads.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { UsersModule } from './modules/users/users.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { PartnersModule } from './modules/partners/partners.module';
 import { GeocodingModule } from './modules/geocoding/geocoding.module';
@@ -76,6 +77,7 @@ import { PerformanceModule } from './modules/performance/performance.module';
     ImportsModule,
     OffboardingModule,
     PerformanceModule,
+    NotificationsModule,
     OutboxModule,
     HealthModule,
   ],

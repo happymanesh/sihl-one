@@ -1071,7 +1071,10 @@ export class LeadsService {
         aggregateType: 'lead',
         aggregateId: id,
         eventType: 'lead.assigned',
-        payload: { reference: lead.reference, from: lead.ownerId, to: owner.id },
+        // actorId is what lets the notification router stay silent when a rep
+        // assigns a lead to themselves. Without it every self-assignment rings
+        // its own bell.
+        payload: { reference: lead.reference, from: lead.ownerId, to: owner.id, actorId: user.id },
       });
     });
 
@@ -1780,7 +1783,13 @@ export class LeadsService {
         aggregateType: 'lead',
         aggregateId: id,
         eventType: 'lead.transferred',
-        payload: { reference: lead.reference, from: lead.ownerId, to: owner.id },
+        payload: {
+          reference: lead.reference,
+          from: lead.ownerId,
+          to: owner.id,
+          reason: input.reason,
+          actorId: user.id,
+        },
       });
     });
 

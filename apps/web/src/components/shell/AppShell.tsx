@@ -8,6 +8,7 @@ import type { AuthenticatedUser } from '@sihl-one/contracts';
 import { Logo } from '@/components/brand/Logo';
 import { Icon } from './Icon';
 import { IdleTimeout } from './IdleTimeout';
+import { NotificationBell } from './NotificationBell';
 import { UserMenu } from './UserMenu';
 import { SECTION_LABELS, visibleNavItems, type NavItem } from './navigation';
 
@@ -15,10 +16,13 @@ export function AppShell({
   user,
   children,
   onLogout,
+  unreadNotifications = 0,
 }: {
   user: AuthenticatedUser;
   children: ReactNode;
   onLogout: () => Promise<void>;
+  /** Read in the layout, so the badge is correct on every navigation. */
+  unreadNotifications?: number;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -128,14 +132,7 @@ export function AppShell({
 
           <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />
-            <button
-              type="button"
-              className="btn btn-ghost px-2"
-              aria-label="Notifications"
-              title="Notifications"
-            >
-              <Icon name="bell" size={18} />
-            </button>
+            <NotificationBell unread={unreadNotifications} />
             <div className="ml-1 border-l border-[var(--color-border)] pl-1">
               <UserMenu user={user} onLogout={onLogout} />
             </div>

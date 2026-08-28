@@ -270,6 +270,9 @@ export class OffboardingService {
         leadsMoved,
         customersMoved,
         sessionsRevoked: revoked.count,
+        successorId: input.strategy === 'SINGLE_OWNER' ? (input.targetUserIds[0] ?? null) : null,
+        summary: `${leadsMoved} leads and ${customersMoved} customers`,
+        actorId: actor.id,
       },
     });
 

@@ -391,6 +391,11 @@ export class ImportsService {
         skipped,
         importedBy: user.id,
         origin: batch.sourceOrigin,
+        // Read by the notification router: it tells the batch owner their
+        // leads have landed, and stays quiet when they imported them himself.
+        assigneeId: input.assignToUserId ?? null,
+        created: String(imported),
+        actorId: user.id,
       },
     });
 

@@ -48,21 +48,41 @@ export function followUpTaskTitle(context: string): string {
 }
 
 /** Minimal surface both PrismaService and a transaction client satisfy. */
-type TaskCreator = Pick<PrismaService, 'task'>;
+type TaskCreator = Pick<PrismaService, 'task' | 'outboxEvent'>;
 
 export async function createFollowUpTask(
   tx: TaskCreator,
   input: FollowUpTaskInput,
 ): Promise<void> {
-  await tx.task.create({
+  const title = followUpTaskTitle(input.context);
+  const task = await tx.task.create({
     data: {
       reference: input.reference,
-      title: followUpTaskTitle(input.context),
+      title,
       entityType: input.entityType,
       entityId: input.entityId,
       dueAt: input.dueAt,
       assigneeId: input.assigneeId,
       createdById: input.createdById,
+    },
+  });
+
+  // Written in the caller's transaction, so the task and the notice that it
+  // exists either both happen or neither does — which is the entire point of
+  // the outbox. The router stays silent when a rep books their own follow-up,
+  // which is the overwhelmingly common case; it fires when a manager closes
+  // out a visit on somebody else's behalf.
+  await tx.outboxEvent.create({
+    data: {
+      aggregateType: 'task',
+      aggregateId: task.id,
+      eventType: 'task.assigned',
+      payload: {
+        reference: input.reference,
+        title,
+        assigneeId: input.assigneeId,
+        actorId: input.createdById,
+      },
     },
   });
 }

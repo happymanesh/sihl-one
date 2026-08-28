@@ -7,6 +7,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
+import { OutboxService } from '../../common/outbox.service';
 import { ReferenceService } from '../../common/reference.service';
 import { ScopeService } from '../../common/scope.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
@@ -28,6 +29,7 @@ export class TasksService {
     private readonly scope: ScopeService,
     private readonly references: ReferenceService,
     private readonly audit: AuditService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async list(
@@ -182,6 +184,21 @@ export class TasksService {
         },
       });
     }
+
+    // Tells the assignee, unless they are the one who created it. The router
+    // enforces that; publishing unconditionally here keeps the decision about
+    // who needs telling in one place rather than in every service.
+    await this.outbox.publish(this.prisma, {
+      aggregateType: 'task',
+      aggregateId: task.id,
+      eventType: 'task.assigned',
+      payload: {
+        reference: task.reference,
+        title: task.title,
+        assigneeId,
+        actorId: user.id,
+      },
+    });
 
     await this.audit.record({ action: 'CREATE', resource: 'task', resourceId: task.id });
     return { id: task.id, reference: task.reference, title: task.title, status: task.status };
