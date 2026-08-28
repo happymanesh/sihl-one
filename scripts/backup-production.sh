@@ -71,6 +71,39 @@ rsh() {
 
 mkdir -p "$DEST_DIR"
 
+# Clean up on the way out, however we leave.
+#
+# `set -e` means any failure after the scratch database is created aborts the
+# script before it can be dropped — and that leftover then breaks *every*
+# later run, because `createdb` refuses an existing name. One interrupted
+# backup silently disarms the verification on all the ones that follow, which
+# is exactly what happened on 28 August. The container-side dump matters more:
+# it is client PII on a shared host, and an early exit would leave it there.
+#
+# Failures inside the trap are swallowed deliberately. Cleanup that aborts
+# cleanup helps nobody, and the exit status of the run itself must survive.
+cleanup() {
+  local status=$?
+  rsh "dropdb --if-exists sihl_restore_verify" >/dev/null 2>&1 || true
+  rsh "rm -f ${REMOTE}" >/dev/null 2>&1 || true
+  return $status
+}
+trap cleanup EXIT
+
+# Sweep dumps abandoned by earlier runs.
+#
+# The trap only ever removed *this* run's file, so every run that died before
+# its cleanup left a dump behind — three of them had accumulated by 28 August,
+# the oldest sitting in the container since the 23rd. Each one is client names,
+# mobile numbers and the full audit trail, on a shared host, for no reason.
+#
+# Only files older than an hour, so a concurrent run's dump is never deleted
+# out from under it while it is still being written or downloaded.
+STALE="$(rsh "find /tmp -maxdepth 1 -name 'sihl-prod-*.dump' -mmin +60 -print -delete 2>/dev/null | wc -l" | tr -d '\r' | tail -1)"
+if [ "${STALE:-0}" -gt 0 ] 2>/dev/null; then
+  echo "==> Removed ${STALE} abandoned dump(s) from the container"
+fi
+
 echo "==> Dumping ${ENVIRONMENT} inside the container"
 REMOTE_SHA="$(rsh "pg_dump --format=custom --compress=9 --file=${REMOTE} && sha256sum ${REMOTE} | cut -d' ' -f1" | tr -d '\r' | tail -1)"
 echo "    remote sha256 ${REMOTE_SHA}"
@@ -94,11 +127,14 @@ echo "    checksum matches"
 # a separate database is created, filled, counted and dropped.
 if [ "$VERIFY" = "1" ]; then
   echo "==> Verifying the dump restores"
-  rsh "createdb sihl_restore_verify && pg_restore --dbname=sihl_restore_verify --no-owner --exit-on-error ${REMOTE}" >/dev/null
+  # Dropped before it is created, not only after. The trap above should have
+  # cleared any leftover, but a run killed hard enough to skip its own trap
+  # still must not leave the next one unable to verify.
+  rsh "dropdb --if-exists sihl_restore_verify && createdb sihl_restore_verify && pg_restore --dbname=sihl_restore_verify --no-owner --exit-on-error ${REMOTE}" >/dev/null
   rsh 'for t in app_user lead activity task audit_log; do
          echo "    $t $(psql -At -d railway -c "select count(*) from $t") -> $(psql -At -d sihl_restore_verify -c "select count(*) from $t")";
        done' | tr -d '\r'
-  rsh "dropdb sihl_restore_verify" >/dev/null
+  rsh "dropdb --if-exists sihl_restore_verify" >/dev/null
   echo "    scratch database dropped"
 fi
 
