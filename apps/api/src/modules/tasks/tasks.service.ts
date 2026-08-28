@@ -158,6 +158,31 @@ export class TasksService {
       },
     });
 
+    // A task raised against a lead is part of that lead's story — a commitment
+    // somebody made about this client. It belongs on the timeline the rep
+    // reads, not only in the admin audit trail. Flagged system-generated so it
+    // shows as history and never counts as contact for scoring.
+    if (task.entityType && task.entityId) {
+      await this.prisma.activity.create({
+        data: {
+          entityType: task.entityType,
+          entityId: task.entityId,
+          type: 'SYSTEM',
+          direction: 'INTERNAL',
+          subject: `Task created: ${task.title}`,
+          // Written out for a person to read, in IST — the server clock is UTC
+          // and a due date shown five and a half hours early is worse than none.
+          body: `Due ${task.dueAt.toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          })}`,
+          actorId: user.id,
+          isSystemGenerated: true,
+        },
+      });
+    }
+
     await this.audit.record({ action: 'CREATE', resource: 'task', resourceId: task.id });
     return { id: task.id, reference: task.reference, title: task.title, status: task.status };
   }
@@ -208,6 +233,24 @@ export class TasksService {
         completedAt: completing ? new Date() : undefined,
       },
     });
+
+    // Only completion reaches the timeline. Every other edit — a due date
+    // nudged, a priority changed — is bookkeeping, and putting all of it here
+    // would bury the calls and meetings the timeline exists to show.
+    if (completing && updated.entityType && updated.entityId) {
+      await this.prisma.activity.create({
+        data: {
+          entityType: updated.entityType,
+          entityId: updated.entityId,
+          type: 'SYSTEM',
+          direction: 'INTERNAL',
+          subject: `Task completed: ${updated.title}`,
+          body: updated.completionNote ?? null,
+          actorId: user.id,
+          isSystemGenerated: true,
+        },
+      });
+    }
 
     await this.audit.record({
       action: 'UPDATE',
