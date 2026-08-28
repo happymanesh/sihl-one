@@ -28,3 +28,4 @@ export * from './allocation';
 export * from './audit';
 export * from './campaign';
 export * from './event';
+export * from './notification';

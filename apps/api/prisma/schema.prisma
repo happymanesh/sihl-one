@@ -231,6 +231,8 @@ model User {
   auditLogs      AuditLog[]
   importBatches  LeadImportBatch[]
   salesTargets   SalesTarget[]
+  notifications  Notification[] @relation("NotificationRecipient")
+  causedNotifications Notification[] @relation("NotificationActor")
 
   @@index([orgUnitId])
   @@index([managerId])
@@ -1878,4 +1880,51 @@ model Counter {
   updatedAt DateTime @updatedAt
 
   @@map("counter")
+}
+
+/// Something that needs one person's attention, once.
+///
+/// The third record this system keeps about an event, and the only one
+/// addressed to a person: the audit log records who changed what, the activity
+/// timeline records what happened with a client, and this says "you need to
+/// look at something".
+///
+/// Deliberately no `deletedAt`. The convention elsewhere is that nothing a
+/// regulator may ask about is hard-deleted — but the regulated record of an
+/// assignment is the audit log and the activity, not the reminder. These rows
+/// name clients, so they are purged on a retention schedule instead.
+model Notification {
+  id String @id @default(cuid())
+
+  /// The recipient. A notification is read only by the person it addresses, so
+  /// `userId` is the entire access check — no data scope is involved.
+  userId String
+  user   User   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  /// Code into the contracts enum; validated on write, never parsed for meaning.
+  type  String  @db.VarChar(40)
+  title String  @db.VarChar(200)
+  body  String? @db.VarChar(500)
+
+  /// Deep-link target. Access is checked when the link is followed, never here:
+  /// a notification can outlive the recipient's access to what it points at —
+  /// being told a lead moved away from you is the case that proves it.
+  entityType String? @db.VarChar(24)
+  entityId   String? @db.VarChar(64)
+
+  actorId String?
+  actor   User?   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// The outbox row that produced this, and the reason a redelivery is
+  /// harmless. The relay retries up to eight times with backoff, so without a
+  /// uniqueness guarantee one transient failure would notify the same person
+  /// again on every subsequent tick.
+  sourceEventId String @db.VarChar(64)
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, sourceEventId, type])
+  @@index([userId, readAt, createdAt])
+  @@map("notification")
 }

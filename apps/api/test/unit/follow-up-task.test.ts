@@ -29,12 +29,23 @@ describe('follow-up task title', () => {
 describe('creating the follow-up task', () => {
   function recorder() {
     const writes: Record<string, unknown>[] = [];
+    const events: Record<string, unknown>[] = [];
     return {
       writes,
+      events,
       client: {
         task: {
           create: async (args: { data: Record<string, unknown> }) => {
             writes.push(args.data);
+            return { ...args.data, id: 'task_' + writes.length };
+          },
+        },
+        // The task and the event that announces it are written to the same
+        // client, in the caller's transaction. A double that only knows about
+        // tasks would let the announcement be dropped without a test noticing.
+        outboxEvent: {
+          create: async (args: { data: Record<string, unknown> }) => {
+            events.push(args.data);
             return undefined;
           },
         },
@@ -81,5 +92,31 @@ describe('creating the follow-up task', () => {
     // this ever flips to the actor, follow-ups silently pile onto managers.
     assert.equal(writes[0].assigneeId, 'rep_1');
     assert.equal(writes[0].createdById, 'manager_1');
+  });
+
+  it('announces the task so the assignee can be told', async () => {
+    const { events, client } = recorder();
+
+    await createFollowUpTask(client as never, {
+      reference: 'TK-2026-000125',
+      entityType: 'LEAD',
+      entityId: 'lead_1',
+      dueAt: new Date('2026-09-01T10:30:00.000Z'),
+      context: 'send the PMS deck',
+      assigneeId: 'rep_1',
+      createdById: 'manager_1',
+    });
+
+    assert.equal(events.length, 1, 'one task.assigned event');
+    assert.equal(events[0].eventType, 'task.assigned');
+    assert.equal(events[0].aggregateType, 'task');
+
+    // The router needs both to decide who to tell, and to stay silent when a
+    // rep books their own follow-up. Losing either turns the bell into noise
+    // or into nothing.
+    const payload = events[0].payload as Record<string, unknown>;
+    assert.equal(payload.assigneeId, 'rep_1');
+    assert.equal(payload.actorId, 'manager_1');
+    assert.equal(payload.title, 'Follow up: send the PMS deck');
   });
 });
