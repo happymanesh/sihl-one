@@ -132,11 +132,13 @@ export default async function VisitsPage({
                       {visit.isOverdue ? 'Overdue' : 'Planned'}
                     </Badge>
                   </div>
-                  {visit.plannedAt ? (
-                    <p className="mt-2 text-xs text-[var(--color-text-subtle)]">
-                      {formatDateTime(visit.plannedAt)}
-                    </p>
-                  ) : null}
+                  {/* The mode decides what check-in will demand — a photo, a
+                      location, a meeting link — so it belongs next to the time,
+                      not one tap away. */}
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-subtle)]">
+                    {visit.plannedAt ? <span>{formatDateTime(visit.plannedAt)}</span> : null}
+                    <span>{visit.modeLabel ?? humanise(visit.mode)}</span>
+                  </div>
                 </Link>
               </li>
             ))}
@@ -180,8 +182,21 @@ export default async function VisitsPage({
                     </div>
                   </div>
 
+                  {/* A visit that has not happened yet has no check-in time,
+                      duration or outcome, so this row used to be empty for
+                      exactly the visits a rep still has to act on — they had to
+                      open each one to find out when it was. Planned rows show
+                      when they are due instead, labelled so a future time is
+                      never mistaken for a time something happened. */}
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
-                    {visit.checkInAt ? <span>{formatDateTime(visit.checkInAt)}</span> : null}
+                    {visit.checkInAt ? (
+                      <span>{formatDateTime(visit.checkInAt)}</span>
+                    ) : visit.plannedAt ? (
+                      <span className={visit.isOverdue ? 'font-semibold text-danger-600' : undefined}>
+                        {visit.isOverdue ? 'Overdue' : 'Planned'} · {formatDateTime(visit.plannedAt)}
+                      </span>
+                    ) : null}
+                    <span>{visit.modeLabel ?? humanise(visit.mode)}</span>
                     {visit.durationMinutes !== null ? (
                       <span>{visit.durationMinutes} min</span>
                     ) : null}
