@@ -421,7 +421,13 @@ export class LeadsService {
     }
 
     const [activityCount, activities] = await Promise.all([
-      this.prisma.activity.count({ where: { entityType: 'LEAD', entityId: id } }),
+      // Human contact only. A lead does not get warmer because somebody
+      // edited it, and activities.service already counts it this way — leaving
+      // this one unfiltered meant the same lead scored differently depending on
+      // which path last recalculated it.
+      this.prisma.activity.count({
+        where: { entityType: 'LEAD', entityId: id, isSystemGenerated: false },
+      }),
       this.prisma.activity.findMany({
         where: { entityType: 'LEAD', entityId: id },
         orderBy: { occurredAt: 'desc' },
@@ -861,12 +867,12 @@ export class LeadsService {
     // list — a PATCH that touches only the city must not wipe outcomes.
     if (input.productInterest) {
       await this.prisma.$transaction(async (tx) => {
-        await this.syncLeadProducts(tx, id, input.productInterest!);
+        await this.syncLeadProducts(tx, id, input.productInterest!, user.id);
       });
     }
 
     const activityCount = await this.prisma.activity.count({
-      where: { entityType: 'LEAD', entityId: id },
+      where: { entityType: 'LEAD', entityId: id, isSystemGenerated: false },
     });
     const scored = rescore(updated, activityCount);
     const final = await this.prisma.lead.update({ where: { id }, data: scored as never });
@@ -1811,6 +1817,16 @@ export class LeadsService {
     tx: Prisma.TransactionClient,
     leadId: string,
     codes: readonly string[],
+    /**
+     * When set, a change to the interest list is written to the timeline.
+     *
+     * Left unset on creation: the lead's own creation entry already says what
+     * it came in wanting, and a second line repeating it is noise. On an edit
+     * it is the opposite — what a client is interested in changing is the whole
+     * business event, and until now it happened silently, so a rep opening the
+     * record could not tell a product had been added or dropped, or by whom.
+     */
+    actorId?: string,
   ): Promise<void> {
     const wanted = [...new Set(codes)];
     const existing = await tx.leadProduct.findMany({
@@ -1837,6 +1853,38 @@ export class LeadsService {
       await tx.leadProduct.createMany({
         data: toAdd.map((productCode) => ({ leadId, productCode })),
         skipDuplicates: true,
+      });
+    }
+
+    if (actorId && (toAdd.length > 0 || removable.length > 0)) {
+      // Product names rather than codes: the timeline is read by a rep, and
+      // "Added PMS" is a sentence where "Added PMS_DISCRETIONARY" is a log line.
+      // Falls back to the code if a master row has since been renamed away.
+      const names = new Map(
+        (
+          await tx.product.findMany({
+            where: { code: { in: [...toAdd, ...removable] } },
+            select: { code: true, name: true },
+          })
+        ).map((row) => [row.code, row.name]),
+      );
+      const label = (code: string) => names.get(code) ?? code;
+
+      const parts: string[] = [];
+      if (toAdd.length > 0) parts.push(`Added ${toAdd.map(label).join(', ')}`);
+      if (removable.length > 0) parts.push(`Removed ${removable.map(label).join(', ')}`);
+
+      await tx.activity.create({
+        data: {
+          entityType: 'LEAD',
+          entityId: leadId,
+          type: 'SYSTEM',
+          direction: 'INTERNAL',
+          subject: 'Products changed',
+          body: parts.join(' · '),
+          actorId,
+          isSystemGenerated: true,
+        },
       });
     }
 
