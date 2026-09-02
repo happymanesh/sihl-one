@@ -8,10 +8,11 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
-import { ALLOW_PENDING_PASSWORD_KEY, IS_PUBLIC_KEY } from '../decorators';
+import { ALLOW_PENDING_PASSWORD_KEY, ALLOW_SERVICE_KEY, IS_PUBLIC_KEY } from '../decorators';
 import { RequestContextStore } from '../request-context';
 import { TokenService } from '../../modules/auth/token.service';
 import { PrincipalService } from '../../modules/auth/principal.service';
+import { ServiceAccountService } from '../../modules/auth/service-account.service';
 
 /**
  * Applied globally. Routes opt *out* with `@Public()` rather than opting in
@@ -24,6 +25,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly tokens: TokenService,
     private readonly principals: PrincipalService,
+    private readonly serviceAccounts: ServiceAccountService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -34,6 +36,42 @@ export class JwtAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<Request & { user?: unknown }>();
+
+    // A machine key, if one was presented. Checked before the bearer path
+    // because the two are different credentials and a caller presents one or
+    // the other — never both.
+    const apiKey = this.extractApiKey(request);
+    if (apiKey) {
+      // Opt-in, unlike the user path. A route has to say it is willing to serve
+      // a machine, so a key cannot reach an endpoint whose author never
+      // considered a non-human caller — the reverse of the `@Public()` default,
+      // and for the same reason: the failure mode of forgetting is a closed
+      // door. Permissions still apply on top; this only decides eligibility.
+      const serviceAllowed = this.reflector.getAllAndOverride<boolean>(ALLOW_SERVICE_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!serviceAllowed) {
+        throw new ForbiddenException({
+          title: 'Not available to service accounts',
+          detail: 'This endpoint can only be used by a signed-in person.',
+        });
+      }
+
+      const principal = await this.serviceAccounts.verify(apiKey);
+      if (!principal) {
+        // One message for unknown, revoked, expired and wrong-secret alike.
+        throw new UnauthorizedException({
+          title: 'Service key rejected',
+          detail: 'The key is unknown, expired or revoked.',
+        });
+      }
+
+      request.user = principal;
+      RequestContextStore.setUser(principal);
+      return true;
+    }
+
     const token = this.extractToken(request);
     if (!token) {
       throw new UnauthorizedException({
@@ -78,6 +116,17 @@ export class JwtAuthGuard implements CanActivate {
     request.user = principal;
     RequestContextStore.setUser(principal);
     return true;
+  }
+
+  /**
+   * Its own header, not `Authorization`. A key in the bearer slot would be
+   * tried as a JWT first and rejected as malformed, and — worse — would end up
+   * in every place a bearer token is already logged or forwarded.
+   */
+  private extractApiKey(request: Request): string | null {
+    const header = request.headers['x-service-key'];
+    const value = Array.isArray(header) ? header[0] : header;
+    return value?.trim() || null;
   }
 
   private extractToken(request: Request): string | null {

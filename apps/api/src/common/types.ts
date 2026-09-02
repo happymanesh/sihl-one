@@ -14,6 +14,18 @@ export interface AuthenticatedPrincipal {
   orgUnitPath: string | null;
   /** Ids of users reporting to this user, for the TEAM scope. */
   teamUserIds: string[];
+  /**
+   * True when the caller is a service account rather than a person.
+   *
+   * Every guard and every ABAC scope helper reads this object and needs nothing
+   * else, which is why a service is shaped as one rather than given a parallel
+   * path. The flag exists for the two places where the difference is real: the
+   * audit trail, whose `actorId` is a foreign key into `app_user` and must stay
+   * null for a machine, and anything that would otherwise treat the caller as
+   * an employee. Default-absent, so existing code reading a user principal is
+   * unaffected.
+   */
+  isService?: boolean;
   partnerId: string | null;
   sessionId: string;
   /**

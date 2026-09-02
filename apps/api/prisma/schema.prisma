@@ -1928,3 +1928,62 @@ model Notification {
   @@index([userId, readAt, createdAt])
   @@map("notification")
 }
+
+/// A non-human caller.
+///
+/// Until now the only way for another system to read from SIHL ONE was to be
+/// given a person's login. That makes the audit trail lie about who did
+/// something, breaks the day that person leaves, and hands a system that only
+/// wanted to count leads a credential that can also change them.
+///
+/// Deliberately not a row in `app_user` with a `SERVICE` user type. A user has
+/// a mobile, an org unit, a manager, a joining date and a leaving date, and
+/// appears in assignment pickers, hierarchy roll-ups and headcount. None of
+/// that is true of a key, and every one of those would need a special case.
+///
+/// No `deletedAt`: a key is revoked, never removed. The audit rows it produced
+/// name it by label, and a reader must still be able to find out what
+/// `ceo-command-centre` was and who created it.
+model ServiceAccount {
+  id String @id @default(cuid())
+
+  /// Stable machine name, used in the audit label. `ceo-command-centre`.
+  name        String  @unique @db.VarChar(60)
+  description String? @db.VarChar(300)
+
+  /// The public half of the key, stored in clear and shown in the UI. It makes
+  /// a key in a log line or a config file identifiable without anyone holding
+  /// the secret, and it is how a presented key is looked up.
+  keyPrefix String @unique @db.VarChar(32)
+
+  /// Argon2id, same parameters and same server-side pepper as user passwords.
+  /// A leaked database alone does not yield a working key.
+  keyHash String
+
+  /// Read-only, enforced at mint time by `isPermissionAllowedForService`. Held
+  /// here rather than through roles because a service's authority should be
+  /// legible in one row, and because role definitions change for reasons that
+  /// have nothing to do with an integration.
+  permissions String[]
+
+  /// Full ABAC scope, resolved exactly as a user's is. `ALL` for reporting.
+  dataScope String @db.VarChar(16)
+
+  isActive  Boolean   @default(true)
+  /// Required, not optional. A credential with no end date is one nobody ever
+  /// revisits.
+  expiresAt DateTime
+  revokedAt DateTime?
+  /// Written at most once a minute, so an ordinary poll does not turn every
+  /// read into a write. The question it answers is "is this key still in use",
+  /// which a minute's resolution answers perfectly well.
+  lastUsedAt DateTime?
+
+  /// Who minted it, as a label rather than a relation: the key must outlive the
+  /// person, and a `SetNull` would erase the only record of where it came from.
+  createdByLabel String   @db.VarChar(160)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("service_account")
+}

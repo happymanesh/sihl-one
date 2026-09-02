@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { MfaService } from './mfa.service';
 import { PasswordService } from './password.service';
 import { PrincipalService } from './principal.service';
+import { ServiceAccountService } from './service-account.service';
 import { TokenService } from './token.service';
 
 /**
@@ -16,7 +17,21 @@ import { TokenService } from './token.service';
 @Module({
   imports: [JwtModule.register({})],
   controllers: [AuthController],
-  providers: [AuthService, MfaService, PasswordService, TokenService, PrincipalService],
-  exports: [AuthService, MfaService, PasswordService, TokenService, PrincipalService],
+  providers: [
+    AuthService,
+    MfaService,
+    PasswordService,
+    TokenService,
+    PrincipalService,
+    ServiceAccountService,
+  ],
+  exports: [
+    AuthService,
+    MfaService,
+    PasswordService,
+    TokenService,
+    PrincipalService,
+    ServiceAccountService,
+  ],
 })
 export class AuthModule {}
