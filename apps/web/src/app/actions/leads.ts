@@ -137,6 +137,49 @@ export async function updateLeadProfile(
 }
 
 /**
+ * Corrects a misspelled name.
+ *
+ * The API has always accepted this — `updateLeadSchema` is the create schema
+ * made partial — but nothing in the web app ever offered it, so a name typed
+ * wrong at capture stayed wrong on every screen, every export and every call
+ * the client was greeted on.
+ *
+ * Deliberately name only. Mobile is the field that carries a rule: editing it
+ * voids the verification recorded against it, which is right, and burying that
+ * consequence inside a general "edit lead" form is how it would get triggered
+ * by somebody fixing a spelling.
+ */
+export async function renameLead(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+
+  const parsed = updateLeadSchema.safeParse({
+    firstName: formData.get('firstName'),
+    lastName: formData.get('lastName') || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      status: 'error',
+      message: 'A first name is required.',
+      errors: zodErrors(parsed.error.issues),
+    };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}`, { method: 'PATCH', body: parsed.data });
+  } catch (error) {
+    return toErrorState(error, 'The name could not be corrected.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return { status: 'success', message: 'Name corrected.' };
+}
+
+/**
  * Changes the products a lead is interested in.
  *
  * Its own action rather than part of a general lead edit, which the web app

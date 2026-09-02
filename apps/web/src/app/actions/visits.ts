@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { cancelVisitSchema, checkInSchema, checkOutSchema, planVisitSchema } from '@sihl-one/contracts';
+import {
+  cancelVisitSchema,
+  checkInSchema,
+  checkOutSchema,
+  planVisitSchema,
+  rescheduleVisitSchema,
+} from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
 
@@ -187,4 +193,36 @@ export async function cancelVisit(
 
   revalidatePath('/visits');
   return { status: 'success', message: 'Visit cancelled.' };
+}
+
+/**
+ * Move a planned visit to a different time.
+ *
+ * A mistyped date used to mean cancelling and planning again, which loses the
+ * reference and everything hanging off it. This corrects the time and nothing
+ * else.
+ */
+export async function rescheduleVisit(
+  _previous: VisitActionState,
+  formData: FormData,
+): Promise<VisitActionState> {
+  const visitId = String(formData.get('visitId'));
+  const parsed = rescheduleVisitSchema.safeParse({
+    plannedAt: formData.get('plannedAt'),
+    reason: formData.get('reason') || undefined,
+  });
+
+  if (!parsed.success) {
+    return { status: 'error', message: 'Pick the date and time the visit should move to.' };
+  }
+
+  try {
+    await apiFetch(`/visits/${visitId}/reschedule`, { method: 'POST', body: parsed.data });
+  } catch (error) {
+    return toErrorState(error, 'The visit could not be moved.');
+  }
+
+  revalidatePath('/visits');
+  revalidatePath(`/visits/${visitId}`);
+  return { status: 'success', message: 'Visit moved.' };
 }

@@ -15,6 +15,7 @@ import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
 import { Timeline } from '@/components/leads/Timeline';
 import { LeadProductOutcomes } from '@/components/leads/LeadProductOutcomes';
+import { RenameLead } from '@/components/leads/RenameLead';
 import { LeadRecordTabs } from '@/components/leads/LeadRecordTabs';
 import { LeadProductsPanel } from '@/components/leads/LeadProductsPanel';
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
@@ -26,6 +27,8 @@ import { formatCurrency, formatDate, formatDateTime, formatRelative, humanise } 
 interface LeadDetail {
   id: string;
   reference: string;
+  firstName: string;
+  lastName: string | null;
   fullName: string;
   mobile: string;
   mobileVerifiedAt: string | null;
@@ -175,6 +178,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <h1 className="text-2xl font-bold">{lead.fullName}</h1>
               <LeadStatusBadge status={lead.status} />
               <PriorityBadge priority={lead.priority} />
+              {/* Converted leads are read-only in the API — the customer record
+                  owns the name from that point. */}
+              <RenameLead
+                leadId={lead.id}
+                firstName={lead.firstName}
+                lastName={lead.lastName}
+                canEdit={can(user, 'lead:update') && lead.status !== 'CONVERTED'}
+              />
             </div>
 
             <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]">
