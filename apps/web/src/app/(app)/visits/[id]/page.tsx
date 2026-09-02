@@ -3,6 +3,7 @@ import type { Route } from 'next';
 
 import { Badge } from '@/components/ui/Badge';
 import { CheckInPanel, CheckOutPanel } from '@/components/visits/CheckInPanel';
+import { ReschedulePanel } from '@/components/visits/ReschedulePanel';
 import { apiFetch } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatDateTime, humanise } from '@/lib/format';
@@ -122,6 +123,13 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
             </dd>
           </div>
         </dl>
+
+        {/* Only while it is still a plan. The API refuses once someone has
+            checked in, and offering a control that will be refused is worse
+            than not offering it. */}
+        {visit.status === 'PLANNED' ? (
+          <ReschedulePanel visitId={visit.id} plannedAt={visit.plannedAt} />
+        ) : null}
       </header>
 
       {visit.integrity.requiresReview ? (

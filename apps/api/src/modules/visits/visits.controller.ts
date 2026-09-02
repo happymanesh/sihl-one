@@ -4,11 +4,13 @@ import type { Response } from 'express';
 import {
   createVisitExpenseSchema,
   type CreateVisitExpenseInput,  cancelVisitSchema,
+  rescheduleVisitSchema,
   checkInSchema,
   checkOutSchema,
   planVisitSchema,
   visitQuerySchema,
   type CancelVisitInput,
+  type RescheduleVisitInput,
   type CheckInInput,
   type CheckOutInput,
   type PlanVisitInput,
@@ -129,6 +131,18 @@ export class VisitsController {
     @ZodBody(cancelVisitSchema) body: CancelVisitInput,
   ) {
     return this.visits.cancel(user, id, body);
+  }
+
+  @Post(':id/reschedule')
+  @RequirePermissions('visit:update')
+  @ApiOperation({ summary: 'Move a planned visit to a different time' })
+  @ApiZodBody(rescheduleVisitSchema)
+  reschedule(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(rescheduleVisitSchema) body: RescheduleVisitInput,
+  ) {
+    return this.visits.reschedule(user, id, body);
   }
 
   // -------------------------------------------------------------------------

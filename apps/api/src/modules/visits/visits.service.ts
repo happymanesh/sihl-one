@@ -6,12 +6,14 @@ import {
 } from '@nestjs/common';
 import {
   assessVisitIntegrity,
+  canRescheduleVisit,
   canTransitionVisit,
   assessCheckInLocation,
   locationQuality,
   visitEvidenceRules,
   DEFAULT_VISIT_MODE,
   type CancelVisitInput,
+  type RescheduleVisitInput,
   type CheckInInput,
   type CheckOutInput,
   type PlanVisitInput,
@@ -383,6 +385,70 @@ export class VisitsService {
       resource: 'visit.cancel',
       resourceId: visitId,
       reason: input.reason,
+    });
+
+    return this.findOne(user, visitId);
+  }
+
+  /**
+   * Move a planned visit to a different time.
+   *
+   * Deliberately not a general edit. Only the time moves; the lead, the mode,
+   * the purpose and the owner all stay put, because every one of those changes
+   * what the visit *is* rather than correcting when it was meant to happen.
+   */
+  async reschedule(
+    user: AuthenticatedPrincipal,
+    visitId: string,
+    input: RescheduleVisitInput,
+  ) {
+    // Deliberately *not* mustFindOwn. That rule exists because a check-in
+    // asserts a specific person was somewhere, so nobody may record one on
+    // another's behalf. Moving a date asserts nothing of the kind — it is a
+    // correction to a plan, and a manager who spots a mistyped date in their
+    // branch should be able to fix it without going back to the rep. Normal
+    // data scope applies instead.
+    const visit = await this.prisma.visit.findFirst({
+      where: { id: visitId, AND: [this.scope.visitScope(user)] },
+    });
+
+    if (!visit) {
+      throw new NotFoundException({
+        title: 'Visit not found',
+        detail: 'No visit with that id is visible to you.',
+      });
+    }
+
+    if (!canRescheduleVisit(visit.status)) {
+      throw new BadRequestException({
+        title: 'Cannot change the date',
+        detail:
+          visit.status === 'CHECKED_IN' || visit.status === 'COMPLETED'
+            ? 'This visit has already started, so its planned time is now part of what happened. Record the correction in the visit notes instead.'
+            : `A visit in ${visit.status} status cannot be rescheduled.`,
+      });
+    }
+
+    const from = visit.plannedAt;
+
+    await this.prisma.visit.update({
+      where: { id: visitId },
+      data: { plannedAt: input.plannedAt },
+    });
+
+    // The old time is the whole point of the record: "moved" means nothing
+    // without saying moved from what.
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'visit.reschedule',
+      resourceId: visitId,
+      reason: input.reason,
+      changes: {
+        plannedAt: {
+          from: from?.toISOString() ?? null,
+          to: input.plannedAt.toISOString(),
+        },
+      },
     });
 
     return this.findOne(user, visitId);

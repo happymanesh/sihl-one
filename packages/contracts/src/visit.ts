@@ -160,6 +160,33 @@ export const cancelVisitSchema = z.object({
 });
 export type CancelVisitInput = z.infer<typeof cancelVisitSchema>;
 
+/**
+ * Moving a planned visit to a different time.
+ *
+ * A visit whose date was mistyped had only two ways out before this: cancel it
+ * and plan another, which loses the reference and everything attached to it, or
+ * leave a wrong date on the board. Neither is a correction.
+ *
+ * Only a visit still in PLANNED can move. Once someone has checked in the visit
+ * has a real, observed start time, and rewriting the plan around it would make
+ * the record disagree with what happened — the same reason COMPLETED is
+ * terminal in the transition table.
+ *
+ * No reason is required. This is overwhelmingly a typo being fixed, and
+ * demanding a sentence for that is how people learn to type "x" into the one
+ * field where a real reason would have mattered.
+ */
+export const rescheduleVisitSchema = z.object({
+  plannedAt: z.coerce.date(),
+  reason: z.string().trim().max(300).optional(),
+});
+export type RescheduleVisitInput = z.infer<typeof rescheduleVisitSchema>;
+
+/** Statuses a visit can be moved from. Anything else has already happened. */
+export function canRescheduleVisit(status: string): boolean {
+  return status === 'PLANNED';
+}
+
 export const visitQuerySchema = paginationQuerySchema.extend({
   status: z.enum(VISIT_STATUSES).optional(),
   userId: idSchema.optional(),
