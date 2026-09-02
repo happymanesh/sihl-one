@@ -17,7 +17,7 @@ export interface AuditEntry {
    * there is no authenticated principal on the request yet and the trail would
    * otherwise attribute every login to "the system".
    */
-  actor?: { id: string; fullName: string; email: string } | null;
+  actor?: { id: string; fullName: string; email: string; isService?: boolean } | null;
 }
 
 /**
@@ -115,16 +115,25 @@ export class AuditService {
     const context = RequestContextStore.get();
     const user = entry.actor ?? context?.user;
 
-    if (entry.action === 'EXPORT' && user) {
+    // A service account is a real actor but not a row in `app_user`, and
+    // `actorId` is a foreign key into that table. Writing the key's id there
+    // would violate the constraint and — because this method deliberately never
+    // throws — the failure would surface as a silently missing audit row.
+    // The label carries the attribution instead.
+    const isService = user?.isService === true;
+
+    if (entry.action === 'EXPORT' && user && !isService) {
       // Fire and forget — an alert must never delay or fail the audit write it
-      // decorates.
+      // decorates. Skipped for services: the notice-period check looks the actor
+      // up in `app_user`, where a key does not exist. Services cannot hold an
+      // export permission in any case.
       void this.flagIfInNoticePeriod(user.id, user.fullName, entry);
     }
 
     try {
       await this.prisma.auditLog.create({
         data: {
-          actorId: user?.id ?? null,
+          actorId: isService ? null : (user?.id ?? null),
           actorLabel: user ? `${user.fullName} <${user.email}>` : null,
           action: entry.action,
           resource: entry.resource,

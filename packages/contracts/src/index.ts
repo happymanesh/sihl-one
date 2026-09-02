@@ -29,3 +29,4 @@ export * from './audit';
 export * from './campaign';
 export * from './event';
 export * from './notification';
+export * from './service-account';

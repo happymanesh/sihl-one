@@ -20,6 +20,22 @@ export const AllowPendingPasswordChange = (): MethodDecorator =>
   SetMetadata(ALLOW_PENDING_PASSWORD_KEY, true);
 
 /**
+ * Marks a route as reachable with a service-account key.
+ *
+ * Opt-*in*, unlike everything else here. A machine credential lives in another
+ * system's configuration and is used unattended, so the set of endpoints it can
+ * reach should be a short list somebody chose, not everything that happens to
+ * match its permissions. A route without this decorator refuses a key even if
+ * the key holds the permission the route requires.
+ *
+ * Permissions are still checked on top. This decides only that a non-human
+ * caller is contemplated here at all.
+ */
+export const ALLOW_SERVICE_KEY = 'sihl:allowServiceKey';
+/** Applies to a whole controller or a single route. */
+export const AllowServiceAccount = () => SetMetadata(ALLOW_SERVICE_KEY, true);
+
+/**
  * Required permissions for a route. The guard requires ALL listed permissions;
  * an OR relationship is expressed by splitting into separate routes, because
  * "any of these" is almost always a sign that two different use cases have been
