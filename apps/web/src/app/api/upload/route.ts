@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAccessToken } from '@/lib/session';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -57,7 +58,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     `${API_BASE}/files?purpose=${encodeURIComponent(purpose)}`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...(await forwardedHeaders()) },
       body: outgoing,
       cache: 'no-store',
     },

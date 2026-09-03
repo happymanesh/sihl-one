@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAccessToken } from '@/lib/session';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -53,7 +54,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const response = await fetch(`${API_BASE}/leads/import/parse?${declaration}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...(await forwardedHeaders()) },
       body: outgoing,
       cache: 'no-store',
     });
@@ -71,7 +72,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const response = await fetch(`${API_BASE}/leads/import/${batchId}/${step}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(await forwardedHeaders()) },
     body: await request.text(),
     cache: 'no-store',
   });

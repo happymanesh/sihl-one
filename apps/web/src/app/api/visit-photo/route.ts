@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAccessToken } from '@/lib/session';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -36,7 +37,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const upstream = await fetch(
     `${API_BASE}/visits/${visitId}/photo?token=${encodeURIComponent(token)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' },
+    { headers: { Authorization: `Bearer ${accessToken}`, ...(await forwardedHeaders()) }, cache: 'no-store' },
   );
 
   if (!upstream.ok) {

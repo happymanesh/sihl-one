@@ -3,6 +3,7 @@ import 'server-only';
 import { redirect } from 'next/navigation';
 import type { ProblemDetails } from '@sihl-one/contracts';
 
+import { forwardedHeaders } from './forwarded';
 import { getAccessToken } from './session';
 
 const BASE_URL =
@@ -52,6 +53,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // Before `...headers`, so an explicit caller can still override, but after
+      // the token, so nothing routine drops the audit attribution.
+      ...(await forwardedHeaders()),
       ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),

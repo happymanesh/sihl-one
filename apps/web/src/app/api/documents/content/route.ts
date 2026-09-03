@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAccessToken } from '@/lib/session';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -30,7 +31,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const upstream = await fetch(
     `${API_BASE}/documents/${documentId}/content?token=${encodeURIComponent(downloadToken)}`,
-    { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
+    { headers: { Authorization: `Bearer ${token}`, ...(await forwardedHeaders()) }, cache: 'no-store' },
   );
 
   if (!upstream.ok) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAccessToken } from '@/lib/session';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -36,7 +37,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const response = await fetch(
     `${API_BASE}/documents?entityType=${target.entityType}&entityId=${target.entityId}`,
-    { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
+    { headers: { Authorization: `Bearer ${token}`, ...(await forwardedHeaders()) }, cache: 'no-store' },
   );
 
   return NextResponse.json(await response.json().catch(() => []), { status: response.status });
@@ -68,7 +69,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     `${API_BASE}/documents?entityType=${target.entityType}&entityId=${target.entityId}&category=${category}`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...(await forwardedHeaders()) },
       body: outgoing,
       cache: 'no-store',
     },
