@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAccessToken } from '@/lib/session';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -24,7 +25,7 @@ export async function POST(): Promise<NextResponse> {
   if (!token) return NextResponse.json({ ok: false }, { status: 401 });
 
   const response = await fetch(`${API_BASE}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...(await forwardedHeaders()) },
     cache: 'no-store',
   }).catch(() => null);
 
