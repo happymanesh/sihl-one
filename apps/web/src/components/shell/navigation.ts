@@ -52,6 +52,10 @@ export const NAV_ITEMS: NavItem[] = [
 
   { label: 'My performance', href: '/performance', icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
 
+  // Same permission as the dashboard, because the separation here is by data
+  // scope rather than by rank: a rep opens this and sees one row — their own.
+  { label: 'Reports', href: '/reports' as Route, icon: 'file', permissions: ['analytics:sales:read'], section: 'work' },
+
   {
     // The partner's own portal. Gated on the partner analytics permission,
     // which only the PARTNER role holds — staff see the Partners directory

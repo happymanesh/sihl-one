@@ -30,3 +30,4 @@ export * from './campaign';
 export * from './event';
 export * from './notification';
 export * from './service-account';
+export * from './report';
