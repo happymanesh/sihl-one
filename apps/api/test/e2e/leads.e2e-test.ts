@@ -275,6 +275,12 @@ describe('lead lifecycle', () => {
     assert.equal(response.status, 400);
     const problem = (await response.json()) as { detail: string };
     assert.match(problem.detail, /already exists/i);
+    // The date is the point of the message: it tells the rep whether they are
+    // colliding with a colleague's live lead or with something captured months
+    // ago. `04-Sep-26 15:35`, in IST.
+    assert.match(problem.detail, /added on : \d{2}-[A-Z][a-z]{2}-\d{2} \d{2}:\d{2}/);
+    // And who holds it, so the rep knows whether to hand off or pick it up.
+    assert.match(problem.detail, /assigned to .+|not yet assigned to anyone/);
   });
 
   it('refuses an invalid status transition', async () => {
