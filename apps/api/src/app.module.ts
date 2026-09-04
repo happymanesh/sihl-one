@@ -38,6 +38,7 @@ import { OrgUnitsModule } from './modules/org-units/org-units.module';
 import { ImportsModule } from './modules/imports/imports.module';
 import { OffboardingModule } from './modules/offboarding/offboarding.module';
 import { PerformanceModule } from './modules/performance/performance.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { PerformanceModule } from './modules/performance/performance.module';
     ImportsModule,
     OffboardingModule,
     PerformanceModule,
+    ReportsModule,
     NotificationsModule,
     OutboxModule,
     HealthModule,
