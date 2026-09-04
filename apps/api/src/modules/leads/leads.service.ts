@@ -98,6 +98,52 @@ const SORTABLE_COLUMNS = new Set([
 /** The three statuses a lead does not come back from without being reopened. */
 const CLOSED_LEAD_STATUSES = new Set(['CONVERTED', 'LOST', 'DISQUALIFIED']);
 
+/**
+ * `04-Sep-26 15:35`, in IST.
+ *
+ * The server clock is UTC and every rep reading this is in India. A lead
+ * captured at 09:00 IST would otherwise be reported as added at 03:30, and the
+ * rep would conclude the message was about some other record.
+ *
+ * Assembled from parts rather than a `dateStyle`, because the format is fixed:
+ * two-digit day, short month, two-digit year, 24-hour clock.
+ *
+ * The month is mapped from its number rather than taken from the locale's short
+ * name. `en-GB` renders September as "Sept" — four letters — which breaks the
+ * fixed width, and ICU short names have changed between releases before. Only
+ * the timezone conversion is delegated to Intl; the wording is ours.
+ */
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+function istStamp(when: Date): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(when);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '';
+  const month = SHORT_MONTHS[Number(part('month')) - 1] ?? part('month');
+  return `${part('day')}-${month}-${part('year')} ${part('hour')}:${part('minute')}`;
+}
+
 @Injectable()
 export class LeadsService {
   constructor(
@@ -2152,13 +2198,35 @@ export class LeadsService {
         deletedAt: null,
         status: { notIn: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
       },
-      select: { reference: true },
+      select: {
+        reference: true,
+        createdAt: true,
+        owner: { select: { firstName: true, lastName: true } },
+      },
     });
     if (existing) {
+      // When it was added, and who has it. "Duplicate" alone leaves the rep
+      // guessing whether they are colliding with a colleague's live lead or with
+      // something captured months ago; the date answers that without them having
+      // to go and look, and the owner tells them who to speak to. An unassigned
+      // duplicate is said plainly rather than left blank — it is the one case
+      // where the rep can simply pick the lead up themselves.
+      const addedOn = istStamp(existing.createdAt);
+      const owner = existing.owner
+        ? `${existing.owner.firstName} ${existing.owner.lastName}`
+        : null;
+      const withWhom = owner ? `assigned to ${owner}` : 'not yet assigned to anyone';
       throw new BadRequestException({
-        title: 'Duplicate lead',
-        detail: `An open lead already exists for this mobile number (${existing.reference}). Add your update to that lead instead.`,
-        errors: { mobile: [`Already tracked as ${existing.reference}`] },
+        title: 'Lead already exists',
+        detail:
+          `Lead already exists. added on : ${addedOn} (${existing.reference}), ${withWhom}. ` +
+          `Add your update to that lead instead.`,
+        errors: {
+          mobile: [
+            `Already exists, added on ${addedOn} as ${existing.reference}, ` +
+              `${owner ? `with ${owner}` : 'unassigned'}`,
+          ],
+        },
       });
     }
   }

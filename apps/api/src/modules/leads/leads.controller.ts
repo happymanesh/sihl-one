@@ -208,7 +208,10 @@ export class LeadsController {
   @RequirePermissions('lead:create')
   @Audited({ action: 'CREATE', resource: 'lead' })
   @ApiOperation({ summary: 'Create a lead' })
-  @ApiResponse({ status: 400, description: 'An open lead already exists for this mobile number.' })
+  @ApiResponse({
+    status: 400,
+    description: 'A lead already exists for this mobile number; the reply says when it was added.',
+  })
   @ApiZodBody(createLeadSchema)
   create(@CurrentUser() user: AuthenticatedPrincipal, @ZodBody(createLeadSchema) body: CreateLeadInput) {
     return this.leads.create(user, body);
