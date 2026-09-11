@@ -112,7 +112,11 @@ export class CustomersService {
           : null,
         partner: customer.partner,
         productInterest: customer.productInterest,
-        // What they actually hold, mirrored from the back office (ADR-0002).
+        // What they hold. Rows written here on conversion carry
+        // sourceSystem=SIHL_ONE — what was sold through our own pipeline — and a
+        // back-office feed writes BACKOFFICE rows alongside them. Per ADR-0002
+        // this system is not the authority on holdings, which is exactly why the
+        // provenance is recorded rather than assumed.
         holdings: customer.holdings.map((holding) => holding.product),
         createdAt: customer.createdAt.toISOString(),
       })),
