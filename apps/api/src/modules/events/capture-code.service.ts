@@ -1,5 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eventAcceptsCaptures, type CaptureContext, type EventStatus } from '@sihl-one/contracts';
+import {
+  eventAcceptsCaptures,
+  type CaptureContext,
+  type CaptureProduct,
+  type EventStatus,
+} from '@sihl-one/contracts';
 
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -91,13 +96,27 @@ export class CaptureCodeService {
    * endpoint; sending the list with the context keeps the public surface to the
    * one route that already exists.
    */
-  private async activeProducts(): Promise<Array<{ code: string; name: string }>> {
+  private async activeProducts(): Promise<CaptureProduct[]> {
     const rows = await this.prisma.product.findMany({
       where: { isActive: true },
-      select: { code: true, name: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        parentId: true,
+        summary: true,
+        parent: { select: { name: true } },
+      },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
-    return rows.map((row) => ({ code: row.code, name: row.name }));
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      parentId: row.parentId,
+      parentName: row.parent?.name ?? null,
+      summary: row.summary,
+    }));
   }
 
   /**

@@ -3,7 +3,10 @@
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 
+import type { CaptureProduct } from '@sihl-one/contracts';
+
 import { submitLeadCapture, type CaptureState } from '@/app/actions/lead-capture';
+import { ProductPicker } from '@/components/leads/ProductPicker';
 
 const INITIAL: CaptureState = { status: 'idle' };
 
@@ -44,9 +47,10 @@ export function LeadCaptureForm({
    * were rejected on submit as unknown products, losing the lead of somebody
    * who had already typed their name and number at a stall.
    */
-  products?: Array<{ code: string; name: string }>;
+  products?: CaptureProduct[];
 } = {}) {
   const [state, formAction] = useActionState(submitLeadCapture, INITIAL);
+  const [picked, setPicked] = useState<string[]>([]);
   const [attribution, setAttribution] = useState({
     utmSource: '',
     utmMedium: '',
@@ -183,21 +187,25 @@ export function LeadCaptureForm({
 
       <fieldset>
         <legend className="label">What are you interested in?</legend>
-        <div className="flex flex-wrap gap-2">
-          {products.map((product) => (
-            <label
-              key={product.code}
-              className="cursor-pointer rounded-full border border-[var(--color-border-strong)] px-3 py-1.5 text-xs font-semibold transition-colors has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white"
-            >
-              <input
-                type="checkbox"
-                name="productInterest"
-                value={product.code}
-                className="sr-only"
-              />
-              {product.name}
-            </label>
-          ))}
+        {/*
+          The same picker the internal forms use, so a sub-product sits under
+          its parent — Intraday and Delivery below Equity, not beside it. This
+          form was the last place still listing every product as an equal pill.
+        */}
+        <div className="mt-2">
+          <ProductPicker
+            products={products as never}
+            name="productInterest"
+            selected={picked}
+            tone="navy"
+            onToggle={(code) =>
+              setPicked((current) =>
+                current.includes(code)
+                  ? current.filter((value) => value !== code)
+                  : [...current, code],
+              )
+            }
+          />
         </div>
       </fieldset>
 

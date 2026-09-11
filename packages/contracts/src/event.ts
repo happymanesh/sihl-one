@@ -204,6 +204,23 @@ export const referralCodeSchema = z
   .regex(new RegExp(`^[${CODE_ALPHABET}]{4,24}$`), 'That referral code is not valid');
 
 /** What a public capture page needs to render itself before anyone types. */
+/**
+ * A product as the public form needs it.
+ *
+ * Carries the parent link so the capture form can group sub-products under
+ * their parent exactly as the internal forms do — Intraday and Delivery sit
+ * under Equity rather than beside it. A flat list made the same fourteen
+ * products read two different ways depending on which screen you were on.
+ */
+export interface CaptureProduct {
+  id: string;
+  code: string;
+  name: string;
+  parentId: string | null;
+  parentName: string | null;
+  summary: string | null;
+}
+
 export interface CaptureContext {
   kind: 'PARTNER' | 'EVENT';
   code: string;
@@ -225,7 +242,7 @@ export interface CaptureContext {
    * three. Every submission that ticked one was rejected as an unknown product,
    * at a stall, by somebody who had already given their name and number.
    */
-  products: Array<{ code: string; name: string }>;
+  products: CaptureProduct[];
 }
 
 /**
