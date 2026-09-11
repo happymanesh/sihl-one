@@ -58,6 +58,34 @@ export class MastersService {
   }
 
   /**
+   * Picks the first source code that actually exists and is active.
+   *
+   * The master list is editable in the admin screen, so it drifts between
+   * environments — production has PHYSICAL_VISIT and no BRANCH_EVENT, while a
+   * developer's database has the reverse. `lead.source` is a foreign key into
+   * this table, so code that hard-codes a preferred code writes a row that
+   * Postgres refuses, and the person filling in the form loses their lead to a
+   * message about a record that does not exist.
+   *
+   * Preferring a code and falling back is the behaviour the capture path wants
+   * everywhere: attribution is worth having, and never worth losing a real
+   * person over.
+   */
+  async firstUsableSource(...preferred: Array<string | null | undefined>): Promise<string | null> {
+    if (!this.activeSourceCodes) {
+      const rows = await this.prisma.leadSourceMaster.findMany({
+        where: { isActive: true },
+        select: { code: true },
+      });
+      this.activeSourceCodes = new Set(rows.map((row) => row.code));
+    }
+    for (const code of preferred) {
+      if (code && this.activeSourceCodes.has(code)) return code;
+    }
+    return null;
+  }
+
+  /**
    * Rejects codes that do not name an active master row.
    *
    * Postgres enforces the source foreign key, but it cannot enforce one on the
