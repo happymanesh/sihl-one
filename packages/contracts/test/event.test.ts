@@ -57,13 +57,71 @@ describe('event lifecycle', () => {
     }
   });
 
-  it('only captures while running', () => {
+  it('captures whenever the event has been opened by hand', () => {
+    assert.equal(eventAcceptsCaptures('RUNNING'), true);
+  });
+
+  it('refuses once the event is closed, however it was closed', () => {
     // The QR outlives the event by months. Someone scanning a poster nobody
     // took down must get "this has ended", not a lead nobody expects.
-    assert.equal(eventAcceptsCaptures('RUNNING'), true);
-    for (const status of ['PLANNED', 'COMPLETED', 'CANCELLED'] as const) {
+    for (const status of ['COMPLETED', 'CANCELLED'] as const) {
       assert.equal(eventAcceptsCaptures(status), false, status);
     }
+  });
+
+  it('refuses a planned event when nothing is known but the status', () => {
+    assert.equal(eventAcceptsCaptures('PLANNED'), false);
+  });
+
+  describe('a planned event that is actually happening', () => {
+    // The two-day meet on 26-27 September. The status is flipped by hand and
+    // nothing flips it back, so the dates have to carry the feature on the day.
+    const schedule = {
+      startsAt: new Date('2026-09-26T04:00:00Z'),
+      endsAt: new Date('2026-09-27T12:00:00Z'),
+    };
+
+    it('captures on the first morning even if nobody opened it', () => {
+      assert.equal(
+        eventAcceptsCaptures('PLANNED', schedule, new Date('2026-09-26T05:30:00Z')),
+        true,
+      );
+    });
+
+    it('still captures on the second day', () => {
+      assert.equal(
+        eventAcceptsCaptures('PLANNED', schedule, new Date('2026-09-27T06:00:00Z')),
+        true,
+      );
+    });
+
+    it('refuses before it starts', () => {
+      assert.equal(
+        eventAcceptsCaptures('PLANNED', schedule, new Date('2026-09-25T23:00:00Z')),
+        false,
+      );
+    });
+
+    it('refuses after it ends, so a leftover banner stops collecting', () => {
+      assert.equal(
+        eventAcceptsCaptures('PLANNED', schedule, new Date('2026-09-28T06:00:00Z')),
+        false,
+      );
+    });
+
+    it('closes 24 hours after the start when no end was given', () => {
+      const open = { startsAt: new Date('2026-09-26T04:00:00Z'), endsAt: null };
+      assert.equal(eventAcceptsCaptures('PLANNED', open, new Date('2026-09-26T20:00:00Z')), true);
+      assert.equal(eventAcceptsCaptures('PLANNED', open, new Date('2026-09-27T05:00:00Z')), false);
+    });
+
+    it('still refuses a cancelled event inside its own window', () => {
+      // Somebody cancelled it knowing something the calendar does not.
+      assert.equal(
+        eventAcceptsCaptures('CANCELLED', schedule, new Date('2026-09-26T05:30:00Z')),
+        false,
+      );
+    });
   });
 });
 

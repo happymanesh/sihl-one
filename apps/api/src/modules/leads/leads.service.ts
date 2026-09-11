@@ -752,7 +752,6 @@ export class LeadsService {
       productInterest: input.productInterest,
     });
 
-    const sourceWeight = await this.masters.weightFor(input.source);
     const reference = await this.references.next('LD');
 
     // Codes in, ids out. Resolved here rather than trusted from the browser:
@@ -765,6 +764,12 @@ export class LeadsService {
 
     const campaignId =
       coded.campaignId ?? (await this.resolveCampaignId(null, input.attribution?.utmCampaign));
+
+    // Weighted on the source the lead is actually stored with, which is the
+    // resolved one. Computing it from `input.source` scored every QR scan at
+    // an event as though it had come from the website — the form always posts
+    // WEBSITE, because the browser does not know what the code resolves to.
+    const sourceWeight = await this.masters.weightFor(coded.source ?? input.source);
 
     const lead = await this.prisma.$transaction(async (tx) => {
       const created = await tx.lead.create({

@@ -37,9 +37,39 @@ export function canTransitionEvent(from: EventStatus, to: EventStatus): boolean 
   return EVENT_STATUS_TRANSITIONS[from].includes(to);
 }
 
-/** Only a running event captures leads. */
-export function eventAcceptsCaptures(status: EventStatus): boolean {
-  return status === 'RUNNING';
+/**
+ * Whether a scan of this event's QR should be attributed to it.
+ *
+ * `RUNNING` always counts — somebody opened the event by hand and that is an
+ * explicit statement of intent.
+ *
+ * A `PLANNED` event also counts **while it is actually happening**. This is the
+ * difference between a feature that works and one that needs a person to
+ * remember something at 9am on a Saturday. The status is flipped manually and
+ * nothing flips it back; before this, a two-day event whose organiser forgot
+ * would show every visitor "this event has not started yet" and collect
+ * nothing, and a team that did remember to open it but not to close it would
+ * keep attributing walk-ups to it for months. The dates were already on the
+ * record and were being ignored.
+ *
+ * `COMPLETED` and `CANCELLED` never count, even inside the window: those are
+ * deliberate acts by somebody who knows something the calendar does not.
+ *
+ * The window ends at `endsAt`, or 24 hours after the start when no end was
+ * given — a single-day event with no end time should not become a permanent
+ * capture channel.
+ */
+export function eventAcceptsCaptures(
+  status: EventStatus,
+  schedule?: { startsAt: Date; endsAt: Date | null },
+  now: Date = new Date(),
+): boolean {
+  if (status === 'COMPLETED' || status === 'CANCELLED') return false;
+  if (status === 'RUNNING') return true;
+  if (!schedule) return false;
+
+  const end = schedule.endsAt ?? new Date(schedule.startsAt.getTime() + 86_400_000);
+  return now >= schedule.startsAt && now <= end;
 }
 
 /**

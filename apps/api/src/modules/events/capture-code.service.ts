@@ -9,7 +9,7 @@ export interface ResolvedCapture {
   campaignId: string | null;
   /** Where the lead should land, when the code names an owner. */
   suggestedOwnerId: string | null;
-  source: 'PARTNER' | 'REFERRAL' | 'WALK_IN' | null;
+  source: 'PARTNER' | 'REFERRAL' | 'BRANCH_EVENT' | null;
 }
 
 /**
@@ -58,11 +58,14 @@ export class CaptureCodeService {
 
     const event = await this.prisma.event.findFirst({
       where: { code: code.toLowerCase(), deletedAt: null },
-      select: { name: true, status: true, venue: true, startsAt: true },
+      select: { name: true, status: true, venue: true, startsAt: true, endsAt: true },
     });
     if (!event) throw new NotFoundException({ title: 'Unknown event code' });
 
-    const open = eventAcceptsCaptures(event.status as EventStatus);
+    const open = eventAcceptsCaptures(event.status as EventStatus, {
+      startsAt: event.startsAt,
+      endsAt: event.endsAt,
+    });
     return {
       kind: 'EVENT',
       code,
@@ -73,7 +76,7 @@ export class CaptureCodeService {
       acceptingSubmissions: open,
       closedReason: open
         ? null
-        : event.status === 'PLANNED'
+        : event.status === 'PLANNED' && event.startsAt > new Date()
           ? 'This event has not started yet. Please scan again on the day.'
           : 'This event has ended. You can still open an account on our website.',
     };
@@ -114,19 +117,37 @@ export class CaptureCodeService {
     if (input.eventCode) {
       const event = await this.prisma.event.findFirst({
         where: { code: input.eventCode.toLowerCase(), deletedAt: null },
-        select: { id: true, status: true, ownerId: true, campaignId: true },
+        select: {
+          id: true,
+          status: true,
+          ownerId: true,
+          campaignId: true,
+          startsAt: true,
+          endsAt: true,
+        },
       });
 
       // A capture against an event that is not running is still recorded, but
       // without the event attribution — otherwise a stale QR quietly inflates
       // last quarter's event report months after it closed.
-      if (event && eventAcceptsCaptures(event.status as EventStatus)) {
+      if (
+        event &&
+        eventAcceptsCaptures(event.status as EventStatus, {
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+        })
+      ) {
         return {
           ...empty,
           eventId: event.id,
           campaignId: event.campaignId,
           suggestedOwnerId: event.ownerId,
-          source: 'WALK_IN',
+          // BRANCH_EVENT, not WALK_IN. Both are seeded and active, and the
+          // difference matters in every report: a QR scanned at a stall and
+          // somebody wandering into a branch are different acquisition
+          // channels, and filing them together made event spend impossible to
+          // judge against anything.
+          source: 'BRANCH_EVENT',
         };
       }
     }

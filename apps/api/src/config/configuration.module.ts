@@ -51,6 +51,7 @@ import { APP_CONFIG, buildAppConfig, validateEnv, type AppConfig, type Env } fro
           AUTH_IDLE_TIMEOUT_MINUTES: read('AUTH_IDLE_TIMEOUT_MINUTES'),
           RATE_LIMIT_TTL: read('RATE_LIMIT_TTL'),
           RATE_LIMIT_LIMIT: read('RATE_LIMIT_LIMIT'),
+          PUBLIC_WEB_URL: read('PUBLIC_WEB_URL'),
           MAIL_DRIVER: read('MAIL_DRIVER'),
           SENDGRID_API_KEY: readOptional('SENDGRID_API_KEY'),
           MAIL_FROM: readOptional('MAIL_FROM'),
