@@ -9,6 +9,7 @@ import {
   closedSince,
   isOpenLeadProductStatus,
   OPEN_LEAD_PRODUCT_STATUSES,
+  LEAD_LOST_REASONS,
   rollUpLeadStatus,
   canTransitionLead,
   LEAD_STATUS_TRANSITIONS,
@@ -22,6 +23,7 @@ import {
   type ClosedPeriod,
   type ConvertProductInput,
   type CheckLeadMobileInput,
+  type LeadLostReason,
   type LeadProductStatus,
   type LeadProductView,
   type DuplicateLeadMatch,
@@ -1290,6 +1292,8 @@ export class LeadsService {
         },
       });
 
+      await this.mirrorConvertedProducts(tx, customer.id, id);
+
       // Roll the lead up from its products, then stamp the conversion dates only
       // if that actually made it converted. A lead still working two other
       // products has not converted, however much of a milestone this was.
@@ -1432,7 +1436,16 @@ export class LeadsService {
     if (query.partnerId) and.push({ partnerId: query.partnerId });
     if (query.campaignId) and.push({ campaignId: query.campaignId });
     if (query.minScore !== undefined) and.push({ score: { gte: query.minScore } });
-    if (query.overdueOnly) and.push({ nextFollowUpAt: { lt: new Date() } });
+    if (query.overdueOnly) {
+      // Closed leads are excluded here as they are on the dashboard and in the
+      // reports. This filter was the one place that did not, so a converted
+      // lead whose old follow-up date had passed still appeared as work
+      // outstanding — and the same lead was absent from the count beside it.
+      and.push({
+        nextFollowUpAt: { lt: new Date() },
+        status: { notIn: [...CLOSED_LEAD_STATUSES] },
+      });
+    }
     // Unverified is the side worth hunting for, and it is the NULL side, so it
     // cannot be expressed as an equality.
     if (query.mobileVerified !== undefined) {
@@ -1947,6 +1960,48 @@ export class LeadsService {
   }
 
   /**
+   * Mirror the lead's converted products onto the customer record.
+   *
+   * Without this the customer screen could not answer "what did they actually
+   * take?", because `customer_product` was declared but never written by
+   * anything — so the holdings chips were always empty and the "holds" filter
+   * never matched a single client.
+   *
+   * `sourceSystem` says SIHL_ONE rather than taking the BACKOFFICE default, and
+   * that word is doing real work. Per ADR-0002 this system is not the record of
+   * what a client holds; it only knows what was sold through its own pipeline.
+   * Labelling the row with where it came from keeps that distinction visible
+   * when a back-office feed eventually writes alongside it.
+   *
+   * `skipDuplicates` for the same reason: if a row for this product already
+   * exists — from the back office, or from an earlier conversion on the same
+   * client — it is left exactly as it was. This adds what is missing and
+   * overwrites nothing.
+   */
+  private async mirrorConvertedProducts(
+    tx: Prisma.TransactionClient,
+    customerId: string,
+    leadId: string,
+  ): Promise<void> {
+    const converted = await tx.leadProduct.findMany({
+      where: { leadId, status: 'CONVERTED' },
+      select: { productCode: true, closedAt: true },
+    });
+    if (converted.length === 0) return;
+
+    await tx.customerProduct.createMany({
+      data: converted.map((row) => ({
+        customerId,
+        product: row.productCode,
+        status: 'CONVERTED',
+        openedAt: row.closedAt ?? new Date(),
+        sourceSystem: 'SIHL_ONE',
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  /**
    * Recompute the lead's own status from its products.
    *
    * Stored rather than derived on read: the pipeline groups and counts by it.
@@ -1954,14 +2009,69 @@ export class LeadsService {
    * with one converted and two open products actually is.
    */
   private async rollUpLead(tx: Prisma.TransactionClient, leadId: string): Promise<void> {
-    const rows = await tx.leadProduct.findMany({ where: { leadId }, select: { status: true } });
+    const rows = await tx.leadProduct.findMany({
+      where: { leadId },
+      select: { status: true, lostReason: true, closedAt: true },
+      orderBy: { closedAt: 'desc' },
+    });
     const rolled = rollUpLeadStatus(rows.map((row) => row.status as LeadProductStatus));
     if (!rolled) return;
 
-    const lead = await tx.lead.findUnique({ where: { id: leadId }, select: { status: true } });
+    const lead = await tx.lead.findUnique({
+      where: { id: leadId },
+      select: { status: true, convertedAt: true, closedAt: true },
+    });
     if (!lead || lead.status === rolled) return;
 
-    await tx.lead.update({ where: { id: leadId }, data: { status: rolled } });
+    // Closing the lead has three consequences beyond the status itself, and
+    // leaving any of them out makes the record disagree with itself.
+    //
+    // `nextFollowUpAt` is cleared because a lead nobody is working has nothing
+    // to chase. Left in place it kept converted and lost leads sitting in the
+    // overdue follow-up list for ever — the reps' most common complaint about
+    // the list, and the reason it was being ignored.
+    //
+    // `convertedAt` and `closedAt` are stamped because the explicit conversion
+    // routes already set them, and reporting counts conversions by
+    // `convertedAt`. Without this a lead that converted by its last product
+    // being marked CONVERTED had the right status and was invisible to every
+    // report of conversions in a period.
+    const closing = CLOSED_LEAD_STATUSES.has(rolled);
+
+    // A LOST lead must carry a reason — `lead_lost_requires_reason` in the
+    // database enforces it. The roll-up never supplied one, so every attempt to
+    // close a lead by losing its last product failed the constraint and threw a
+    // 500: the products were marked lost but the lead stayed open for ever.
+    // The reason is taken from the most recently closed product, which is the
+    // one that actually ended the lead.
+    // `LeadProduct.lostReason` is a plain string while the lead's is an enum, so
+    // the value is checked against the vocabulary rather than trusted. Anything
+    // unrecognised falls back to OTHER: a lead that will not close because a
+    // product carries a stale reason code is worse than a slightly vague one.
+    const productReason = rows.find((row) => row.status === 'LOST' && row.lostReason)?.lostReason;
+    const lostReason: LeadLostReason | undefined =
+      rolled === 'LOST'
+        ? ((LEAD_LOST_REASONS as readonly string[]).includes(productReason ?? '')
+            ? (productReason as LeadLostReason)
+            : 'OTHER')
+        : undefined;
+
+    await tx.lead.update({
+      where: { id: leadId },
+      data: {
+        status: rolled,
+        ...(lostReason ? { lostReason } : {}),
+        ...(closing
+          ? {
+              nextFollowUpAt: null,
+              closedAt: lead.closedAt ?? new Date(),
+              // Only on conversion, and never overwritten: the first time they
+              // became a client is the date that matters.
+              ...(rolled === 'CONVERTED' && !lead.convertedAt ? { convertedAt: new Date() } : {}),
+            }
+          : {}),
+      },
+    });
     await tx.leadStatusHistory.create({
       data: {
         leadId,
@@ -2148,6 +2258,14 @@ export class LeadsService {
           } as never,
         },
       });
+
+      // The customer already exists on this path; mirror against whichever one
+      // the lead is linked to rather than assuming a fresh record.
+      const linked = await tx.lead.findUniqueOrThrow({
+        where: { id },
+        select: { customerId: true },
+      });
+      if (linked.customerId) await this.mirrorConvertedProducts(tx, linked.customerId, id);
 
       await this.rollUpLead(tx, id);
 
