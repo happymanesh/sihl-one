@@ -5,15 +5,6 @@ import { useFormStatus } from 'react-dom';
 
 import { submitLeadCapture, type CaptureState } from '@/app/actions/lead-capture';
 
-const PRODUCTS = [
-  { value: 'EQUITY', label: 'Equity' },
-  { value: 'DERIVATIVES', label: 'F&O' },
-  { value: 'MUTUAL_FUNDS', label: 'Mutual funds' },
-  { value: 'IPO', label: 'IPOs' },
-  { value: 'COMMODITY', label: 'Commodities' },
-  { value: 'NRI', label: 'NRI investing' },
-] as const;
-
 const INITIAL: CaptureState = { status: 'idle' };
 
 function SubmitButton({ label }: { label?: string }) {
@@ -38,11 +29,22 @@ export function LeadCaptureForm({
   partnerCode,
   eventCode,
   submitLabel,
+  products = [],
 }: {
   /** Provenance from a coded link. Passed through as a code, never an id. */
   partnerCode?: string;
   eventCode?: string;
   submitLabel?: string;
+  /**
+   * The active product master, supplied by the page.
+   *
+   * Previously six options were hard-coded here. The master is edited in the
+   * admin screen and had moved on: production has no COMMODITY at all, and IPO
+   * and NRI are switched off — so three of the six choices on the public form
+   * were rejected on submit as unknown products, losing the lead of somebody
+   * who had already typed their name and number at a stall.
+   */
+  products?: Array<{ code: string; name: string }>;
 } = {}) {
   const [state, formAction] = useActionState(submitLeadCapture, INITIAL);
   const [attribution, setAttribution] = useState({
@@ -182,18 +184,18 @@ export function LeadCaptureForm({
       <fieldset>
         <legend className="label">What are you interested in?</legend>
         <div className="flex flex-wrap gap-2">
-          {PRODUCTS.map((product) => (
+          {products.map((product) => (
             <label
-              key={product.value}
+              key={product.code}
               className="cursor-pointer rounded-full border border-[var(--color-border-strong)] px-3 py-1.5 text-xs font-semibold transition-colors has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white"
             >
               <input
                 type="checkbox"
                 name="productInterest"
-                value={product.value}
+                value={product.code}
                 className="sr-only"
               />
-              {product.label}
+              {product.name}
             </label>
           ))}
         </div>
@@ -212,9 +214,16 @@ export function LeadCaptureForm({
         stores this exact wording alongside the timestamp as evidence.
       */}
       <label className="flex cursor-pointer items-start gap-2.5 text-xs text-[var(--color-text-muted)]">
+        {/*
+          Ticked by default at the product owner's instruction, to cut the number
+          of forms abandoned at a stall. Still `required`, so a visitor who
+          unticks it cannot submit — the box remains a real control they can
+          refuse, rather than a decoration.
+        */}
         <input
           type="checkbox"
           name="consentToContact"
+          defaultChecked
           required
           className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
           aria-invalid={Boolean(state.errors?.consentToContact)}

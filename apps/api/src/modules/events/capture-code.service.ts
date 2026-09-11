@@ -46,6 +46,7 @@ export class CaptureCodeService {
 
       const active = partner.status === 'ACTIVE';
       return {
+        products: await this.activeProducts(),
         kind: 'PARTNER',
         code,
         attributedTo: partner.name,
@@ -67,6 +68,7 @@ export class CaptureCodeService {
       endsAt: event.endsAt,
     });
     return {
+      products: await this.activeProducts(),
       kind: 'EVENT',
       code,
       attributedTo: event.name,
@@ -80,6 +82,22 @@ export class CaptureCodeService {
           ? 'This event has not started yet. Please scan again on the day.'
           : 'This event has ended. You can still open an account on our website.',
     };
+  }
+
+  /**
+   * Active products, for the public form.
+   *
+   * The capture page is unauthenticated, so it cannot call the masters
+   * endpoint; sending the list with the context keeps the public surface to the
+   * one route that already exists.
+   */
+  private async activeProducts(): Promise<Array<{ code: string; name: string }>> {
+    const rows = await this.prisma.product.findMany({
+      where: { isActive: true },
+      select: { code: true, name: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    return rows.map((row) => ({ code: row.code, name: row.name }));
   }
 
   /**

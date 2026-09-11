@@ -107,6 +107,7 @@ export default async function JoinPage({ params }: Props) {
           partnerCode={context.kind === 'PARTNER' ? context.code : undefined}
           eventCode={context.kind === 'EVENT' ? context.code : undefined}
           submitLabel={isEvent ? 'Register my interest' : 'Request a call back'}
+          products={context.products ?? []}
         />
       </div>
 

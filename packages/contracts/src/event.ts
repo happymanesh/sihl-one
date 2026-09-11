@@ -216,6 +216,16 @@ export interface CaptureContext {
   eventName?: string;
   venue?: string | null;
   startsAt?: string;
+  /**
+   * The products this form may offer, from the master list.
+   *
+   * Served with the context rather than hard-coded in the page. The master is
+   * edited in the admin screen and drifts — production had no COMMODITY at all
+   * and IPO, NRI and PMS switched off, while the form went on offering all
+   * three. Every submission that ticked one was rejected as an unknown product,
+   * at a stall, by somebody who had already given their name and number.
+   */
+  products: Array<{ code: string; name: string }>;
 }
 
 /**

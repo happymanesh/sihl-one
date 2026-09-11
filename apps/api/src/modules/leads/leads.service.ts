@@ -765,11 +765,25 @@ export class LeadsService {
     const campaignId =
       coded.campaignId ?? (await this.resolveCampaignId(null, input.attribution?.utmCampaign));
 
-    // Weighted on the source the lead is actually stored with, which is the
-    // resolved one. Computing it from `input.source` scored every QR scan at
-    // an event as though it had come from the website — the form always posts
-    // WEBSITE, because the browser does not know what the code resolves to.
-    const sourceWeight = await this.masters.weightFor(coded.source ?? input.source);
+    // The code resolver names a preferred source, but the master list is edited
+    // through the admin screen and drifts between environments — `lead.source`
+    // is a foreign key, so writing a code that is not there loses the lead to a
+    // constraint violation. Fall back through the alternatives to whatever the
+    // caller actually sent, which has already been validated above.
+    const storedSource =
+      (await this.masters.firstUsableSource(
+        coded.source,
+        // BRANCH_EVENT is the intended label for a stall capture; WALK_IN and
+        // PHYSICAL_VISIT are what older master lists call the same thing.
+        coded.eventId ? 'WALK_IN' : null,
+        coded.eventId ? 'PHYSICAL_VISIT' : null,
+      )) ?? input.source;
+
+    // Weighted on the source the lead is actually stored with. Computing it
+    // from `input.source` scored every QR scan at an event as though it had
+    // come from the website — the form always posts WEBSITE, because the
+    // browser does not know what the code resolves to.
+    const sourceWeight = await this.masters.weightFor(storedSource);
 
     const lead = await this.prisma.$transaction(async (tx) => {
       const created = await tx.lead.create({
@@ -780,7 +794,7 @@ export class LeadsService {
           mobile: input.mobile,
           email: input.email || null,
           city: input.city ?? null,
-          source: coded.source ?? input.source,
+          source: storedSource,
           productInterest: input.productInterest,
           campaignId,
           partnerId: coded.partnerId,
