@@ -1,6 +1,12 @@
 import { randomInt } from 'node:crypto';
 
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   canGrantRoles,
   canManageUserAt,
@@ -25,6 +31,8 @@ import { ReferenceService } from '../../common/reference.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PasswordService } from '../auth/password.service';
+import { Mailer } from '../mail/mailer';
+import { APP_CONFIG, type AppConfig } from '../../config/configuration';
 
 /**
  * User and designation administration.
@@ -41,6 +49,8 @@ export class UserAdminService {
     private readonly references: ReferenceService,
     private readonly passwords: PasswordService,
     private readonly audit: AuditService,
+    private readonly mailer: Mailer,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   // --- Designations --------------------------------------------------------
@@ -370,20 +380,61 @@ export class UserAdminService {
       }),
     ]);
 
-    // Deliberately records that credentials were issued, never what they were.
+    // Email the person whose password it is. Best-effort by design: if SendGrid
+    // is down, the reset has already happened and the administrator still has
+    // the password on screen to pass on by hand. Failing the whole operation
+    // because a notification did not send would turn a working manual process
+    // into a broken automatic one.
+    const delivery = await this.notifyPasswordReset(target, temporary);
+
+    // Deliberately records that credentials were issued, never what they were —
+    // including whether the email carrying them was accepted, which is the
+    // question asked when somebody says they never received it.
     await this.audit.record({
       action: 'UPDATE',
       resource: 'user.credentials',
       resourceId: userId,
-      changes: { issuedTo: target.email, mustChangePassword: true },
+      changes: {
+        issuedTo: target.email,
+        mustChangePassword: true,
+        emailSent: delivery.accepted,
+        ...(delivery.failureReason ? { emailFailure: delivery.failureReason } : {}),
+      },
       reason: 'Temporary credentials issued',
     });
 
     return {
       email: target.email,
       temporaryPassword: temporary,
-      note: 'Shown once. They must change it at first sign-in.',
+      emailSent: delivery.accepted,
+      note: delivery.accepted
+        ? 'Emailed to the user. Shown once here as well; they must change it at first sign-in.'
+        : 'Email could not be sent — pass this on yourself. Shown once; they must change it at first sign-in.',
     };
+  }
+
+  /**
+   * Never throws. The caller has already committed the reset, and an exception
+   * here would surface to the administrator as a failure of something that
+   * actually succeeded.
+   */
+  private async notifyPasswordReset(
+    target: { email: string; firstName: string; employeeCode: string | null },
+    temporary: string,
+  ) {
+    try {
+      return await this.mailer.sendPasswordReset({
+        to: target.email,
+        firstName: target.firstName,
+        employeeCode: target.employeeCode,
+        temporaryPassword: temporary,
+        appUrl: this.config.mail.appUrl ?? '',
+        productName: this.config.mail.fromName,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { accepted: false, providerMessageId: null, failureReason: reason };
+    }
   }
 
   /** Candidate managers: anyone more senior than the given level, in scope. */

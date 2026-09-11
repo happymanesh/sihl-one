@@ -40,6 +40,23 @@ const envSchema = z
     RATE_LIMIT_TTL: z.coerce.number().int().min(1).default(60),
     RATE_LIMIT_LIMIT: z.coerce.number().int().min(1).default(120),
 
+    /**
+     * Outbound email for system messages — today only the password-reset
+     * notice. Defaults to `noop`, which logs and sends nothing, so a
+     * developer or a CI run can never mail a real person by accident.
+     */
+    MAIL_DRIVER: z.enum(['noop', 'sendgrid']).default('noop'),
+    SENDGRID_API_KEY: z.string().min(1).optional(),
+    /** Must be a verified sender, or on a domain authenticated in SendGrid. */
+    MAIL_FROM: z.string().email().optional(),
+    MAIL_FROM_NAME: z.string().min(1).default('SIHL LMS+'),
+    /**
+     * The address staff see in links. Separate from CORS_ORIGINS because that
+     * is a security allow-list and this is a public, human-facing URL — reusing
+     * one for the other means a CORS change silently rewrites customer email.
+     */
+    MAIL_APP_URL: z.string().url().optional(),
+
     STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
     STORAGE_LOCAL_ROOT: z.string().default('storage'),
     // Opt-in acknowledgement that STORAGE_LOCAL_ROOT points at a persistent
@@ -140,6 +157,33 @@ const envSchema = z
       });
     }
 
+    // Caught at boot rather than at the first password reset. A missing key or
+    // sender would otherwise surface as a member of staff locked out and
+    // waiting for an email that was never going to arrive.
+    if (env.MAIL_DRIVER === 'sendgrid') {
+      if (!env.SENDGRID_API_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'MAIL_DRIVER=sendgrid requires SENDGRID_API_KEY.',
+          path: ['SENDGRID_API_KEY'],
+        });
+      }
+      if (!env.MAIL_FROM) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'MAIL_DRIVER=sendgrid requires MAIL_FROM (a verified sender).',
+          path: ['MAIL_FROM'],
+        });
+      }
+      if (!env.MAIL_APP_URL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'MAIL_DRIVER=sendgrid requires MAIL_APP_URL for the sign-in link.',
+          path: ['MAIL_APP_URL'],
+        });
+      }
+    }
+
     if (env.NODE_ENV !== 'production') return;
 
     // Production-only checks. These are the mistakes that actually happen: a
@@ -235,6 +279,13 @@ export interface AppConfig {
     idleTimeoutMinutes: number;
   };
   rateLimit: { ttlSeconds: number; limit: number };
+  mail: {
+    driver: Env['MAIL_DRIVER'];
+    apiKey: string | undefined;
+    from: string | undefined;
+    fromName: string;
+    appUrl: string | undefined;
+  };
   storage: {
     driver: Env['STORAGE_DRIVER'];
     localRoot: string;
@@ -289,6 +340,13 @@ export function buildAppConfig(env: Env): AppConfig {
       idleTimeoutMinutes: env.AUTH_IDLE_TIMEOUT_MINUTES,
     },
     rateLimit: { ttlSeconds: env.RATE_LIMIT_TTL, limit: env.RATE_LIMIT_LIMIT },
+    mail: {
+      driver: env.MAIL_DRIVER,
+      apiKey: env.SENDGRID_API_KEY,
+      from: env.MAIL_FROM,
+      fromName: env.MAIL_FROM_NAME,
+      appUrl: env.MAIL_APP_URL,
+    },
     storage: {
       driver: env.STORAGE_DRIVER,
       localRoot: env.STORAGE_LOCAL_ROOT,
