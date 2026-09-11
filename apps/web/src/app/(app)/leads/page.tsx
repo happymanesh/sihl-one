@@ -48,6 +48,7 @@ export default async function LeadsPage({
     productInterest: params.productInterest as string | string[] | undefined,
     priority: first('priority'),
     ownerId: first('ownerId'),
+    eventId: first('eventId'),
     overdueOnly: first('overdueOnly'),
     minScore: first('minScore'),
     sortBy: first('sortBy') ?? 'createdAt',
@@ -62,6 +63,14 @@ export default async function LeadsPage({
   ]);
 
   const data = await apiFetch<Paginated>(`/leads${query}`);
+
+  // Named, not just applied. Arriving from an event's "View the leads" with a
+  // silent filter looks identical to a broken list — the reader has no way to
+  // tell "this event produced three leads" from "the search is wrong".
+  const eventId = first('eventId');
+  const filteredEvent = eventId
+    ? await apiFetch<{ id: string; name: string }>(`/events/${eventId}`).catch(() => null)
+    : null;
   // Chips show the master's name rather than a title-cased code, so NRI does
   // not render as "Nri" and MUTUAL_FUNDS reads however the business named it.
   const productLabels = Object.fromEntries(products.map((p) => [p.code, p.name]));
@@ -98,6 +107,19 @@ export default async function LeadsPage({
       </header>
 
       <LeadFilters sources={sources} products={products} />
+
+      {filteredEvent ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-sm">
+          <span className="text-[var(--color-text-muted)]">Showing leads captured at</span>
+          <span className="font-semibold">{filteredEvent.name}</span>
+          <Link
+            href="/leads"
+            className="ml-auto text-xs font-semibold text-[var(--color-text-muted)] underline underline-offset-2"
+          >
+            Show all leads
+          </Link>
+        </div>
+      ) : null}
 
       {data.items.length === 0 ? (
         <div className="card">

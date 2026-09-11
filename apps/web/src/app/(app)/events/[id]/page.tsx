@@ -121,7 +121,10 @@ export default async function EventDetailPage({ params }: Props) {
           <h2 className="font-bold">What the leads became</h2>
           {event.leads > 0 ? (
             <Link
-              href={`/leads?q=${encodeURIComponent(event.code)}`}
+              // An exact filter on the event, not a free-text search for its
+              // code — which matched nothing, because the lead search only ever
+              // looked at the person.
+              href={`/leads?eventId=${event.id}`}
               className="text-xs font-semibold text-teal-600 hover:underline dark:text-teal-300"
             >
               View the leads

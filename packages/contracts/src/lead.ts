@@ -220,6 +220,12 @@ export const leadQuerySchema = paginationQuerySchema.extend({
   ownerId: idSchema.optional(),
   partnerId: idSchema.optional(),
   campaignId: idSchema.optional(),
+  /**
+   * Leads captured at one event. An id rather than the code, because the event
+   * screen already holds it and an exact filter beats a free-text search that
+   * can also match somebody's surname.
+   */
+  eventId: idSchema.optional(),
   /** `true` restricts to leads whose follow-up date has passed. */
   overdueOnly: z.coerce.boolean().optional(),
   createdFrom: z.coerce.date().optional(),

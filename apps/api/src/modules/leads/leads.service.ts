@@ -1436,6 +1436,14 @@ export class LeadsService {
           { mobile: { contains: term } },
           { email: { contains: term, mode: 'insensitive' } },
           { reference: { contains: term, mode: 'insensitive' } },
+          // Where the lead came from, not just who they are. The event screen
+          // links straight to `/leads?q=<event code>` to show "the leads this
+          // stall produced", and that link returned nothing because the search
+          // only ever looked at the person. Searching the campaign the same way
+          // for the same reason.
+          { event: { code: { contains: term, mode: 'insensitive' } } },
+          { event: { name: { contains: term, mode: 'insensitive' } } },
+          { campaign: { name: { contains: term, mode: 'insensitive' } } },
         ],
       });
     }
@@ -1454,6 +1462,7 @@ export class LeadsService {
     if (query.ownerId) and.push({ ownerId: query.ownerId });
     if (query.partnerId) and.push({ partnerId: query.partnerId });
     if (query.campaignId) and.push({ campaignId: query.campaignId });
+    if (query.eventId) and.push({ eventId: query.eventId });
     if (query.minScore !== undefined) and.push({ score: { gte: query.minScore } });
     if (query.overdueOnly) {
       // Closed leads are excluded here as they are on the dashboard and in the

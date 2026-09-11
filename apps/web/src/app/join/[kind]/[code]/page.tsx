@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CaptureContext } from '@sihl-one/contracts';
 
+import { Logo } from '@/components/brand/Logo';
 import { LeadCaptureForm } from '@/components/marketing/LeadCaptureForm';
 import { formatDate } from '@/lib/format';
 
@@ -122,8 +123,15 @@ export default async function JoinPage({ params }: Props) {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="mx-auto min-h-screen max-w-lg px-4 py-10">
-      <div className="mb-6 text-center">
-        <span className="text-lg font-bold tracking-tight">SIHL ONE</span>
+      {/*
+        The company's mark, not the internal product name. This page is the only
+        part of the system a member of the public sees — at a stall, on their own
+        phone, deciding whether to hand over their mobile number. "SIHL ONE"
+        means nothing to them and reads like the wrong company; the logo is what
+        they walked up to the banner for.
+      */}
+      <div className="mb-6 flex justify-center">
+        <Logo size="md" />
       </div>
       <div className="card p-6">{children}</div>
     </main>
