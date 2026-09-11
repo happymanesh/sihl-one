@@ -41,6 +41,16 @@ const envSchema = z
     RATE_LIMIT_LIMIT: z.coerce.number().int().min(1).default(120),
 
     /**
+     * The public address of the web app. This is what gets encoded into the QR
+     * on an event banner and a partner's card, so a wrong value is not a
+     * degraded experience — it is a printed sheet of paper that does nothing.
+     * Validated here because it was being read straight from process.env with a
+     * localhost fallback, which fails silently and only in the one place nobody
+     * can check after the fact.
+     */
+    PUBLIC_WEB_URL: z.string().url().default('http://localhost:3000'),
+
+    /**
      * Outbound email for system messages — today only the password-reset
      * notice. Defaults to `noop`, which logs and sends nothing, so a
      * developer or a CI run can never mail a real person by accident.
@@ -185,6 +195,18 @@ const envSchema = z
     }
 
     if (env.NODE_ENV !== 'production') return;
+
+    // A production build encoding localhost into a printed QR is the failure
+    // this catches. Nobody discovers it until a banner is standing in a hall
+    // and the codes scan to nothing.
+    if (/localhost|127\.0\.0\.1/.test(env.PUBLIC_WEB_URL)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUBLIC_WEB_URL must be the real public address in production, not localhost.',
+        path: ['PUBLIC_WEB_URL'],
+      });
+    }
+
 
     // Production-only checks. These are the mistakes that actually happen: a
     // .env copied from a dev machine straight onto a server.
