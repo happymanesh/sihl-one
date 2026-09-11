@@ -245,8 +245,13 @@ export class ReportsService {
         conversionRate: null,
       };
       entry.interested += 1;
-      if (row.status === 'WON') entry.won += 1;
-      else if (row.status === 'LOST') entry.lost += 1;
+      // A lead product carries a LeadStatus, not a separate won/lost vocabulary
+      // — `LEAD_PRODUCT_STATUSES = LEAD_STATUSES`. An earlier version of this
+      // checked for 'WON', which no status ever equals, so every converted
+      // product was silently counted as still open and the won column read zero
+      // for everything.
+      if (row.status === 'CONVERTED') entry.won += 1;
+      else if (row.status === 'LOST' || row.status === 'DISQUALIFIED') entry.lost += 1;
       else entry.open += 1;
       grouped.set(row.productCode, entry);
     }
