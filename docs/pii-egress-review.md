@@ -59,12 +59,24 @@ deliberately shows the same confirmation either way, with this comment in
 That reasoning is right. But the control lives in the client, and the API is reachable on its
 own hostname, so calling the API directly bypasses it.
 
-**Recommended:** make the API response identical in both cases — drop the `duplicate` flag from
-the public response, and return a freshly generated acknowledgement id rather than the existing
-lead's reference. The web page already treats both cases the same, so no user-visible change.
+**Confirmed 12 September 2026:** the API does have its own public domain in production
+(`api-production-c405d.up.railway.app`), so this is reachable from the internet today. The
+severity stands.
 
-**Confirm first:** whether the API service has a public domain in production. On Railway it does
-unless explicitly removed. If it genuinely is not reachable from the internet, this drops to low.
+**Decided 12 September 2026 — drop the reference from the public response entirely.**
+
+The visitor is currently shown "Your reference is LD-…" after submitting. That line goes. An
+opaque acknowledgement id would preserve it, but needs a lookup table and a way for staff to
+resolve one, which nobody has asked for.
+
+Keeping a reference for new leads only does not work: references are sequential, so submitting
+an unknown number twice and receiving the same number back rather than the next one answers the
+question even with the `duplicate` flag removed. The reference has to go.
+
+**Scheduled for after 27 September 2026.** This is the capture path the live event runs on, and
+a disclosure issue that has been present for months does not justify touching that path days
+before the event. To be implemented with an end-to-end QR scan test on staging before it reaches
+production.
 
 ## 2. Unauthenticated callers can write to existing lead records
 
@@ -85,6 +97,8 @@ repeat enquiry from a scripted one.
 
 **Recommended:** cap the effect per lead per window — record at most one repeat-enquiry activity
 per lead per 24 hours, and do not escalate priority from an unauthenticated call more than once.
+
+**Scheduled alongside finding 1, after 27 September 2026** — same endpoint, same release.
 
 ## 3. Import staging retains rejected people indefinitely
 
