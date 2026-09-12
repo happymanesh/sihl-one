@@ -202,7 +202,7 @@ export default async function ReportsPage({
           // credit for a visit stays with its owner.
           formatNumber(row.joinedOthers),
           row.overdueFollowUps > 0 ? (
-            <span key="o" className="font-semibold text-warn-600 dark:text-warn-400">
+            <span key="o" className="font-semibold text-[var(--color-warn-strong)]">
               {formatNumber(row.overdueFollowUps)}
             </span>
           ) : (
