@@ -3,7 +3,12 @@ import type { LeadListItem } from '@sihl-one/contracts';
 
 import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
 import { ProductChips } from '@/components/ui/ProductChips';
-import { formatCompactCurrency, formatDate, formatRelative, humanise } from '@/lib/format';
+import {
+  formatCompactCurrency,
+  formatDateCompact,
+  formatRelative,
+  humanise,
+} from '@/lib/format';
 
 /**
  * Two layouts, one dataset.
@@ -36,6 +41,7 @@ export function LeadTable({
                 <Th>Source</Th>
                 <Th>Owner</Th>
                 <Th className="text-right">Value</Th>
+                <Th>Added / updated</Th>
                 <Th>Follow-up</Th>
               </tr>
             </thead>
@@ -98,10 +104,26 @@ export function LeadTable({
                   <td className="px-4 py-3 text-right font-semibold tnum">
                     {formatCompactCurrency(lead.estimatedValue)}
                   </td>
-                  <td className="px-4 py-3 text-xs">
+                  {/*
+                    Both dates in one column rather than two: the pair is read
+                    together — a lead added in March and untouched since is the
+                    story, and neither date tells it alone.
+
+                    "Updated" is lastActivityAt, not the row's updatedAt. The
+                    latter moves on any write the system makes, so a nightly
+                    rescore would show an abandoned lead as worked yesterday —
+                    exactly the wrong answer on a screen managers judge people by.
+                  */}
+                  <td className="whitespace-nowrap px-4 py-3 text-xs tnum text-[var(--color-text-muted)]">
+                    {formatDateCompact(lead.createdAt)}
+                    <div className="mt-0.5 text-[var(--color-text-subtle)]">
+                      {lead.lastActivityAt ? formatDateCompact(lead.lastActivityAt) : 'not touched'}
+                    </div>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs">
                     {lead.nextFollowUpAt ? (
                       <span className={lead.isOverdue ? 'font-bold text-danger-500' : ''}>
-                        {formatDate(lead.nextFollowUpAt)}
+                        {formatDateCompact(lead.nextFollowUpAt)}
                         {lead.isOverdue ? ' · overdue' : ''}
                       </span>
                     ) : (
@@ -137,6 +159,11 @@ export function LeadTable({
                 </span>
                 <span className="text-[var(--color-text-muted)]">{humanise(lead.source)}</span>
               </div>
+
+              <p className="mt-2 text-xs text-[var(--color-text-subtle)]">
+                Added {formatDateCompact(lead.createdAt)}
+                {lead.lastActivityAt ? ` · updated ${formatDateCompact(lead.lastActivityAt)}` : ' · not touched'}
+              </p>
 
               {lead.nextFollowUpAt ? (
                 <p
