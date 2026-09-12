@@ -95,6 +95,13 @@
   --color-text-subtle: #7d94a9;
   --color-chrome: #ffffff;
   --color-chrome-text: #10243a;
+
+  /* "Needs attention" as a token pair rather than a `dark:` utility pair.
+     The theme switches on [data-theme], but Tailwind's dark: variant follows
+     only the OS — so `bg-warn-50 dark:bg-warn-900` keeps its light value for
+     anyone who picks dark inside the app on a light machine. */
+  --color-warn-surface: rgb(253 236 200 / 0.45);
+  --color-warn-strong: #b45309;
   color-scheme: light;
 }
 
@@ -112,6 +119,8 @@ html.dark {
   --color-text-subtle: #7595ae;
   --color-chrome: #04182b;
   --color-chrome-text: #e8f2f9;
+  --color-warn-surface: rgb(180 83 9 / 0.18);
+  --color-warn-strong: #f0b429;
   color-scheme: dark;
 }
 
