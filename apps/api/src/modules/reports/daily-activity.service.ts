@@ -1,18 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  ACTIVITY_METRIC_LABELS,
   defaultActivityDate,
   istDayWindow,
+  type ActivityDetail,
+  type ActivityTotals,
+  type ActivityDetailQuery,
+  type ActivityDetailRow,
+  type LeadListItem,
   type DailyActivityGroup,
   type DailyActivityQuery,
   type DailyActivityReport,
   type DailyActivityRow,
 } from '@sihl-one/contracts';
 
+import { LEAD_LIST_SELECT, toLeadListItem, type LeadRow } from '../leads/lead.mapper';
+
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
 
 /** A row with every count at zero, which is the row that matters most here. */
 const EMPTY = {
+  openLeads: 0,
   leadsAssigned: 0,
   leadsCreated: 0,
   mobilesVerified: 0,
@@ -23,6 +32,25 @@ const EMPTY = {
   lost: 0,
   total: 0,
 };
+
+/** Adds a set of rows column by column. Used for both subtotals and the whole. */
+function sumRows(rows: readonly DailyActivityRow[]): ActivityTotals {
+  return rows.reduce<ActivityTotals>(
+    (sum, row) => ({
+      openLeads: sum.openLeads + row.openLeads,
+      leadsAssigned: sum.leadsAssigned + row.leadsAssigned,
+      leadsCreated: sum.leadsCreated + row.leadsCreated,
+      mobilesVerified: sum.mobilesVerified + row.mobilesVerified,
+      leadsUpdated: sum.leadsUpdated + row.leadsUpdated,
+      visitsDone: sum.visitsDone + row.visitsDone,
+      joinedVisits: sum.joinedVisits + row.joinedVisits,
+      converted: sum.converted + row.converted,
+      lost: sum.lost + row.lost,
+      total: sum.total + row.total,
+    }),
+    { ...EMPTY },
+  );
+}
 
 /**
  * The daily activity report.
@@ -46,13 +74,20 @@ export class DailyActivityService {
 
     const people = await this.peopleInScope(user);
     if (people.length === 0) {
-      return { date, partial: this.isToday(date), groups: [], idleCount: 0, peopleCount: 0 };
+      return {
+        date,
+        partial: this.isToday(date),
+        groups: [],
+        overall: { ...EMPTY },
+        idleCount: 0,
+        peopleCount: 0,
+      };
     }
 
     const ids = people.map((person) => person.id);
     const window = { gte: from, lte: to };
 
-    const [assigned, created, verified, updated, visits, joined, statuses] = await Promise.all([
+    const [assigned, created, verified, updated, visits, joined, statuses, open] = await Promise.all([
       // Who a lead was given to, from the audit payload rather than the lead's
       // current owner — the point is what changed hands that day.
       this.prisma.auditLog.findMany({
@@ -108,6 +143,33 @@ export class DailyActivityService {
         },
         _count: true,
       }),
+      // The backlog each person was carrying at the end of that day.
+      //
+      // Reconstructed from the status history rather than read from
+      // `lead.closedAt`, which is populated on almost nothing — two rows out of
+      // a hundred and seventy in production. A lead counts as open if it
+      // existed by the end of the day and had not yet reached a closed status
+      // by then.
+      //
+      // Ownership is the *current* owner. Reconstructing who held a lead on a
+      // past date is possible from the assignment audit but expensive, and for
+      // a report that defaults to yesterday it would change almost nothing.
+      // Worth knowing before anyone reads a three-month-old day.
+      this.prisma.lead.groupBy({
+        by: ['ownerId'],
+        where: {
+          ownerId: { in: ids },
+          deletedAt: null,
+          createdAt: { lte: to },
+          statusHistory: {
+            none: {
+              toStatus: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
+              changedAt: { lte: to },
+            },
+          },
+        },
+        _count: true,
+      }),
     ]);
 
     const assignedTo = new Map<string, number>();
@@ -133,6 +195,7 @@ export class DailyActivityService {
     const updatedBy = tally(updated, 'actorId');
     const visitedBy = tally(visits, 'userId');
     const joinedBy = tally(joined, 'userId');
+    const openBy = tally(open, 'ownerId');
 
     const convertedBy = new Map<string, number>();
     const lostBy = new Map<string, number>();
@@ -153,6 +216,7 @@ export class DailyActivityService {
         converted: convertedBy.get(person.id) ?? 0,
         lost: lostBy.get(person.id) ?? 0,
       };
+      const openLeads = openBy.get(person.id) ?? 0;
       return {
         userId: person.id,
         fullName: `${person.firstName} ${person.lastName}`.trim(),
@@ -162,7 +226,12 @@ export class DailyActivityService {
         manager: person.manager
           ? `${person.manager.firstName} ${person.manager.lastName}`.trim()
           : null,
+        openLeads,
         ...counts,
+        // Deliberately excludes openLeads. The total answers "did they do
+        // anything today"; a standing backlog is not something they did, and
+        // folding it in would make the idle row with ninety untouched leads
+        // look like the busiest person on the page.
         total: Object.values(counts).reduce((sum, value) => sum + value, 0),
       };
     });
@@ -171,8 +240,229 @@ export class DailyActivityService {
       date,
       partial: this.isToday(date),
       groups: await this.group(user, people, rows),
+      // Summed from the people, not from the groups: a person belongs to exactly
+      // one group today, but that is a property of how grouping happens to work
+      // rather than something the total should depend on.
+      overall: sumRows(rows),
       idleCount: rows.filter((row) => row.total === 0).length,
       peopleCount: rows.length,
+    };
+  }
+
+  /**
+   * The records behind one number.
+   *
+   * Re-checks scope from scratch rather than trusting the id in the URL: a
+   * drill-down is a separate request, and "this person appeared on a report I
+   * could see" is not a reason to hand over their leads afterwards.
+   *
+   * Lead metrics come back in the leads-list shape, through the same mapper the
+   * Leads screen uses. A second rendering of a lead would drift from the first
+   * one within a release or two, and a manager who drills into a figure and
+   * meets an unfamiliar table has to learn the screen twice.
+   *
+   * Capped at 200 records. A cell showing four hundred is a backlog to work
+   * through on the Leads screen, not a list to read on a report.
+   */
+  async detail(
+    user: AuthenticatedPrincipal,
+    query: ActivityDetailQuery,
+  ): Promise<ActivityDetail> {
+    const people = await this.peopleInScope(user);
+    const person = people.find((candidate) => candidate.id === query.userId);
+    if (!person) {
+      throw new NotFoundException({
+        title: 'Not in your view',
+        detail: 'That person is not somebody you can report on.',
+      });
+    }
+
+    const { from, to } = istDayWindow(query.date);
+    const window = { gte: from, lte: to };
+    const take = 201;
+
+    /** Leads by id, in the order the ids were given. */
+    const leadsByIds = async (ids: string[]): Promise<LeadListItem[]> => {
+      const unique = [...new Set(ids)];
+      if (unique.length === 0) return [];
+      const found = await this.prisma.lead.findMany({
+        where: { id: { in: unique }, deletedAt: null },
+        select: LEAD_LIST_SELECT,
+      });
+      const byId = new Map(found.map((row) => [row.id, toLeadListItem(row as unknown as LeadRow)]));
+      return unique
+        .map((id) => byId.get(id))
+        .filter((lead): lead is LeadListItem => lead !== undefined);
+    };
+
+    let leads: LeadListItem[] = [];
+    let visits: ActivityDetailRow[] = [];
+    // Defaults to the number of records found; only the metrics that count
+    // events rather than leads override it.
+    let count: number | null = null;
+
+    switch (query.metric) {
+      case 'openLeads': {
+        const found = await this.prisma.lead.findMany({
+          where: {
+            ownerId: person.id,
+            deletedAt: null,
+            createdAt: { lte: to },
+            statusHistory: {
+              none: {
+                toStatus: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
+                changedAt: { lte: to },
+              },
+            },
+          },
+          select: LEAD_LIST_SELECT,
+          // Follow-up date first, so the overdue end of the backlog is what a
+          // manager meets rather than the newest lead.
+          orderBy: [{ nextFollowUpAt: 'asc' }, { createdAt: 'desc' }],
+          take,
+        });
+        leads = found.map((row) => toLeadListItem(row as unknown as LeadRow));
+        break;
+      }
+
+      case 'leadsCreated': {
+        const found = await this.prisma.lead.findMany({
+          where: { createdById: person.id, createdAt: window },
+          select: LEAD_LIST_SELECT,
+          orderBy: { createdAt: 'desc' },
+          take,
+        });
+        leads = found.map((row) => toLeadListItem(row as unknown as LeadRow));
+        break;
+      }
+
+      case 'mobilesVerified': {
+        const found = await this.prisma.lead.findMany({
+          where: { mobileVerifiedById: person.id, mobileVerifiedAt: window },
+          select: LEAD_LIST_SELECT,
+          orderBy: { mobileVerifiedAt: 'desc' },
+          take,
+        });
+        leads = found.map((row) => toLeadListItem(row as unknown as LeadRow));
+        break;
+      }
+
+      case 'leadsAssigned': {
+        const audit = await this.prisma.auditLog.findMany({
+          where: { action: 'ASSIGN', resource: 'lead', createdAt: window },
+          select: { resourceId: true, changes: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        const mine = audit.filter(
+          (row) => (row.changes as { to?: unknown } | null)?.to === person.id,
+        );
+        count = mine.length;
+        leads = await leadsByIds(
+          mine.map((row) => row.resourceId).filter((id): id is string => Boolean(id)),
+        );
+        break;
+      }
+
+      case 'leadsUpdated': {
+        const audit = await this.prisma.auditLog.findMany({
+          where: {
+            actorId: person.id,
+            action: { in: ['UPDATE', 'STATUS_CHANGE'] },
+            resource: 'lead',
+            createdAt: window,
+          },
+          select: { resourceId: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        // The report counts edits; this lists leads. Ten edits to four leads is
+        // ten there and four rows here, so the real figure travels separately
+        // rather than the two quietly disagreeing.
+        count = audit.length;
+        leads = await leadsByIds(
+          audit.map((row) => row.resourceId).filter((id): id is string => Boolean(id)),
+        );
+        break;
+      }
+
+      case 'converted':
+      case 'lost': {
+        const reached =
+          query.metric === 'converted' ? ['CONVERTED'] : ['LOST', 'DISQUALIFIED'];
+        const history = await this.prisma.leadStatusHistory.findMany({
+          where: {
+            changedById: person.id,
+            changedAt: window,
+            toStatus: { in: reached as never },
+          },
+          select: { leadId: true },
+          orderBy: { changedAt: 'desc' },
+        });
+        count = history.length;
+        leads = await leadsByIds(history.map((entry) => entry.leadId));
+        break;
+      }
+
+      case 'visitsDone': {
+        const found = await this.prisma.visit.findMany({
+          where: { userId: person.id, checkInAt: window },
+          select: { id: true, reference: true, purpose: true, status: true, checkInAt: true },
+          orderBy: { checkInAt: 'desc' },
+          take,
+        });
+        visits = found.map((visit) => ({
+          id: visit.id,
+          reference: visit.reference,
+          title: visit.purpose,
+          subtitle: visit.status,
+          at: visit.checkInAt ? visit.checkInAt.toISOString() : null,
+          href: `/visits/${visit.id}`,
+        }));
+        break;
+      }
+
+      case 'joinedVisits': {
+        const joined = await this.prisma.attendee.findMany({
+          where: {
+            userId: person.id,
+            confirmedAt: { not: null },
+            visit: { checkInAt: window },
+          },
+          select: {
+            visit: {
+              select: { id: true, reference: true, purpose: true, status: true, checkInAt: true },
+            },
+          },
+          take,
+        });
+        visits = joined
+          .map((row) => row.visit)
+          .filter((visit): visit is NonNullable<typeof visit> => visit !== null)
+          .map((visit) => ({
+            id: visit.id,
+            reference: visit.reference,
+            title: visit.purpose,
+            subtitle: visit.status,
+            at: visit.checkInAt ? visit.checkInAt.toISOString() : null,
+            href: `/visits/${visit.id}`,
+          }));
+        break;
+      }
+    }
+
+    const found = leads.length + visits.length;
+    return {
+      metric: query.metric,
+      label: ACTIVITY_METRIC_LABELS[query.metric],
+      date: query.date,
+      person: {
+        userId: person.id,
+        fullName: [person.firstName, person.lastName].filter(Boolean).join(' '),
+        employeeCode: person.employeeCode,
+      },
+      count: count ?? Math.min(found, 200),
+      leads: leads.slice(0, 200),
+      visits: visits.slice(0, 200),
+      truncated: found > 200,
     };
   }
 
@@ -251,20 +541,7 @@ export class DailyActivityService {
 
     return [...units.entries()]
       .map(([orgUnitId, unit]): DailyActivityGroup => {
-        const subtotal = unit.rows.reduce(
-          (sum, row) => ({
-            leadsAssigned: sum.leadsAssigned + row.leadsAssigned,
-            leadsCreated: sum.leadsCreated + row.leadsCreated,
-            mobilesVerified: sum.mobilesVerified + row.mobilesVerified,
-            leadsUpdated: sum.leadsUpdated + row.leadsUpdated,
-            visitsDone: sum.visitsDone + row.visitsDone,
-            joinedVisits: sum.joinedVisits + row.joinedVisits,
-            converted: sum.converted + row.converted,
-            lost: sum.lost + row.lost,
-            total: sum.total + row.total,
-          }),
-          { ...EMPTY },
-        );
+        const subtotal = sumRows(unit.rows);
         return {
           orgUnitId,
           code: unit.code,

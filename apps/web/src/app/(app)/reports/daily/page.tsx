@@ -1,10 +1,12 @@
 import Link from 'next/link';
-import type { DailyActivityReport, DailyActivityRow } from '@sihl-one/contracts';
+import type { DailyActivityReport } from '@sihl-one/contracts';
 
 import { apiFetch } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 import { DayPicker } from '@/components/reports/DayPicker';
+import { DailyActivityGroup } from '@/components/reports/DailyActivityGroup';
+import { ACTIVITY_COLUMNS } from '@/components/reports/activity-columns';
 
 export const metadata = { title: 'Daily activity' };
 
@@ -21,29 +23,9 @@ export const metadata = { title: 'Daily activity' };
  * they do, which is why the report defaults to yesterday.
  */
 
-const COLUMNS: Array<{ key: keyof DailyActivityRow; label: string; short: string }> = [
-  { key: 'leadsAssigned', label: 'Leads assigned to them', short: 'Assigned' },
-  { key: 'leadsCreated', label: 'Leads they added', short: 'Added' },
-  { key: 'mobilesVerified', label: 'Mobiles verified', short: 'Verified' },
-  { key: 'leadsUpdated', label: 'Leads updated', short: 'Updated' },
-  { key: 'visitsDone', label: 'Visits checked into', short: 'Visits' },
-  { key: 'joinedVisits', label: "Joined someone else's visit", short: 'Joined' },
-  { key: 'converted', label: 'Converted', short: 'Won' },
-  { key: 'lost', label: 'Lost or disqualified', short: 'Lost' },
-];
-
 /** Today in IST. The report's day boundary is IST, not the server's UTC. */
 function istToday(): string {
   return new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
-}
-
-function Num({ value, strong }: { value: number; strong?: boolean }) {
-  if (value === 0) {
-    // A dash, not a nought. A grid of zeros is unreadable, and the eye needs
-    // the non-zero figures to stand out rather than the other way round.
-    return <span className="text-[var(--color-text-subtle)]">–</span>;
-  }
-  return <span className={strong ? 'font-semibold' : undefined}>{formatNumber(value)}</span>;
 }
 
 export default async function DailyActivityPage({
@@ -57,19 +39,34 @@ export default async function DailyActivityPage({
   const report = await apiFetch<DailyActivityReport>(`/reports/daily${suffix}`);
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Daily activity</h1>
-          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            {report.date} · {formatNumber(report.peopleCount)}{' '}
-            {report.peopleCount === 1 ? 'person' : 'people'} in your view ·{' '}
-            <span className={report.idleCount > 0 ? 'font-semibold text-warn-600 dark:text-warn-400' : ''}>
-              {formatNumber(report.idleCount)} with nothing recorded
-            </span>
-          </p>
+    <div className="space-y-4">
+      {/*
+        Sticky, because this page is long by design — everybody in scope, one
+        row each — and the date control is the one thing a reader reaches for
+        repeatedly. Scrolling back to the top to move a day is the friction that
+        stops a report being used every morning.
+      */}
+      <header className="sticky top-0 z-20 -mx-4 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-surface)]/80 sm:-mx-6 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold">Daily activity</h1>
+            <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+              {report.date} · {formatNumber(report.peopleCount)}{' '}
+              {report.peopleCount === 1 ? 'person' : 'people'} ·{' '}
+              <span
+                className={
+                  report.idleCount > 0
+                    ? 'font-semibold text-[var(--color-warn-strong)]'
+                    : ''
+                }
+              >
+                {formatNumber(report.idleCount)} with nothing recorded
+              </span>
+            </p>
+          </div>
+          <DayPicker date={report.date} today={istToday()} />
         </div>
-        <DayPicker date={report.date} today={istToday()} />
+
       </header>
 
       {report.partial ? (
@@ -87,92 +84,109 @@ export default async function DailyActivityPage({
           Nobody in your view on this date.
         </p>
       ) : (
-        report.groups.map((group) => (
-          <section key={group.orgUnitId} className="card overflow-hidden">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-border)] px-5 py-3">
-              <div>
-                <h2 className="font-semibold">{group.name}</h2>
-                <p className="mt-0.5 text-xs text-[var(--color-text-subtle)]">
-                  {group.code} · {group.type.toLowerCase()} · {group.rows.length}{' '}
-                  {group.rows.length === 1 ? 'person' : 'people'}
-                </p>
-              </div>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                {formatNumber(group.subtotal.total)} actions
-              </p>
-            </div>
+        /*
+          One table for the whole report, in one scroll pane.
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)] text-left">
-                    <th className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)]">
-                      Name
-                    </th>
-                    {COLUMNS.map((column) => (
-                      <th
-                        key={column.key}
-                        title={column.label}
-                        className="px-3 py-2 text-right text-xs font-medium text-[var(--color-text-muted)]"
-                      >
-                        {column.short}
-                      </th>
-                    ))}
-                    <th className="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-muted)]">
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.rows.map((row) => (
-                    <tr
-                      key={row.userId}
-                      className={`border-b border-[var(--color-border)] last:border-0 ${
-                        row.total === 0
-                          ? 'bg-warn-50/40 dark:bg-warn-900/10'
-                          : 'hover:bg-[var(--color-surface-inset)]'
-                      }`}
-                    >
-                      <td className="px-4 py-2">
-                        <span className="font-medium">{row.fullName}</span>
-                        <span className="block text-xs font-normal text-[var(--color-text-subtle)]">
-                          {row.employeeCode ? `${row.employeeCode}` : ''}
-                          {row.manager ? `${row.employeeCode ? ' · ' : ''}reports to ${row.manager}` : ''}
-                        </span>
-                      </td>
-                      {COLUMNS.map((column) => (
-                        <td key={column.key} className="px-3 py-2 text-right tnum">
-                          <Num value={row[column.key] as number} />
-                        </td>
-                      ))}
-                      <td className="px-4 py-2 text-right tnum">
-                        <Num value={row.total} strong />
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="bg-[var(--color-surface-muted)] font-semibold">
-                    <td className="px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-                      {group.code} total
-                    </td>
-                    {COLUMNS.map((column) => (
-                      <td key={column.key} className="px-3 py-2 text-right tnum">
-                        <Num value={group.subtotal[column.key as keyof typeof group.subtotal]} />
-                      </td>
-                    ))}
-                    <td className="px-4 py-2 text-right tnum">
-                      <Num value={group.subtotal.total} strong />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ))
+          A table per branch would size its own columns, so "Verified" would sit
+          somewhere different in every card — and reading a column down the page,
+          which is the whole point of a roll-up, would mean finding the column
+          again at every heading. One table, one colgroup, one geometry.
+
+          The pane scrolls rather than the page so the column names can stay
+          frozen at its top: sticky resolves against the nearest scroll container,
+          so a thead inside an overflow box only freezes if that box is what
+          scrolls.
+        */
+        <div className="card max-h-[calc(100vh-11rem)] overflow-auto">
+          <table className="w-full min-w-[60rem] table-fixed text-sm">
+            <colgroup>
+              {/* Unset, so the name column absorbs whatever is left over. */}
+              <col />
+              {ACTIVITY_COLUMNS.map((column) => (
+                <col key={column.key} className="w-[4.5rem]" />
+              ))}
+              <col className="w-[5rem]" />
+            </colgroup>
+
+            <thead className="sticky top-0 z-10 bg-[var(--color-surface)]">
+              <tr className="text-left">
+                <th
+                  scope="col"
+                  className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)] shadow-[inset_0_-1px_0_var(--color-border)]"
+                >
+                  Branch and people
+                </th>
+                {ACTIVITY_COLUMNS.map((column) => (
+                  <th
+                    key={column.key}
+                    scope="col"
+                    title={column.long}
+                    className="px-2 py-2 text-right text-xs font-medium text-[var(--color-text-muted)] shadow-[inset_0_-1px_0_var(--color-border)]"
+                  >
+                    {column.short}
+                  </th>
+                ))}
+                <th
+                  scope="col"
+                  className="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-muted)] shadow-[inset_0_-1px_0_var(--color-border)]"
+                >
+                  Total
+                </th>
+              </tr>
+            </thead>
+
+            {/*
+              Everyone in scope, first — the number a national head came for,
+              before they meet nine branches. In the table rather than in the
+              page header so it lands under its own column heading.
+            */}
+            <tbody>
+              <tr className="border-b-2 border-[var(--color-border)] font-semibold">
+                <th scope="row" className="px-4 py-2 text-left font-semibold">
+                  All branches
+                  <span className="block text-xs font-normal text-[var(--color-text-subtle)]">
+                    {formatNumber(report.peopleCount)}{' '}
+                    {report.peopleCount === 1 ? 'person' : 'people'}
+                    {report.idleCount > 0
+                      ? ` · ${formatNumber(report.idleCount)} with nothing recorded`
+                      : ''}
+                  </span>
+                </th>
+                {ACTIVITY_COLUMNS.map((column) => (
+                  <td key={column.key} className="px-2 py-2 text-right tnum">
+                    {report.overall[column.key] === 0 ? (
+                      <span className="font-normal text-[var(--color-text-subtle)]">–</span>
+                    ) : (
+                      formatNumber(report.overall[column.key])
+                    )}
+                  </td>
+                ))}
+                <td className="px-4 py-2 text-right tnum">
+                  {formatNumber(report.overall.total)}
+                </td>
+              </tr>
+            </tbody>
+
+            {report.groups.map((group) => (
+              <DailyActivityGroup
+                key={group.orgUnitId}
+                group={group}
+                date={report.date}
+                // A branch where nothing happened opens collapsed. On a page
+                // listing every branch, the ones worth reading are the ones with
+                // something in them — and the silent ones are still visible as a
+                // heading with their idle count, which is the fact a manager needs.
+                defaultOpen={group.subtotal.total > 0 || report.groups.length <= 3}
+              />
+            ))}
+          </table>
+        </div>
       )}
 
       <p className="text-xs text-[var(--color-text-subtle)]">
         Counts work recorded in the system — a lead handed over, a mobile verified, a visit
-        checked into. It does not track presence, sign-in times or idle periods.{' '}
+        checked into. It does not track presence, sign-in times or idle periods. Open leads is a
+        backlog at the end of that day, not something done on it, so it is not part of the total.{' '}
         <Link href="/reports" className="underline underline-offset-2">
           The period report
         </Link>{' '}
