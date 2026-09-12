@@ -66,6 +66,35 @@ export function formatDate(value: string | Date | null | undefined): string {
   return `${get('day')}-${get('month')}-${get('year')}`;
 }
 
+/**
+ * Three-letter months, indexed by month number.
+ *
+ * `Intl` with `month: 'short'` under `en-GB` returns "Sept" for September —
+ * four letters where every other month gives three. In a table column that one
+ * month is enough to wrap the date onto two lines, so the abbreviation is taken
+ * from the month number instead of from the locale.
+ */
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/** 05-Jan-26. For table columns, where the century is never the question. */
+export function formatDateCompact(value: string | Date | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'numeric',
+    year: '2-digit',
+    timeZone: IST,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  const month = MONTHS[Number(get('month')) - 1] ?? get('month');
+  return `${get('day')}-${month}-${get('year')}`;
+}
+
 /** 14:30. `h23` rather than hour12:false, which yields "24:00" at midnight on some engines. */
 export function formatTime(value: string | Date | null | undefined): string {
   const date = toDate(value);
