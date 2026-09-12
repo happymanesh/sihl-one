@@ -1366,6 +1366,21 @@ model Attendee {
 
   role AttendeeRole @default(SUPPORT)
 
+  /// When the owner confirmed this person actually came.
+  ///
+  /// Null means "expected but not yet confirmed". The original design put
+  /// planned attendees on the task and actual ones on the visit, which keeps
+  /// the two facts apart — but reps plan through "Plan a visit", which creates
+  /// a Visit and no task, so following that literally would have forced a task
+  /// to exist just to name a colleague.
+  ///
+  /// One nullable timestamp keeps both facts on one row instead: added when the
+  /// visit was planned, stamped at check-out. The gap between the two is still
+  /// answerable — "we meant to bring a product expert and nobody came" is a
+  /// row with a role and no confirmation — which was the whole point of
+  /// separating them.
+  confirmedAt DateTime?
+
   addedById String?
   addedAt   DateTime @default(now())
 

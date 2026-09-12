@@ -28,14 +28,18 @@ export function PlanVisitForm({
   meetingModes,
   presetEntityType,
   presetEntityId,
+  colleagues = [],
 }: {
   leads: Option[];
   customers: Option[];
   meetingModes: MeetingModeItem[];
   presetEntityType?: string;
   presetEntityId?: string;
+  /** People the rep may bring, from `/users/assignable`. */
+  colleagues?: Array<{ id: string; fullName: string; employeeCode?: string | null }>;
 }) {
   const [state, action] = useActionState(planVisit, INITIAL);
+  const [bringing, setBringing] = useState<string[]>([]);
   const [entityType, setEntityType] = useState(presetEntityType ?? 'LEAD');
   const [mode, setMode] = useState(DEFAULT_VISIT_MODE);
 
@@ -168,6 +172,44 @@ export function PlanVisitForm({
           Leave blank for an unscheduled visit — it still shows on today’s plan.
         </p>
       </div>
+
+      {colleagues.length > 0 ? (
+        <div>
+          <label className="label" htmlFor="attendees">
+            Bringing anyone?{' '}
+            <span className="font-normal text-[var(--color-text-subtle)]">Optional</span>
+          </label>
+          <select
+            id="attendees"
+            multiple
+            value={bringing}
+            onChange={(event) =>
+              setBringing(Array.from(event.target.selectedOptions, (option) => option.value))
+            }
+            className="input min-h-[5.5rem]"
+          >
+            {colleagues.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.fullName}
+                {person.employeeCode ? ` · ${person.employeeCode}` : ''}
+              </option>
+            ))}
+          </select>
+          {/*
+            Posted as repeated hidden fields, which the action reads with
+            getAll. A multiple <select> does not post reliably across mobile
+            browsers, and this form is filled in between meetings.
+          */}
+          {bringing.map((id) => (
+            <input key={id} type="hidden" name="attendees" value={id} />
+          ))}
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+            {bringing.length === 0
+              ? 'The visit stays yours either way — this only records who supported it.'
+              : `${bringing.length} colleague${bringing.length === 1 ? '' : 's'} joining. You can change this later.`}
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex gap-2 border-t border-[var(--color-border)] pt-4">
         <SubmitButton />

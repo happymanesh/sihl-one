@@ -67,6 +67,17 @@ export interface OwnerReportRow {
   conversionRate: number | null;
   activities: number;
   visits: number;
+  /**
+   * Visits somebody else owned, that this person went along to and was
+   * confirmed present at.
+   *
+   * Counted separately from `visits` and never added to it: credit for a visit
+   * stays with its owner, so rolling support into the same column would let two
+   * people bank one meeting. It answers a different question — who is being
+   * pulled into other people's deals, and whether the product experts are
+   * spread too thin.
+   */
+  joinedOthers: number;
   overdueFollowUps: number;
   /** Rep-entered estimate, never a booked figure. Decimal string. */
   pipelineValue: string;

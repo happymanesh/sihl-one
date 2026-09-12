@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import type { Route } from 'next';
 
+import type { AttendeeView } from '@sihl-one/contracts';
+
 import { Badge } from '@/components/ui/Badge';
 import { CheckInPanel, CheckOutPanel } from '@/components/visits/CheckInPanel';
+import { AttendeePanel } from '@/components/visits/AttendeePanel';
 import { ReschedulePanel } from '@/components/visits/ReschedulePanel';
 import { apiFetch } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
@@ -12,6 +15,7 @@ interface VisitDetail {
   id: string;
   reference: string;
   status: string;
+  attendees: AttendeeView[];
   purpose: string;
   mode: string;
   modeLabel: string | null;
@@ -61,6 +65,14 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
   const { id } = await params;
 
   const visit = await apiFetch<VisitDetail>(`/visits/${id}`);
+  // Only fetched for a visit that can still change; a finished one shows its
+  // attendee list read-only and has nobody left to add.
+  const colleagues =
+    visit.status === 'COMPLETED' || visit.status === 'CANCELLED'
+      ? []
+      : await apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
+          '/users/assignable',
+        ).catch(() => []);
   // Only the person making the visit may act on it — a check-in asserts that a
   // specific person was somewhere, so nobody can record it on their behalf.
   const isOwner = visit.user?.id === user.id;
@@ -146,6 +158,13 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
           </p>
         </section>
       ) : null}
+
+      <AttendeePanel
+        visitId={visit.id}
+        status={visit.status}
+        attendees={visit.attendees ?? []}
+        colleagues={colleagues}
+      />
 
       {visit.status === 'PLANNED' && isOwner ? (
         <section className="card p-5">

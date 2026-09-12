@@ -5,6 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  canAddAttendee,
+  canConfirmAttendance,
+  type AddAttendeeInput,
+  type ConfirmAttendanceInput,
+  type AttendeeRole,
   assessVisitIntegrity,
   canRescheduleVisit,
   canTransitionVisit,
@@ -96,6 +101,34 @@ export class VisitsService {
       },
     });
 
+    // Colleagues named while arranging the meeting. Silently skipping the
+    // owner and any duplicate rather than refusing the whole visit: the visit
+    // is the thing that matters, and losing it because somebody picked
+    // themselves from a list would be a poor trade.
+    const wanted = (input.attendees ?? []).filter((row) => row.userId !== user.id);
+    if (wanted.length > 0) {
+      const colleagues = await this.prisma.user.findMany({
+        where: {
+          id: { in: [...new Set(wanted.map((row) => row.userId))] },
+          deletedAt: null,
+          userType: 'INTERNAL',
+        },
+        select: { id: true },
+      });
+      const real = new Set(colleagues.map((row) => row.id));
+      await this.prisma.attendee.createMany({
+        data: wanted
+          .filter((row) => real.has(row.userId))
+          .map((row) => ({
+            visitId: visit.id,
+            userId: row.userId,
+            role: row.role,
+            addedById: user.id,
+          })),
+        skipDuplicates: true,
+      });
+    }
+
     await this.audit.record({
       action: 'CREATE',
       resource: 'visit',
@@ -105,6 +138,7 @@ export class VisitsService {
         entityType: input.entityType,
         entityId: input.entityId,
         mode: mode.code,
+        attendees: wanted.length,
       },
     });
 
@@ -210,6 +244,55 @@ export class VisitsService {
    * the meeting on to the parent record's timeline so the visit is part of the
    * relationship history rather than a separate silo.
    */
+  /**
+   * Record who actually came, at check-out.
+   *
+   * Everyone on the visit who is not named as present is left unconfirmed
+   * rather than deleted. "We meant to bring a product expert and nobody came"
+   * is a fact worth keeping — it is the signal that tells a manager there are
+   * not enough experts to go round, and deleting the row would erase the
+   * question along with the answer.
+   */
+  async confirmAttendance(
+    user: AuthenticatedPrincipal,
+    visitId: string,
+    input: ConfirmAttendanceInput,
+  ) {
+    const visit = await this.prisma.visit.findFirst({
+      where: { id: visitId, AND: [this.scope.visitScope(user)] },
+      select: { id: true, status: true },
+    });
+    if (!visit) throw new NotFoundException({ title: 'Visit not found' });
+
+    if (!canConfirmAttendance(visit.status)) {
+      throw new BadRequestException({
+        title: 'Not checked in',
+        detail: 'Attendance is confirmed when the visit is checked out.',
+      });
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.attendee.updateMany({
+        where: { visitId, userId: { in: input.presentUserIds } },
+        data: { confirmedAt: now },
+      }),
+      this.prisma.attendee.updateMany({
+        where: { visitId, userId: { notIn: input.presentUserIds } },
+        data: { confirmedAt: null },
+      }),
+    ]);
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'visit.attendee',
+      resourceId: visitId,
+      changes: { confirmedPresent: input.presentUserIds.length },
+    });
+
+    return this.findOne(user, visitId);
+  }
+
   async checkOut(user: AuthenticatedPrincipal, visitId: string, input: CheckOutInput) {
     const visit = await this.mustFindOwn(user, visitId);
 
@@ -510,11 +593,103 @@ export class VisitsService {
     return paginate(items, total, query.page, query.pageSize);
   }
 
+  /**
+   * Add a colleague to a visit.
+   *
+   * Any rep may add any colleague without a manager's approval — the explicit
+   * product decision. Requiring sign-off to bring a product expert to a meeting
+   * tomorrow morning is how a feature like this goes unused, and the cost of
+   * getting it wrong is a name on a visit, not access to anybody's book.
+   *
+   * Scoped, not owner-only. A manager arranging cover for a rep who is ill
+   * should not have to sign in as them. The owner-only rule exists for check-in,
+   * where the claim is that a specific person was physically somewhere.
+   */
+  async addAttendee(user: AuthenticatedPrincipal, visitId: string, input: AddAttendeeInput) {
+    const visit = await this.prisma.visit.findFirst({
+      where: { id: visitId, AND: [this.scope.visitScope(user)] },
+      include: { attendees: { select: { userId: true } } },
+    });
+    if (!visit) throw new NotFoundException({ title: 'Visit not found' });
+
+    const decision = canAddAttendee({
+      visitStatus: visit.status,
+      ownerId: visit.userId,
+      candidateUserId: input.userId,
+      existingUserIds: visit.attendees.map((row) => row.userId),
+    });
+    if (!decision.allowed) {
+      throw new BadRequestException({
+        title: 'Cannot add them to this visit',
+        detail: decision.reason ?? 'That person cannot be added.',
+      });
+    }
+
+    const colleague = await this.prisma.user.findFirst({
+      where: { id: input.userId, deletedAt: null, userType: 'INTERNAL' },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    if (!colleague) throw new NotFoundException({ title: 'No such colleague' });
+
+    await this.prisma.attendee.create({
+      data: {
+        visitId,
+        userId: colleague.id,
+        role: input.role,
+        addedById: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'visit.attendee',
+      resourceId: visitId,
+      changes: { added: `${colleague.firstName} ${colleague.lastName}`.trim(), role: input.role },
+    });
+
+    return this.findOne(user, visitId);
+  }
+
+  async removeAttendee(user: AuthenticatedPrincipal, visitId: string, attendeeId: string) {
+    const attendee = await this.prisma.attendee.findFirst({
+      where: { id: attendeeId, visitId, visit: { AND: [this.scope.visitScope(user)] } },
+      include: { user: { select: { firstName: true, lastName: true } }, visit: { select: { status: true } } },
+    });
+    if (!attendee) throw new NotFoundException({ title: 'Not on this visit' });
+
+    // Same reasoning as adding: once the visit is closed its attendee list is
+    // part of what happened, not a plan to be edited.
+    if (attendee.visit?.status === 'COMPLETED' || attendee.visit?.status === 'CANCELLED') {
+      throw new BadRequestException({
+        title: 'This visit is closed',
+        detail: 'Who attended is part of the record once the visit has ended.',
+      });
+    }
+
+    await this.prisma.attendee.delete({ where: { id: attendeeId } });
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'visit.attendee',
+      resourceId: visitId,
+      changes: {
+        removed: `${attendee.user.firstName} ${attendee.user.lastName}`.trim(),
+      },
+    });
+
+    return this.findOne(user, visitId);
+  }
+
   async findOne(user: AuthenticatedPrincipal, visitId: string, knownEntityName?: string | null) {
     const visit = await this.prisma.visit.findFirst({
       where: { id: visitId, AND: [this.scope.visitScope(user)] },
       include: {
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        attendees: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+          },
+          orderBy: { addedAt: 'asc' },
+        },
         modeMaster: {
           select: {
             code: true,
@@ -563,6 +738,15 @@ export class VisitsService {
       id: visit.id,
       reference: visit.reference,
       status: visit.status,
+      attendees: visit.attendees.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        fullName: `${row.user.firstName} ${row.user.lastName}`.trim(),
+        employeeCode: row.user.employeeCode,
+        role: row.role as AttendeeRole,
+        confirmedAt: row.confirmedAt?.toISOString() ?? null,
+        addedAt: row.addedAt.toISOString(),
+      })),
       purpose: visit.purpose,
       mode: visit.mode ?? DEFAULT_VISIT_MODE,
       modeLabel: visit.modeMaster?.label ?? null,

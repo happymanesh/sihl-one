@@ -16,6 +16,7 @@ export * from './customer';
 export * from './activity';
 export * from './geo';
 export * from './visit';
+export * from './attendee';
 export * from './document';
 export * from './partner';
 export * from './matching';

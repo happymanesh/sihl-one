@@ -55,6 +55,7 @@ export class WorkbookService {
         { header: 'Conversion %', key: 'conversionRate', width: 14 },
         { header: 'Activities', key: 'activities', width: 12 },
         { header: 'Visits', key: 'visits', width: 9 },
+        { header: 'Joined others', key: 'joinedOthers', width: 14 },
         { header: 'Overdue follow-ups', key: 'overdueFollowUps', width: 19 },
         { header: 'Pipeline (est.)', key: 'pipelineValue', width: 17, money: true },
       ],
