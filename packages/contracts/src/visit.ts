@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { VISIT_STATUSES } from './enums';
 import { ENTITY_TYPES } from './activity';
+import { ATTENDEE_ROLES } from './attendee';
 import { idSchema, paginationQuerySchema } from './common';
 
 /**
@@ -42,6 +43,18 @@ export const planVisitSchema = z.object({
   entityId: idSchema,
   purpose: z.string().trim().min(3, 'Say what the visit is for').max(200),
   plannedAt: z.coerce.date().optional(),
+  /**
+   * Colleagues the owner intends to bring — a product expert for a derivatives
+   * pitch, a manager for a large account. Named here rather than added
+   * afterwards because the decision is made while arranging the meeting, and a
+   * second step on another screen is a step that does not get taken.
+   *
+   * Capped at ten: beyond that it is not a client visit, it is a seminar.
+   */
+  attendees: z
+    .array(z.object({ userId: idSchema, role: z.enum(ATTENDEE_ROLES).default('SUPPORT') }))
+    .max(10)
+    .optional(),
   /**
    * Optional for older callers, which planned physical visits because that was
    * the only kind. Defaulting keeps their meaning rather than inventing a new

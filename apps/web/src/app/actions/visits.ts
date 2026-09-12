@@ -59,7 +59,11 @@ export async function planVisit(
     // and take the default away from callers that never had the field.
     mode: formData.get('mode') || undefined,
     plannedAt: plannedAt ? new Date(String(plannedAt)) : undefined,
-  });
+    // Repeated fields from the multi-select. Role is not asked for at plan time:
+  // one decision on a form a rep fills in between meetings is enough, and it
+  // can be corrected on the visit itself.
+  attendees: formData.getAll('attendees').map((id) => ({ userId: String(id), role: 'SUPPORT' as const })),
+});
 
   if (!parsed.success) {
     return {
@@ -225,4 +229,76 @@ export async function rescheduleVisit(
   revalidatePath('/visits');
   revalidatePath(`/visits/${visitId}`);
   return { status: 'success', message: 'Visit moved.' };
+}
+
+/**
+ * Add a colleague to a visit.
+ *
+ * No manager approval: a rep arranging a meeting for tomorrow morning decides
+ * who to bring. Credit for the visit stays with its owner — this records who
+ * supported, which is a different question and deliberately not a divisible one.
+ */
+export async function addVisitAttendee(
+  _previous: VisitActionState,
+  formData: FormData,
+): Promise<VisitActionState> {
+  const visitId = String(formData.get('visitId'));
+  const userId = String(formData.get('userId') ?? '');
+  if (!userId) return { status: 'error', message: 'Pick a colleague first.' };
+
+  try {
+    await apiFetch(`/visits/${visitId}/attendees`, {
+      method: 'POST',
+      body: { userId, role: String(formData.get('role') || 'SUPPORT') },
+    });
+  } catch (error) {
+    return toErrorState(error, 'They could not be added to this visit.');
+  }
+
+  revalidatePath(`/visits/${visitId}`);
+  return { status: 'success', message: 'Added.' };
+}
+
+export async function removeVisitAttendee(
+  _previous: VisitActionState,
+  formData: FormData,
+): Promise<VisitActionState> {
+  const visitId = String(formData.get('visitId'));
+  const attendeeId = String(formData.get('attendeeId'));
+
+  try {
+    await apiFetch(`/visits/${visitId}/attendees/${attendeeId}`, { method: 'DELETE' });
+  } catch (error) {
+    return toErrorState(error, 'They could not be removed.');
+  }
+
+  revalidatePath(`/visits/${visitId}`);
+  return { status: 'success', message: 'Removed.' };
+}
+
+/**
+ * Record who actually came, at check-out.
+ *
+ * Anyone expected but not ticked stays on the record as unconfirmed rather than
+ * being deleted: "we meant to bring a product expert and nobody came" is the
+ * signal that tells a manager the experts are spread too thin.
+ */
+export async function confirmVisitAttendance(
+  _previous: VisitActionState,
+  formData: FormData,
+): Promise<VisitActionState> {
+  const visitId = String(formData.get('visitId'));
+  const presentUserIds = formData.getAll('presentUserIds').map(String).filter(Boolean);
+
+  try {
+    await apiFetch(`/visits/${visitId}/attendees/confirm`, {
+      method: 'POST',
+      body: { presentUserIds },
+    });
+  } catch (error) {
+    return toErrorState(error, 'Attendance could not be recorded.');
+  }
+
+  revalidatePath(`/visits/${visitId}`);
+  return { status: 'success', message: 'Attendance recorded.' };
 }

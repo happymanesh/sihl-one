@@ -186,6 +186,7 @@ export class ReportsService {
 
     const activityByOwner = await this.activityCountsByOwner(user, from, to);
     const visitByOwner = await this.visitCountsByOwner(user, from, to);
+    const joinedByOwner = await this.joinedCountsByOwner(user, from, to);
 
     const count = (rows: Array<{ ownerId: string | null; _count: number }>, id: string | null) =>
       rows.find((r) => r.ownerId === id)?._count ?? 0;
@@ -210,6 +211,7 @@ export class ReportsService {
           conversionRate: rate(convertedCount, assignedCount),
           activities: id ? (activityByOwner.get(id) ?? 0) : 0,
           visits: id ? (visitByOwner.get(id) ?? 0) : 0,
+          joinedOthers: id ? (joinedByOwner.get(id) ?? 0) : 0,
           overdueFollowUps: count(overdue, id),
           pipelineValue: (
             value.find((r) => r.ownerId === id)?._sum.estimatedValue ?? 0
@@ -407,6 +409,38 @@ export class ReportsService {
       _count: true,
     });
     return new Map(rows.filter((r) => r.actorId).map((r) => [r.actorId as string, r._count]));
+  }
+
+  /**
+   * Visits somebody else owned that this person was confirmed present at.
+   *
+   * Only confirmed attendance counts. Somebody added to a plan who did not turn
+   * up has not supported anything, and counting the intention would make the
+   * column reward being invited rather than going.
+   *
+   * The visit's own owner is excluded, so a manager reading the row cannot
+   * mistake support for ownership — credit is not divisible, and these two
+   * columns must never be summed.
+   */
+  private async joinedCountsByOwner(
+    user: AuthenticatedPrincipal,
+    from: Date,
+    to: Date,
+  ): Promise<Map<string, number>> {
+    const leadIds = await this.leadIdsInScope(user);
+    const rows = await this.prisma.attendee.groupBy({
+      by: ['userId'],
+      where: {
+        confirmedAt: { not: null },
+        visit: {
+          entityType: 'LEAD',
+          entityId: { in: leadIds },
+          checkInAt: { gte: from, lte: to },
+        },
+      },
+      _count: true,
+    });
+    return new Map(rows.map((row) => [row.userId, row._count]));
   }
 
   private async visitCountsByOwner(

@@ -1,7 +1,11 @@
-import { Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
+  addAttendeeSchema,
+  confirmAttendanceSchema,
+  type AddAttendeeInput,
+  type ConfirmAttendanceInput,
   createVisitExpenseSchema,
   type CreateVisitExpenseInput,  cancelVisitSchema,
   rescheduleVisitSchema,
@@ -119,6 +123,51 @@ export class VisitsController {
     @ZodBody(checkOutSchema) body: CheckOutInput,
   ) {
     return this.visits.checkOut(user, id, body);
+  }
+
+  @Post(':id/attendees')
+  @RequirePermissions('visit:update')
+  @ApiOperation({
+    summary: 'Add a colleague to this visit',
+    description:
+      'A rep may bring a colleague without a manager’s approval. Credit for the visit ' +
+      'stays with its owner; this records who supported.',
+  })
+  @ApiZodBody(addAttendeeSchema)
+  addAttendee(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(addAttendeeSchema) body: AddAttendeeInput,
+  ) {
+    return this.visits.addAttendee(user, id, body);
+  }
+
+  @Delete(':id/attendees/:attendeeId')
+  @RequirePermissions('visit:update')
+  @ApiOperation({ summary: 'Remove a colleague from a visit that has not ended' })
+  removeAttendee(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @Param('attendeeId', IdParamPipe) attendeeId: string,
+  ) {
+    return this.visits.removeAttendee(user, id, attendeeId);
+  }
+
+  @Post(':id/attendees/confirm')
+  @RequirePermissions('visit:update')
+  @ApiOperation({
+    summary: 'Record who actually came',
+    description:
+      'Submitted at check-out. Anyone expected but not named is left unconfirmed rather ' +
+      'than deleted — "we meant to bring an expert and nobody came" is the signal.',
+  })
+  @ApiZodBody(confirmAttendanceSchema)
+  confirmAttendance(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(confirmAttendanceSchema) body: ConfirmAttendanceInput,
+  ) {
+    return this.visits.confirmAttendance(user, id, body);
   }
 
   @Post(':id/cancel')

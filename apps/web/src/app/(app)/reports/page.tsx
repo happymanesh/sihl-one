@@ -177,6 +177,7 @@ export default async function ReportsPage({
           'Conversion',
           'Activities',
           'Visits',
+          'Joined',
           'Overdue',
           'Pipeline',
         ]}
@@ -197,6 +198,9 @@ export default async function ReportsPage({
           <Rate key="r" value={row.conversionRate} />,
           formatNumber(row.activities),
           formatNumber(row.visits),
+          // Support on somebody else's visit, never added to their own count —
+          // credit for a visit stays with its owner.
+          formatNumber(row.joinedOthers),
           row.overdueFollowUps > 0 ? (
             <span key="o" className="font-semibold text-warn-600 dark:text-warn-400">
               {formatNumber(row.overdueFollowUps)}

@@ -24,7 +24,7 @@ export default async function PlanVisitPage({
 
   // Only the records the caller can actually visit are offered. Pulling the
   // whole book and filtering in the browser would both leak names and be slow.
-  const [leads, customers, meetingModes] = await Promise.all([
+  const [leads, customers, meetingModes, colleagues] = await Promise.all([
     apiFetch<{ items: LeadListItem[] }>(
       // Every open stage, NEW included.
       //
@@ -42,6 +42,9 @@ export default async function PlanVisitPage({
     // An empty list hides the selector rather than blocking the form: planning
     // a visit must not fail because a master could not be read.
     apiFetch<MeetingModeItem[]>('/masters/meeting-modes').catch(() => [] as MeetingModeItem[]),
+    apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
+      '/users/assignable',
+    ).catch(() => []),
   ]);
 
   return (
@@ -65,6 +68,7 @@ export default async function PlanVisitPage({
 
       <div className="card p-5">
         <PlanVisitForm
+          colleagues={colleagues}
           meetingModes={meetingModes}
           leads={leads.items.map((lead) => ({
             id: lead.id,
