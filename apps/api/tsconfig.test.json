@@ -1,0 +1,19 @@
+{
+  // The tests, typechecked.
+  //
+  // The main tsconfig compiles `src` only, and the suites run under tsx, which
+  // strips types without checking them — so until this existed a test could
+  // assert against a field that no longer exists and still go green by never
+  // reaching the assertion. That matters most for the authorisation suites,
+  // whose entire job is to fail when something is wrong.
+  //
+  // Separate rather than folded into the main config because `rootDir` is
+  // `src`: including the tests there would put them in the build output.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["test/**/*.ts", "src/**/*.ts"]
+}
