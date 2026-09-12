@@ -2,8 +2,10 @@ import { Controller, Get, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
+  activityDetailQuerySchema,
   dailyActivityQuerySchema,
   reportRangeSchema,
+  type ActivityDetailQuery,
   type DailyActivityQuery,
   type ReportRange,
 } from '@sihl-one/contracts';
@@ -66,6 +68,20 @@ export class ReportsController {
     @Query(new ZodValidationPipe(dailyActivityQuerySchema)) query: DailyActivityQuery,
   ) {
     return this.dailyActivity.report(user, query);
+  }
+
+  @Get('daily/detail')
+  @RequirePermissions('analytics:sales:read')
+  @ApiOperation({
+    summary: 'The records behind one number on the daily report',
+    description:
+      'Scope is re-checked here, not inherited from the report that linked to it.',
+  })
+  dailyDetail(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query(new ZodValidationPipe(activityDetailQuerySchema)) query: ActivityDetailQuery,
+  ) {
+    return this.dailyActivity.detail(user, query);
   }
 
   @Get('by-owner')

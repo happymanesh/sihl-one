@@ -54,6 +54,7 @@ import { CaptureCodeService } from '../events/capture-code.service';
 import { MastersService } from '../masters/masters.service';
 import { AllocationService } from '../performance/allocation.service';
 import {
+  LEAD_LIST_SELECT,
   buildScoringFeatures,
   decimalToString,
   rescore,
@@ -61,30 +62,8 @@ import {
   type LeadRow,
 } from './lead.mapper';
 
-const LIST_SELECT = {
-  id: true,
-  reference: true,
-  firstName: true,
-  lastName: true,
-  mobile: true,
-  email: true,
-  pan: true,
-  city: true,
-  status: true,
-  source: true,
-  priority: true,
-  productInterest: true,
-  score: true,
-  estimatedValue: true,
-  nextFollowUpAt: true,
-  lastActivityAt: true,
-  mobileVerifiedAt: true,
-  mobileVerificationMethod: true,
-  createdAt: true,
-  campaignId: true,
-  owner: { select: { id: true, firstName: true, lastName: true } },
-  partner: { select: { id: true, name: true } },
-} as const;
+/** The leads-list columns, defined beside the mapper that consumes them. */
+const LIST_SELECT = LEAD_LIST_SELECT;
 
 const SORTABLE_COLUMNS = new Set([
   'createdAt',

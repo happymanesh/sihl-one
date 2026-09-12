@@ -7,6 +7,39 @@ import {
   type ScoringFeatures,
 } from '@sihl-one/contracts';
 
+/**
+ * The columns `toLeadListItem` needs, as a Prisma select.
+ *
+ * Lives beside the mapper rather than in the service, because more than one
+ * place now produces a leads list — the Leads screen and the daily report's
+ * drill-down — and a select that drifts from its mapper fails at runtime with
+ * a missing field rather than at compile time.
+ */
+export const LEAD_LIST_SELECT = {
+  id: true,
+  reference: true,
+  firstName: true,
+  lastName: true,
+  mobile: true,
+  email: true,
+  pan: true,
+  city: true,
+  status: true,
+  source: true,
+  priority: true,
+  productInterest: true,
+  score: true,
+  estimatedValue: true,
+  nextFollowUpAt: true,
+  lastActivityAt: true,
+  mobileVerifiedAt: true,
+  mobileVerificationMethod: true,
+  createdAt: true,
+  campaignId: true,
+  owner: { select: { id: true, firstName: true, lastName: true } },
+  partner: { select: { id: true, name: true } },
+} as const;
+
 /** Shape the mapper needs; a structural subset of the Prisma Lead row. */
 export interface LeadRow {
   id: string;
