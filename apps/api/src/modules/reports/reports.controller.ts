@@ -1,13 +1,19 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { reportRangeSchema, type ReportRange } from '@sihl-one/contracts';
+import {
+  dailyActivityQuerySchema,
+  reportRangeSchema,
+  type DailyActivityQuery,
+  type ReportRange,
+} from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
 import { CurrentUser, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ZodValidationPipe } from '../../common/zod';
 import { ReportsService } from './reports.service';
+import { DailyActivityService } from './daily-activity.service';
 import { WorkbookService } from './workbook.service';
 
 /**
@@ -25,6 +31,7 @@ export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly workbook: WorkbookService,
+    private readonly dailyActivity: DailyActivityService,
     private readonly audit: AuditService,
   ) {}
 
@@ -43,6 +50,22 @@ export class ReportsController {
     @Query(new ZodValidationPipe(reportRangeSchema)) range: ReportRange,
   ) {
     return this.reports.full(user, range);
+  }
+
+  @Get('daily')
+  @RequirePermissions('analytics:sales:read')
+  @ApiQuery({ name: 'date', required: false, description: 'YYYY-MM-DD in IST. Defaults to yesterday.' })
+  @ApiOperation({
+    summary: 'What each person did on one day',
+    description:
+      'One row per person in the caller’s scope, including everyone with nothing ' +
+      'recorded — the empty rows are the point. Grouped by branch with subtotals.',
+  })
+  daily(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query(new ZodValidationPipe(dailyActivityQuerySchema)) query: DailyActivityQuery,
+  ) {
+    return this.dailyActivity.report(user, query);
   }
 
   @Get('by-owner')

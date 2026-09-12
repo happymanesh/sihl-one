@@ -1316,7 +1316,7 @@ export class LeadsService {
       // Roll the lead up from its products, then stamp the conversion dates only
       // if that actually made it converted. A lead still working two other
       // products has not converted, however much of a milestone this was.
-      await this.rollUpLead(tx, id);
+      await this.rollUpLead(tx, id, user.id);
 
       const rolled = await tx.lead.findUniqueOrThrow({
         where: { id },
@@ -1984,7 +1984,7 @@ export class LeadsService {
       });
     }
 
-    await this.rollUpLead(tx, leadId);
+    await this.rollUpLead(tx, leadId, actorId ?? undefined);
   }
 
   /**
@@ -2036,7 +2036,20 @@ export class LeadsService {
    * The rule itself lives in the contracts so both apps agree on what a lead
    * with one converted and two open products actually is.
    */
-  private async rollUpLead(tx: Prisma.TransactionClient, leadId: string): Promise<void> {
+  private async rollUpLead(
+    tx: Prisma.TransactionClient,
+    leadId: string,
+    /**
+     * Who caused the roll-up.
+     *
+     * Every other write to `lead_status_history` records an actor; this one did
+     * not, so a lead that converted because its last open product was marked
+     * won was attributed to nobody. That is the one path a daily activity
+     * report most needs to see — the rep did the work, and the row credited
+     * no one.
+     */
+    actorId?: string,
+  ): Promise<void> {
     const rows = await tx.leadProduct.findMany({
       where: { leadId },
       select: { status: true, lostReason: true, closedAt: true },
@@ -2106,6 +2119,7 @@ export class LeadsService {
         fromStatus: lead.status,
         toStatus: rolled,
         note: 'Rolled up from product outcomes',
+        changedById: actorId ?? null,
       },
     });
   }
@@ -2176,7 +2190,7 @@ export class LeadsService {
         },
       });
 
-      await this.rollUpLead(tx, id);
+      await this.rollUpLead(tx, id, user.id);
     });
 
     await this.audit.record({
@@ -2295,7 +2309,7 @@ export class LeadsService {
       });
       if (linked.customerId) await this.mirrorConvertedProducts(tx, linked.customerId, id);
 
-      await this.rollUpLead(tx, id);
+      await this.rollUpLead(tx, id, user.id);
 
       const rolled = await tx.lead.findUniqueOrThrow({ where: { id }, select: { status: true } });
       if (rolled.status === 'CONVERTED') {
