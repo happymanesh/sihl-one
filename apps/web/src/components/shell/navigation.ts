@@ -55,6 +55,9 @@ export const NAV_ITEMS: NavItem[] = [
   // Same permission as the dashboard, because the separation here is by data
   // scope rather than by rank: a rep opens this and sees one row — their own.
   { label: 'Reports', href: '/reports' as Route, icon: 'file', permissions: ['analytics:sales:read'], section: 'work' },
+  // Sits beside the period report rather than inside it: they answer different
+  // questions. That one judges a month, this one asks who needs help today.
+  { label: 'Daily activity', href: '/reports/daily' as Route, icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
 
   {
     // The partner's own portal. Gated on the partner analytics permission,
