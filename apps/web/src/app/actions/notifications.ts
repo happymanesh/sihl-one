@@ -28,6 +28,25 @@ export async function fetchNotifications(): Promise<NotificationView[]> {
   }
 }
 
+/**
+ * Just the badge number, for the bell to poll on.
+ *
+ * Deliberately separate from `fetchNotifications`: this runs on a timer for
+ * every signed-in user, so it has to stay the cheapest call in the app. Pulling
+ * twenty rows to render one integer would multiply that cost by twenty for a
+ * number nobody has clicked on.
+ */
+export async function fetchUnreadCount(): Promise<number | null> {
+  try {
+    const result = await apiFetch<{ unread: number }>('/notifications/unread-count');
+    return result.unread;
+  } catch {
+    // Null rather than 0: a failed poll must not silently clear a badge that
+    // is genuinely showing unread work. The bell keeps what it had.
+    return null;
+  }
+}
+
 export async function markNotificationsRead(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   try {

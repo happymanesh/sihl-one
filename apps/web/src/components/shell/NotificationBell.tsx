@@ -7,6 +7,7 @@ import type { NotificationView } from '@sihl-one/contracts';
 
 import {
   fetchNotifications,
+  fetchUnreadCount,
   markAllNotificationsRead,
   markNotificationsRead,
 } from '@/app/actions/notifications';
@@ -16,9 +17,13 @@ import { Icon } from './Icon';
 /**
  * The bell.
  *
- * The unread count arrives as a prop from the layout, so it is correct on every
- * navigation without this component polling. Rows are fetched when the panel
- * opens, because until then nobody needs them.
+ * The unread count arrives as a prop from the layout, which makes it right on
+ * every navigation — and wrong in between, which is most of the time. The bell
+ * polls for itself while the tab is visible and asks again the moment it
+ * regains focus, so something assigned to you reaches you without a reload.
+ *
+ * Rows are still fetched only when the panel opens, because until then nobody
+ * needs them.
  *
  * **Opening the panel does not mark everything read.** That is the common
  * default and it destroys the thing the bell is for: you glance at it, the
@@ -34,8 +39,71 @@ export function NotificationBell({ unread }: { unread: number }) {
 
   // Optimistic, so the badge responds to a click rather than waiting for the
   // layout to re-render. The server value wins again on the next navigation.
-  const [readLocally, setReadLocally] = useState<Set<string>>(new Set());
-  const badge = Math.max(0, unread - readLocally.size);
+  const [readLocally, setReadLocally] = useState<{ base: number; ids: Set<string> }>({
+    base: unread,
+    ids: new Set(),
+  });
+
+  /*
+    The count the layout handed us is only right until something happens.
+
+    A lead assigned to somebody while they sit on one screen did not reach them
+    until they navigated or reloaded — which, for a rep working a single lead
+    for twenty minutes, meant the notification may as well not have been sent.
+    So the bell now asks for itself.
+
+    Polling rather than a socket: one integer a minute per signed-in user is
+    nothing, and a socket needs infrastructure, reconnection handling and a
+    sticky session to earn its keep at this size.
+  */
+  const [live, setLive] = useState<{ base: number; count: number } | null>(null);
+
+  /*
+    Both the polled count and the optimistic read marks are stamped with the
+    server number they were derived from, and ignored once that number changes.
+
+    Deriving it this way rather than clearing them in an effect keyed on
+    `unread` matters: resetting state from an effect runs a second render pass
+    every navigation, and it is the pattern `react-hooks/set-state-in-effect`
+    exists to catch. A fresh server render simply supersedes anything stale.
+  */
+  const source = live && live.base === unread ? live.count : unread;
+  const readAgainst = readLocally.base === unread ? readLocally.ids.size : 0;
+  const badge = Math.max(0, source - readAgainst);
+
+  /*
+    Poll while the tab is visible, and once more the moment it becomes visible.
+
+    The visibility check is the part that matters in practice: a rep leaves the
+    tab open all day, and a background tab that keeps polling every minute is
+    hundreds of pointless requests per person per day. Browsers also throttle
+    timers in hidden tabs, so the interval alone would be both wasteful and
+    unreliable — asking on focus is what makes it feel immediate.
+  */
+  useEffect(() => {
+    let cancelled = false;
+
+    const check = () => {
+      if (document.visibilityState !== 'visible') return;
+      void fetchUnreadCount().then((count) => {
+        if (!cancelled && count !== null) setLive({ base: unread, count });
+      });
+    };
+
+    const timer = setInterval(check, 60_000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('focus', check);
+    };
+    // Depends on `unread` because the stamp written above must be the current
+    // server number. With an empty dependency list the closure keeps the value
+    // from first render, every later stamp misses, and no polled count is ever
+    // believed again after the first navigation.
+  }, [unread]);
 
   useEffect(() => {
     if (!open) return;
@@ -72,14 +140,20 @@ export function NotificationBell({ unread }: { unread: number }) {
   }, [open]);
 
   const readOne = (id: string) => {
-    if (readLocally.has(id)) return;
-    setReadLocally((prev) => new Set(prev).add(id));
+    if (readLocally.base === unread && readLocally.ids.has(id)) return;
+    setReadLocally((prev) => ({
+      base: unread,
+      ids: new Set(prev.base === unread ? prev.ids : []).add(id),
+    }));
     startTransition(() => void markNotificationsRead([id]));
   };
 
   const readAll = () => {
     const unreadIds = (items ?? []).filter((n) => !n.readAt).map((n) => n.id);
-    setReadLocally((prev) => new Set([...prev, ...unreadIds]));
+    setReadLocally((prev) => ({
+      base: unread,
+      ids: new Set([...(prev.base === unread ? prev.ids : []), ...unreadIds]),
+    }));
     setItems((prev) =>
       prev ? prev.map((n) => (n.readAt ? n : { ...n, readAt: new Date().toISOString() })) : prev,
     );
@@ -149,7 +223,8 @@ export function NotificationBell({ unread }: { unread: number }) {
             ) : (
               items.map((n) => {
                 const target = href(n);
-                const isUnread = !n.readAt && !readLocally.has(n.id);
+                const isUnread =
+                  !n.readAt && !(readLocally.base === unread && readLocally.ids.has(n.id));
                 const inner = (
                   <>
                     <span className="flex items-start gap-2">
