@@ -36,12 +36,15 @@ export function LeadProductsPanel({
   const [editing, setEditing] = useState(false);
   const [picked, setPicked] = useState<string[]>(selected);
 
+  // Keyed on the whole state rather than `state.status`: two successful saves
+  // running leave that string unchanged, so the effect never fires the second
+  // time and the editor stays open. Same defect as the outcomes panel below it.
   useEffect(() => {
     if (state.status === 'success') {
       setEditing(false);
       router.refresh();
     }
-  }, [state.status, router]);
+  }, [state, router]);
 
   // Re-sync when the server sends a fresh list, so a cancel after fiddling
   // does not leave the checkboxes showing something that was never saved.

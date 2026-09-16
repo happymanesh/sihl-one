@@ -29,7 +29,7 @@ function SubmitButton() {
       disabled={pending}
       className="btn btn-primary h-9 px-3 text-sm disabled:opacity-60"
     >
-      {pending ? 'Updating…' : 'Update Product Status'}
+      {pending ? 'Updating…' : 'Update Product Lead Stage'}
     </button>
   );
 }
@@ -70,12 +70,21 @@ export function LeadProductOutcomes({
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState('');
 
+  /*
+    Keyed on the whole state, not `state.status`.
+
+    Two successful saves in a row leave that string identical, so React sees no
+    dependency change and never re-runs — the panel stayed open on every update
+    after the first. `useActionState` hands back a fresh object per submission,
+    so its identity is what actually means "something just came back", whether
+    or not the outcome reads the same as last time.
+  */
   useEffect(() => {
     if (state.status === 'success') {
       setEditing(null);
       router.refresh();
     }
-  }, [state.status, router]);
+  }, [state, router]);
 
   if (outcomes.length === 0) return null;
 
