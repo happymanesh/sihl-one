@@ -12,13 +12,13 @@ const montserrat = Montserrat({
 
 export const metadata: Metadata = {
   title: {
-    default: 'SIHL ONE',
-    template: '%s · SIHL ONE',
+    default: 'SIHL LMS',
+    template: '%s · SIHL LMS',
   },
   description:
     'The unified digital platform for Shah Investors Home Ltd. — marketing, CRM, onboarding, ' +
     'relationship management and partner journeys in one place.',
-  applicationName: 'SIHL ONE',
+  applicationName: 'SIHL LMS',
   manifest: '/manifest.webmanifest',
   // The application is an internal system of engagement holding customer PII.
   // It must never appear in a search index.

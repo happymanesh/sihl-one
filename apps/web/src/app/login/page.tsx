@@ -37,7 +37,7 @@ export default async function LoginPage({
           }}
         />
         <div className="relative flex h-full flex-col justify-between p-12 text-white">
-          <Logo size="lg" inverted />
+          <Logo size="xl" inverted />
           <div>
             <h1 className="max-w-md text-3xl font-extrabold leading-tight">
               One platform for every SIHL relationship.
@@ -56,7 +56,7 @@ export default async function LoginPage({
       <main id="main" className="flex items-center justify-center px-5 py-12">
         <div className="w-full max-w-sm">
           <div className="lg:hidden">
-            <Logo size="md" />
+            <Logo size="lg" />
           </div>
 
           <h2 className="mt-8 text-2xl font-bold lg:mt-0">Sign in</h2>

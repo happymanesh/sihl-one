@@ -25,14 +25,20 @@ export function Logo({
   size = 'md',
   inverted = false,
 }: {
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   /** Set on dark grounds, where the plate needs an edge to sit against. */
   inverted?: boolean;
 }) {
   // Taller than the old mark at every step: this logo carries the company name
   // inside the artwork, and below about thirty pixels the words stop being
   // words.
-  const height = { sm: 30, md: 38, lg: 54 }[size];
+  //
+  // Raised across the board on request — the mark was reading as small on the
+  // sign-in panel and on the public capture page, which is the one screen a
+  // prospect at a stall sees before deciding to hand over their number. `xl`
+  // exists for those hero placements, where the logo is the only branding on
+  // the page and has room to carry it.
+  const height = { sm: 36, md: 46, lg: 64, xl: 84 }[size];
   const width = Math.round(height * RATIO);
 
   return (

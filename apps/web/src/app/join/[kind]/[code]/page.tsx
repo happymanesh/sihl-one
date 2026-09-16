@@ -131,7 +131,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         they walked up to the banner for.
       */}
       <div className="mb-6 flex justify-center">
-        <Logo size="md" />
+        <Logo size="xl" />
       </div>
       <div className="card p-6">{children}</div>
     </main>

@@ -76,7 +76,7 @@ export function AppShell({
       >
         <div className="flex h-14 items-center gap-1 border-b border-[var(--color-border)] px-4">
           <Link href="/dashboard" className={collapsed ? 'lg:hidden' : undefined}>
-            <Logo size="sm" />
+            <Logo size="md" />
           </Link>
           <button
             type="button"
