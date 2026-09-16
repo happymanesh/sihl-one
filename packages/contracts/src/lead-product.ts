@@ -121,6 +121,21 @@ export interface LeadProductView {
   lostReason: string | null;
   closedAt: string | null;
   updatedAt: string;
+
+  /**
+   * What the rep typed when they recorded the outcome.
+   *
+   * Held on the row all along and never surfaced, so the note a rep wrote at
+   * the moment of the decision was only readable by scrolling the timeline —
+   * which is where "why did we lose this" goes to die.
+   */
+  note: string | null;
+
+  /** What the client actually put in. Null unless converted. A rupee string. */
+  finalAmount: string | null;
+  /** The PAN or client code the conversion was recorded against. */
+  conversionRef: string | null;
+  conversionRefKind: string | null;
 }
 
 /**

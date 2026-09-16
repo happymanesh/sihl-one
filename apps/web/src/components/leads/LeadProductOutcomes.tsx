@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useEffect, useState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
   LEAD_LOST_REASONS,
@@ -10,9 +11,28 @@ import {
 
 import { changeLeadProductStatus, type ActionState } from '@/app/actions/leads';
 import { ConversionFields } from '@/components/leads/ConversionFields';
-import { humanise } from '@/lib/format';
+import { formatCurrency, humanise } from '@/lib/format';
 
 const INITIAL: ActionState = { status: 'idle' };
+
+/**
+ * The save button, which knows whether its own form is in flight.
+ *
+ * Its own component because `useFormStatus` reads the form it sits *inside*;
+ * called from the panel body it would always report idle.
+ */
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="btn btn-primary h-9 px-3 text-sm disabled:opacity-60"
+    >
+      {pending ? 'Updating…' : 'Update Product Status'}
+    </button>
+  );
+}
 
 /**
  * Where each product on this lead stands.
@@ -88,7 +108,7 @@ export function LeadProductOutcomes({
             key={row.productCode}
             className="rounded-lg border border-[var(--color-border)] px-3 py-2"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">
                   {row.productName ?? row.productCode}
@@ -97,6 +117,43 @@ export function LeadProductOutcomes({
                   <p className="text-xs text-[var(--color-text-muted)]">
                     {humanise(row.lostReason)}
                   </p>
+                ) : null}
+
+                {/*
+                  What was recorded, beside the product it was recorded for.
+
+                  A fixed label column rather than free-flowing text, so amount
+                  sits under amount and PAN under PAN when a lead carries three
+                  products — the point of the request was reading down the
+                  column, not just having the values present somewhere.
+                */}
+                {row.finalAmount || row.conversionRef || row.note ? (
+                  <dl className="mt-1.5 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5 text-xs">
+                    {row.finalAmount ? (
+                      <>
+                        <dt className="text-[var(--color-text-subtle)]">Final amount</dt>
+                        <dd className="tnum font-semibold">
+                          {formatCurrency(row.finalAmount)}
+                        </dd>
+                      </>
+                    ) : null}
+                    {row.conversionRef ? (
+                      <>
+                        <dt className="text-[var(--color-text-subtle)]">
+                          {row.conversionRefKind === 'PAN' ? 'PAN' : 'Client code'}
+                        </dt>
+                        <dd className="font-mono font-semibold">{row.conversionRef}</dd>
+                      </>
+                    ) : null}
+                    {row.note ? (
+                      <>
+                        <dt className="text-[var(--color-text-subtle)]">Remarks</dt>
+                        <dd className="whitespace-pre-wrap text-[var(--color-text-muted)]">
+                          {row.note}
+                        </dd>
+                      </>
+                    ) : null}
+                  </dl>
                 ) : null}
               </div>
 
@@ -175,13 +232,21 @@ export function LeadProductOutcomes({
                 <input
                   name="note"
                   className="input h-9 text-sm"
-                  placeholder="Note (optional)"
+                  placeholder="Remarks (optional)"
                   maxLength={1000}
                 />
 
-                <button type="submit" className="btn btn-primary h-9 px-3 text-sm">
-                  {status === 'CONVERTED' ? 'Record conversion' : 'Record outcome'}
-                </button>
+                {/*
+                  One label for both outcomes. The button used to rename itself
+                  to "Record conversion" when Converted was picked, which read
+                  as a different action for what is one decision: say where this
+                  product now stands.
+
+                  Disabled while the save is in flight, because the panel closes
+                  on success and a second click before that lands is a duplicate
+                  conversion.
+                */}
+                <SubmitButton />
               </form>
             ) : null}
           </li>
