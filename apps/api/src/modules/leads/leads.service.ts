@@ -2233,6 +2233,54 @@ export class LeadsService {
       // every one after it. One client is one customer however many products
       // they take; a second record would split their history where it matters.
       let customerId = lead.customerId;
+
+      /*
+        An existing client converting again is the common case, not the edge.
+
+        Both `pan` and `clientCode` are unique on customer, so creating blindly
+        whenever *this lead* has no customer threw a unique violation the moment
+        the person already existed from any other lead — and because the whole
+        conversion is one transaction, the product never reached CONVERTED. The
+        rep saw the outcome silently refuse to stick.
+
+        Matching on the identifier the rep supplied is also the right answer on
+        its own terms: the comment below has always said one client is one
+        customer however many products they take, and the lead's own link is
+        only one of the two ways to discover that.
+      */
+      if (!customerId) {
+        const existing = await tx.customer.findFirst({
+          where: isPan ? { pan: input.identifier } : { clientCode: input.identifier },
+          select: { id: true },
+        });
+        if (existing) {
+          customerId = existing.id;
+
+          /*
+            `lead.customerId` is unique, so a customer can be linked to exactly
+            one lead. That is fine the first time a client converts and wrong
+            the second: an existing client arriving as a fresh lead for another
+            product cannot be linked, and writing the link anyway is what made
+            the whole conversion fail.
+
+            So the link is written only when it is free. The conversion itself,
+            the amount, the reference and the mirrored customer product all
+            still happen — the second lead simply does not carry the pointer.
+            Reaching the customer from that lead is the one thing lost, and the
+            proper repair is to drop the unique constraint so a client may be
+            reached from every lead they ever arrived on. That needs a
+            migration, so it is not done quietly here.
+          */
+          const linkTaken = await tx.lead.findFirst({
+            where: { customerId: existing.id, id: { not: id } },
+            select: { id: true },
+          });
+          if (!linkTaken) {
+            await tx.lead.update({ where: { id }, data: { customerId } });
+          }
+        }
+      }
+
       if (!customerId) {
         const reference = await this.references.next('CU');
         const created = await tx.customer.create({
@@ -2280,13 +2328,12 @@ export class LeadsService {
         },
       });
 
-      // The customer already exists on this path; mirror against whichever one
-      // the lead is linked to rather than assuming a fresh record.
-      const linked = await tx.lead.findUniqueOrThrow({
-        where: { id },
-        select: { customerId: true },
-      });
-      if (linked.customerId) await this.mirrorConvertedProducts(tx, linked.customerId, id);
+      // Mirror against the customer this conversion actually resolved to, not
+      // the one the lead happens to point at. For a returning client the
+      // pointer may be absent — the customer above is still the right place for
+      // the product to land, and reading it back from the lead would silently
+      // skip the mirror for exactly the people who already own products.
+      if (customerId) await this.mirrorConvertedProducts(tx, customerId, id);
 
       await this.rollUpLead(tx, id, user.id);
 
@@ -2327,6 +2374,13 @@ export class LeadsService {
       lostReason: row.lostReason,
       closedAt: row.closedAt?.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),
+      note: row.note,
+      // A string, like every other money figure that crosses the wire: Decimal
+      // through JSON.stringify becomes a float, and a float cannot hold every
+      // rupee value exactly.
+      finalAmount: decimalToString(row.finalAmount),
+      conversionRef: row.conversionRef,
+      conversionRefKind: row.conversionRefKind,
     }));
   }
 
