@@ -142,7 +142,16 @@ export class CustomersService {
         partner: { select: { id: true, name: true, type: true } },
         orgUnit: { select: { id: true, name: true } },
         holdings: true,
-        lead: {
+        /*
+          How this client was acquired — so the earliest lead, not any lead.
+
+          A client may now arrive on several leads (an existing customer
+          enquiring about another product opens a new one), and "acquisition"
+          means the first time they came to us. Ordering explicitly rather than
+          taking whichever row the database returns first is the difference
+          between a stable answer and one that changes between page loads.
+        */
+        leads: {
           select: {
             id: true,
             reference: true,
@@ -150,6 +159,8 @@ export class CustomersService {
             convertedAt: true,
             campaign: { select: { id: true, name: true } },
           },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
         },
       },
     });
@@ -179,6 +190,9 @@ export class CustomersService {
     ]);
 
     await this.audit.record({ action: 'READ', resource: 'customer', resourceId: id });
+
+    /** The lead that brought them in; later ones are further business, not acquisition. */
+    const [acquiredOn] = customer.leads;
 
     return {
       profile: {
@@ -213,11 +227,11 @@ export class CustomersService {
         orgUnit: customer.orgUnit,
       },
       acquisition: {
-        leadId: customer.lead?.id ?? null,
-        leadReference: customer.lead?.reference ?? null,
-        source: customer.lead?.source ?? null,
-        campaign: customer.lead?.campaign ?? null,
-        convertedAt: customer.lead?.convertedAt?.toISOString() ?? null,
+        leadId: acquiredOn?.id ?? null,
+        leadReference: acquiredOn?.reference ?? null,
+        source: acquiredOn?.source ?? null,
+        campaign: acquiredOn?.campaign ?? null,
+        convertedAt: acquiredOn?.convertedAt?.toISOString() ?? null,
       },
       holdings: customer.holdings.map((holding) => ({
         product: holding.product,

@@ -2254,30 +2254,11 @@ export class LeadsService {
           select: { id: true },
         });
         if (existing) {
+          // Many leads may point at one customer since
+          // 20260916090000_lead_customer_not_unique, so a returning client is
+          // linked from every lead they arrive on rather than only the first.
           customerId = existing.id;
-
-          /*
-            `lead.customerId` is unique, so a customer can be linked to exactly
-            one lead. That is fine the first time a client converts and wrong
-            the second: an existing client arriving as a fresh lead for another
-            product cannot be linked, and writing the link anyway is what made
-            the whole conversion fail.
-
-            So the link is written only when it is free. The conversion itself,
-            the amount, the reference and the mirrored customer product all
-            still happen — the second lead simply does not carry the pointer.
-            Reaching the customer from that lead is the one thing lost, and the
-            proper repair is to drop the unique constraint so a client may be
-            reached from every lead they ever arrived on. That needs a
-            migration, so it is not done quietly here.
-          */
-          const linkTaken = await tx.lead.findFirst({
-            where: { customerId: existing.id, id: { not: id } },
-            select: { id: true },
-          });
-          if (!linkTaken) {
-            await tx.lead.update({ where: { id }, data: { customerId } });
-          }
+          await tx.lead.update({ where: { id }, data: { customerId } });
         }
       }
 

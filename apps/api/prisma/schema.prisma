@@ -660,7 +660,17 @@ model Lead {
   mergedInto   Lead?   @relation("LeadMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   mergedFrom   Lead[]  @relation("LeadMerge")
 
-  customerId String?   @unique
+  /// The customer this lead became, or joined.
+  ///
+  /// Deliberately *not* unique. It was, and that encoded a claim the business
+  /// does not make: that a client arrives as a lead exactly once. An existing
+  /// client enquiring about a second product is routine, and the constraint
+  /// turned that into a failed conversion — the whole transaction rolled back,
+  /// so the product silently stayed NEW.
+  ///
+  /// Many leads may now point at one customer. The reverse still holds: a lead
+  /// has at most one customer.
+  customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   /// Marketing-contact consent state.
@@ -697,6 +707,10 @@ model Lead {
   /// rule only applies to rows where deletedAt IS NULL.
   @@index([mobile])
   @@index([email])
+  // Replaces the unique index dropped above. "Which leads belong to this
+  // customer" is asked on every 360 view, and without an index it becomes a
+  // sequential scan of the whole lead table.
+  @@index([customerId])
   @@index([status, createdAt])
   @@index([ownerId, status])
   @@index([orgUnitId])
@@ -923,7 +937,13 @@ model Customer {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  lead     Lead?
+  /// Every lead this client arrived on, not just the first.
+  ///
+  /// Was `Lead?`, which paired with the unique `lead.customerId` to assert one
+  /// lead per client. A returning client enquiring about another product is
+  /// routine, so this is a collection now — see the migration
+  /// 20260916090000_lead_customer_not_unique.
+  leads    Lead[]
   holdings CustomerProduct[]
   consents ConsentRecord[]
 
