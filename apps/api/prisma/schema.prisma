@@ -625,8 +625,14 @@ model Lead {
   campaignId String?
   campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
+  /// The event that produced this lead. Null for every other origin, and never
+  /// set retrospectively — a returning client met at a later event is recorded
+  /// in `eventAttendances`, so that event's "leads generated" stays honest.
   eventId String?
   event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// Every event this lead has turned up at.
+  eventAttendances EventAttendance[]
 
   /// On the TRAI Do Not Disturb registry. Populated by a registry check; false
   /// means "not known to be registered", not "confirmed contactable".
@@ -1150,12 +1156,48 @@ model Event {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  /// Leads this event produced — first-time enquiries captured here.
   leads Lead[]
+
+  /// Everyone who registered at the stall, including people we already knew.
+  ///
+  /// Separate from `leads` because they answer different questions. "How many
+  /// leads did this event generate" must not count a client who has banked with
+  /// us for years and happened to walk past; "who did we meet at this event"
+  /// must. Overloading `lead.eventId` would have made the second answer right
+  /// by making the first one wrong.
+  attendees EventAttendance[]
 
   @@index([status])
   @@index([code])
   @@index([startsAt])
   @@map("event")
+}
+
+/// A lead we met at an event, whether or not the event created them.
+///
+/// Written for every stall registration. For a first-time enquiry it duplicates
+/// what `lead.eventId` already says, and that redundancy is deliberate: "who
+/// attended" is then one query against one table, rather than a union of two
+/// with different meanings.
+model EventAttendance {
+  id String @id @default(cuid())
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  /// True when we already held an open lead for them before they registered.
+  returning Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  /// Someone scanning the QR twice at the same stall is one attendance, not two.
+  @@unique([eventId, leadId])
+  @@index([leadId])
+  @@map("event_attendance")
 }
 
 // ===========================================================================

@@ -226,6 +226,14 @@ export const leadQuerySchema = paginationQuerySchema.extend({
    * can also match somebody's surname.
    */
   eventId: idSchema.optional(),
+  /**
+   * Everyone we met at this event, not only the leads it produced.
+   *
+   * The difference is the returning client: they registered at the stall, so a
+   * rep needs to reach them from the event, but the event did not create them
+   * and `eventId` must not say it did.
+   */
+  attendedEventId: idSchema.optional(),
   /** `true` restricts to leads whose follow-up date has passed. */
   overdueOnly: z.coerce.boolean().optional(),
   createdFrom: z.coerce.date().optional(),

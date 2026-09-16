@@ -67,18 +67,37 @@ export default async function EventDetailPage({ params }: Props) {
       </header>
 
       <section aria-label="Capture">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {/*
+            People met, then leads won — in that order, because the first is the
+            question a rep standing at the stall actually has, and until now it
+            had no answer at all. A client already on the book who registered
+            here appeared nowhere on this page.
+          */}
+          <StatTile
+            label="People met"
+            value={formatNumber(event.attended)}
+            hint={
+              event.returningAttendees > 0
+                ? `${formatNumber(event.returningAttendees)} already on the book`
+                : event.expectedFootfall
+                  ? `${event.expectedFootfall} expected footfall`
+                  : undefined
+            }
+            href={`/leads?attendedEventId=${event.id}`}
+          />
           <StatTile
             label="Leads captured"
             value={formatNumber(event.leads)}
-            hint={event.expectedFootfall ? `${event.expectedFootfall} expected footfall` : undefined}
+            hint="New enquiries this event produced"
+            href={`/leads?eventId=${event.id}`}
           />
           <StatTile
             label="Not yet contacted"
             value={formatNumber(event.uncontacted)}
             hint={event.uncontacted > 0 ? 'Nobody has called these' : 'All followed up'}
             tone={event.uncontacted > 0 ? 'warning' : 'default'}
-            href={`/leads?status=NEW`}
+            href={`/leads?eventId=${event.id}&status=NEW`}
           />
           <StatTile label="Converted" value={formatNumber(event.converted)} />
           <StatTile label="Conversion" value={`${event.conversionRate}%`} />

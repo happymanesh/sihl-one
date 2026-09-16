@@ -159,6 +159,20 @@ export interface EventDetail extends EventListItem {
   pipeline: Array<{ status: string; count: number }>;
   /** How many captured leads nobody has contacted yet. */
   uncontacted: number;
+
+  /**
+   * Everyone who registered at the stall, including clients we already had.
+   *
+   * Always at least `leads`, and larger whenever an existing client turned up.
+   * Kept apart from `leads` because they answer different questions: how many
+   * leads the event generated, and how many people we actually met. Counting a
+   * client of ten years as a lead this event won would flatter its conversion
+   * rate with business it had nothing to do with.
+   */
+  attended: number;
+  /** Of those, the ones already on the book before they arrived. */
+  returningAttendees: number;
+
   conversionRate: number;
 }
 

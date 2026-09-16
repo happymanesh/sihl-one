@@ -110,6 +110,35 @@ export class EventsService {
       orderBy: { status: 'asc' },
     });
 
+    /*
+      Everyone who registered at the stall, and how many of them we already
+      knew. Counted separately from `leads` on purpose: a client of ten years
+      who walks past is somebody we met, not a lead this event generated, and
+      folding them together would flatter the event's conversion rate with
+      business it never won.
+    */
+    const [attended, returning] = await Promise.all([
+      /*
+        A union, not a count of the attendance table.
+
+        Attendance only started being recorded when the table was added, so
+        every lead captured at an event before that has no row — counting rows
+        alone would report a well-attended past event as having met nobody, and
+        would show "people met" as smaller than "leads captured", which reads as
+        a bug to anyone looking at it.
+
+        Being captured here *is* attendance; the table records the people that
+        does not cover.
+      */
+      this.prisma.lead.count({
+        where: {
+          deletedAt: null,
+          OR: [{ eventId: id }, { eventAttendances: { some: { eventId: id } } }],
+        },
+      }),
+      this.prisma.eventAttendance.count({ where: { eventId: id, returning: true } }),
+    ]);
+
     const total = byStatus.reduce((sum, row) => sum + row._count._all, 0);
     const converted = byStatus
       .filter((row) => row.status === 'CONVERTED')
@@ -127,6 +156,8 @@ export class EventsService {
         .map((row) => ({ status: row.status, count: row._count._all }))
         .sort((a, b) => b.count - a.count),
       uncontacted,
+      attended,
+      returningAttendees: returning,
       conversionRate: total > 0 ? Math.round((converted / total) * 1000) / 10 : 0,
     };
   }

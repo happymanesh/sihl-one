@@ -49,6 +49,7 @@ export default async function LeadsPage({
     priority: first('priority'),
     ownerId: first('ownerId'),
     eventId: first('eventId'),
+    attendedEventId: first('attendedEventId'),
     overdueOnly: first('overdueOnly'),
     minScore: first('minScore'),
     sortBy: first('sortBy') ?? 'createdAt',
@@ -67,7 +68,9 @@ export default async function LeadsPage({
   // Named, not just applied. Arriving from an event's "View the leads" with a
   // silent filter looks identical to a broken list — the reader has no way to
   // tell "this event produced three leads" from "the search is wrong".
-  const eventId = first('eventId');
+  // Either filter names the same event; which one only changes the wording.
+  const eventId = first('eventId') ?? first('attendedEventId');
+  const byAttendance = Boolean(first('attendedEventId'));
   const filteredEvent = eventId
     ? await apiFetch<{ id: string; name: string }>(`/events/${eventId}`).catch(() => null)
     : null;
@@ -110,7 +113,16 @@ export default async function LeadsPage({
 
       {filteredEvent ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-sm">
-          <span className="text-[var(--color-text-muted)]">Showing leads captured at</span>
+          {/*
+            The wording distinguishes the two lists. "Everyone we met" includes
+            clients who were already on the book; "leads captured" is only what
+            the event produced. Same event, different question, and a reader who
+            cannot tell which one they are looking at will read the larger
+            number as the event's performance.
+          */}
+          <span className="text-[var(--color-text-muted)]">
+            {byAttendance ? 'Showing everyone we met at' : 'Showing leads captured at'}
+          </span>
           <span className="font-semibold">{filteredEvent.name}</span>
           <Link
             href="/leads"

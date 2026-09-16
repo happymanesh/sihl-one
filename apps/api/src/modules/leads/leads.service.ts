@@ -679,6 +679,20 @@ export class LeadsService {
   async capture(input: LeadCaptureInput) {
     const context = RequestContextStore.get();
 
+    /*
+      Resolved before the duplicate check, not after, because both branches need
+      it now. A returning client registering at a stall has to be recorded as
+      having attended, and that was impossible while the event was only looked
+      up on the path that creates a lead.
+
+      Codes in, ids out — see the note further down on why this is never trusted
+      from the browser.
+    */
+    const coded = await this.captureCodes.resolve({
+      partnerCode: input.partnerCode,
+      eventCode: input.eventCode,
+    });
+
     const existing = await this.prisma.lead.findFirst({
       where: {
         mobile: input.mobile,
@@ -708,6 +722,23 @@ export class LeadsService {
           where: { id: existing.id },
           data: { lastActivityAt: new Date(), priority: 'HIGH' },
         });
+
+        /*
+          They turned up. Recorded here and nowhere else — `lead.eventId` is
+          left alone deliberately, because it means "the event that produced
+          this lead" and this event did not produce them. Writing it would
+          either credit this event with a lead it did not win, or overwrite the
+          earlier event that did.
+
+          `skipDuplicates` covers the person who scans the QR twice at the same
+          stall, which is one attendance.
+        */
+        if (coded.eventId) {
+          await tx.eventAttendance.createMany({
+            data: [{ eventId: coded.eventId, leadId: existing.id, returning: true }],
+            skipDuplicates: true,
+          });
+        }
         await tx.consentRecord.create({
           data: {
             entityType: 'LEAD',
@@ -733,14 +764,9 @@ export class LeadsService {
 
     const reference = await this.references.next('LD');
 
-    // Codes in, ids out. Resolved here rather than trusted from the browser:
-    // this endpoint is unauthenticated, so an id in the payload would let
-    // anyone attribute someone else's business to themselves.
-    const coded = await this.captureCodes.resolve({
-      partnerCode: input.partnerCode,
-      eventCode: input.eventCode,
-    });
-
+    // `coded` is resolved at the top of this method — ids, never trusted from
+    // the browser: this endpoint is unauthenticated, so an id in the payload
+    // would let anyone attribute someone else's business to themselves.
     const campaignId =
       coded.campaignId ?? (await this.resolveCampaignId(null, input.attribution?.utmCampaign));
 
@@ -835,6 +861,17 @@ export class LeadsService {
         eventType: 'lead.captured',
         payload: { reference, source: input.source, utmCampaign: input.attribution?.utmCampaign ?? null },
       });
+
+      // Recorded for a first-time registration too, even though `eventId` on
+      // the lead already implies it. "Who did we meet at this event" is then
+      // one query against one table rather than a union of two lists whose
+      // meanings differ — and the redundancy costs a row.
+      if (coded.eventId) {
+        await tx.eventAttendance.createMany({
+          data: [{ eventId: coded.eventId, leadId: created.id, returning: false }],
+          skipDuplicates: true,
+        });
+      }
 
       return created;
     });
@@ -1442,6 +1479,17 @@ export class LeadsService {
     if (query.partnerId) and.push({ partnerId: query.partnerId });
     if (query.campaignId) and.push({ campaignId: query.campaignId });
     if (query.eventId) and.push({ eventId: query.eventId });
+    if (query.attendedEventId) {
+      // Captured here, or recorded as having turned up. The first covers every
+      // event that ran before attendance was recorded at all; without it this
+      // list would silently omit the very leads the event is known for.
+      and.push({
+        OR: [
+          { eventId: query.attendedEventId },
+          { eventAttendances: { some: { eventId: query.attendedEventId } } },
+        ],
+      });
+    }
     if (query.minScore !== undefined) and.push({ score: { gte: query.minScore } });
     if (query.overdueOnly) {
       // Closed leads are excluded here as they are on the dashboard and in the
