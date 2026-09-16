@@ -89,7 +89,9 @@ export function LeadCaptureForm({
             />
           </svg>
         </div>
-        <h3 className="mt-3 font-bold">Enquiry received</h3>
+        <h3 className="mt-3 font-bold">
+          {state.alreadyKnown ? 'We already have your details' : 'Enquiry received'}
+        </h3>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">{state.message}</p>
         {state.reference ? (
           <p className="mt-3 text-sm">
