@@ -76,21 +76,54 @@ export function LeadCaptureForm({
   }, []);
 
   if (state.status === 'success') {
+    /*
+      Two different outcomes, told apart at a glance.
+
+      A rep at a stall reads this over someone's shoulder and needs to know in
+      an instant whether to take fresh details — so the two states differ by
+      colour *and* by shape, not by wording alone.
+
+      A new enquiry gets the teal tick. A returning client gets no symbol at
+      all: the greeting itself is set large and bold in brand navy, which is a
+      bigger and faster signal than any glyph in a circle, and it reads to the
+      visitor as a greeting rather than a status icon.
+
+      Navy rather than amber or red on purpose. Being told you are a problem for
+      having enquired before is the wrong note to strike with an existing client
+      who has just queued at your stall; the company's own colour says we know
+      you, where a warning colour would say you did something wrong.
+    */
     return (
-      <div className="rounded-lg border border-teal-500/40 bg-teal-50 p-5 text-center dark:bg-teal-900/30">
-        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-teal-500 text-white">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="m5 13 4 4L19 7"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
-        <h3 className="mt-3 font-bold">
-          {state.alreadyKnown ? 'We already have your details' : 'Enquiry received'}
+      <div
+        className={`rounded-lg border p-5 text-center ${
+          state.alreadyKnown
+            ? 'border-navy-500/40 bg-navy-50 dark:bg-navy-900/40'
+            : 'border-teal-500/40 bg-teal-50 dark:bg-teal-900/30'
+        }`}
+      >
+        {state.alreadyKnown ? null : (
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-teal-500 text-white">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="m5 13 4 4L19 7"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        )}
+        <h3
+          className={
+            state.alreadyKnown
+              ? // Deliberately larger than anything else on the page, including
+                // the event name. It is the whole signal.
+                'text-3xl font-extrabold tracking-tight text-navy-600 dark:text-navy-200 sm:text-4xl'
+              : 'mt-3 font-bold'
+          }
+        >
+          {state.alreadyKnown ? 'Welcome Back' : 'Enquiry received'}
         </h3>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">{state.message}</p>
         {state.reference ? (

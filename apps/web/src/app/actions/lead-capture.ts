@@ -118,8 +118,12 @@ export async function submitLeadCapture(
       status: 'success',
       reference: data.reference,
       alreadyKnown,
+      // Warm on purpose. This is read by an existing client who has just
+      // queued at a stall to tell us something — "you are already registered"
+      // lands as a correction, and nobody enjoys being told they did a
+      // redundant thing. Lead with what we did with what they said.
       message: alreadyKnown
-        ? 'You are already registered with us. Your interest has been added to your existing enquiry and a relationship manager will call you shortly.'
+        ? 'We already have your details, so nothing you have told us today is lost — it has been added to your existing enquiry, and your relationship manager will call you shortly.'
         : 'Thank you. A relationship manager will call you shortly.',
     };
   } catch (error) {
