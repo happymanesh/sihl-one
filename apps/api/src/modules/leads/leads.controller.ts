@@ -25,6 +25,7 @@ import {
   verifyLeadMobileSchema,
   convertLeadSchema,
   createLeadSchema,
+  instaLeadSchema,
   leadCaptureSchema,
   leadQuerySchema,
   updateLeadSchema,
@@ -38,6 +39,7 @@ import {
   type VerifyLeadMobileInput,
   type ConvertLeadInput,
   type CreateLeadInput,
+  type InstaLeadInput,
   type LeadCaptureInput,
   type LeadQuery,
   type UpdateLeadInput,
@@ -215,6 +217,24 @@ export class LeadsController {
   @ApiZodBody(createLeadSchema)
   create(@CurrentUser() user: AuthenticatedPrincipal, @ZodBody(createLeadSchema) body: CreateLeadInput) {
     return this.leads.create(user, body);
+  }
+
+  @Post('insta')
+  @RequirePermissions('lead:create', 'visit:create')
+  @ApiOperation({
+    summary: 'Insta Lead — capture someone in person and start the meeting',
+    description:
+      'Two fields and a mode. Writes the lead first and commits it before the visit is ' +
+      'touched, so a failed check-in never costs the client. A mobile that already has an ' +
+      'open lead attaches to it rather than being refused.',
+  })
+  @ApiResponse({ status: 201, description: 'Lead and visit created. `awaitingCheckIn` says whether a photo is still needed.' })
+  @ApiZodBody(instaLeadSchema)
+  instaLead(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(instaLeadSchema) body: InstaLeadInput,
+  ) {
+    return this.leads.instaLead(user, body);
   }
 
   @Patch(':id')

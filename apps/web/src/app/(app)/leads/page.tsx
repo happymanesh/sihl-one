@@ -90,7 +90,13 @@ export default async function LeadsPage({
             {formatNumber(data.total)} {data.total === 1 ? 'lead' : 'leads'} in your scope
           </p>
         </div>
-        <div className="flex gap-2">
+        {/*
+          Wraps, because a third button here is what tips this row past a phone.
+          Without it the row stays one line, the page itself grows wider than
+          the screen, and every screen in the app scrolls sideways — the header
+          is above the fold on the list a rep opens most.
+        */}
+        <div className="flex flex-wrap gap-2">
           <Link href="/pipeline" className="btn btn-outline">
             <Icon name="columns" size={16} />
             Pipeline view
@@ -98,6 +104,21 @@ export default async function LeadsPage({
           {can(user, 'lead:import') ? (
             <Link href="/leads/import" className="btn btn-outline">
               Import
+            </Link>
+          ) : null}
+          {/*
+            Insta Lead sits beside New lead, not instead of it. They are two
+            different situations: one is somebody at a desk entering a lead
+            properly, the other is a rep with a client in front of them. Placing
+            them together is what makes the distinction obvious.
+
+            Needs `visit:create` as well, because it starts a meeting — anyone
+            who may only create leads still gets the ordinary form.
+          */}
+          {can(user, 'lead:create') && can(user, 'visit:create') ? (
+            <Link href="/leads/insta" className="btn btn-accent">
+              <Icon name="target" size={16} />
+              Insta Lead
             </Link>
           ) : null}
           {can(user, 'lead:create') ? (

@@ -19,6 +19,21 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: '#f5f9fc',
     theme_color: '#0a5281',
     categories: ['business', 'finance', 'productivity'],
+    /*
+      Long-press the icon and go straight to capture.
+
+      This is the whole point of the field-sales case: a rep with a client in
+      front of them should not be navigating a menu. From a locked phone it is
+      icon, shortcut, typing — no dashboard, no drawer, no scrolling.
+    */
+    shortcuts: [
+      {
+        name: 'Insta Lead',
+        short_name: 'Insta Lead',
+        description: 'Capture someone you are meeting right now',
+        url: '/leads/insta',
+      },
+    ],
     icons: [
       { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
     ],

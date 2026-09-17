@@ -89,8 +89,8 @@ export function collectRoutes(srcDir: string): RouteEntry[] {
         Forward: every decorator between this one and the handler signature.
 
         Block comments are walked through rather than treated as the end of the
-        decorator list. A `/* … *​/` explaining *why* a route carries the
-        permission it does is exactly the comment worth writing, and an earlier
+        decorator list. A multi-line comment explaining *why* a route carries
+        the permission it does is exactly the one worth writing, and an earlier
         version of this parser stopped at its first prose line and reported the
         route as unguarded — a false alarm that teaches people to edit the
         allow-list rather than read it, which is the opposite of the point.

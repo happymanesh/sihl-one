@@ -78,6 +78,61 @@ export const createLeadSchema = z.object({
 });
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
 
+/**
+ * Insta Lead: somebody is in front of you and the meeting is happening now.
+ *
+ * Two typed fields and a choice of where. Everything the ordinary form asks for
+ * — products, email, PAN, value, follow-up — is deliberately absent, because at
+ * the door you would be guessing, and after the conversation you will know. The
+ * lead can be filled in properly from its own page in the minute afterwards.
+ *
+ * The source is not asked for either. A capture made this way is a walk-in by
+ * definition, and one more decision at the door buys nothing.
+ */
+export const instaLeadSchema = z.object({
+  firstName: z.string().trim().min(1, 'A name is needed').max(60),
+  lastName: z.string().trim().max(60).optional(),
+  mobile: indianMobileSchema,
+
+  /** `CLIENT_SITE` or `OFFICE`. Decides whether a check-in photo is demanded. */
+  mode: z.string().trim().min(1).max(40),
+
+  /**
+   * One colleague who is there too.
+   *
+   * Recorded as a planned attendee, not a confirmed one — attendance is
+   * confirmed at check-out, where the question is who actually stayed rather
+   * than who was expected.
+   */
+  attendeeUserId: idSchema.optional(),
+
+  /**
+   * Best-effort fix from the browser, taken while the rep types.
+   *
+   * Optional throughout: a basement or a bad signal marks the visit unverified
+   * and must never stop the capture.
+   */
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  accuracy: z.number().positive().optional(),
+});
+export type InstaLeadInput = z.infer<typeof instaLeadSchema>;
+
+export interface InstaLeadResult {
+  leadId: string;
+  leadReference: string;
+  visitId: string;
+  /** True when the mobile already had an open lead and this attached to it. */
+  reusedExistingLead: boolean;
+  /**
+   * The visit still needs a photograph before it counts as checked in.
+   *
+   * When false the check-in is already done and the rep has nothing left to do
+   * but talk.
+   */
+  awaitingCheckIn: boolean;
+}
+
 export const updateLeadSchema = createLeadSchema.partial().extend({
   status: z.enum(LEAD_STATUSES).optional(),
   lostReason: z.enum(LEAD_LOST_REASONS).optional(),

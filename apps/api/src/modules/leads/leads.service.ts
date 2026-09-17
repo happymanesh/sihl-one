@@ -31,7 +31,10 @@ import {
   type BulkAssignLeadInput,
   type ChangeLeadStatusInput,
   type ConvertLeadInput,
+  visitEvidenceRules,
   type CreateLeadInput,
+  type InstaLeadInput,
+  type InstaLeadResult,
   type LeadCaptureInput,
   type LeadListItem,
   type LeadQuery,
@@ -52,6 +55,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CaptureCodeService } from '../events/capture-code.service';
 import { MastersService } from '../masters/masters.service';
+import { VisitsService } from '../visits/visits.service';
 import { AllocationService } from '../performance/allocation.service';
 import {
   LEAD_LIST_SELECT,
@@ -136,6 +140,7 @@ export class LeadsService {
     private readonly allocation: AllocationService,
     private readonly captureCodes: CaptureCodeService,
     private readonly masters: MastersService,
+    private readonly visits: VisitsService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -2383,6 +2388,159 @@ export class LeadsService {
     });
 
     return this.productsFor(user, id);
+  }
+
+  /**
+   * Insta Lead — capture somebody standing in front of you and start the meeting.
+   *
+   * Ordered so the irreplaceable thing happens first. The lead is written and
+   * committed before the visit is touched and long before a camera opens: a
+   * dead battery, a refused permission or a rep who has to walk away then costs
+   * a check-in, which can be redone, rather than the client's number, which
+   * cannot. It is the same rule the event capture follows.
+   *
+   * A mobile that already has an open lead attaches to it rather than being
+   * refused. The ordinary Add lead form is right to refuse — it is somebody at
+   * a desk about to create a duplicate. Here the person is in front of you, and
+   * stopping the rep dead to explain a data rule is the worst available answer.
+   */
+  async instaLead(
+    user: AuthenticatedPrincipal,
+    input: InstaLeadInput,
+  ): Promise<InstaLeadResult> {
+    const existing = await this.prisma.lead.findFirst({
+      where: {
+        mobile: input.mobile,
+        deletedAt: null,
+        status: { notIn: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
+      },
+      select: {
+        id: true,
+        reference: true,
+        createdAt: true,
+        ownerId: true,
+        owner: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    let leadId: string;
+    let leadReference: string;
+
+    if (existing) {
+      /*
+        Attaching is only possible if the rep can actually see the lead.
+
+        A walk-in whose number already sits with a colleague is common, and
+        recording a meeting on a lead outside your scope would be an ABAC hole
+        dressed up as a convenience. So this says who has it, which is the one
+        thing that lets the rep act — walk over, or call them. The wording
+        matches the Add lead form so the two screens do not tell different
+        stories about the same number.
+      */
+      const visible = await this.prisma.lead.findFirst({
+        where: { id: existing.id, deletedAt: null, AND: [this.scope.leadScope(user)] },
+        select: { id: true },
+      });
+      if (!visible) {
+        const addedOn = istStamp(existing.createdAt);
+        const owner = existing.owner
+          ? `${existing.owner.firstName} ${existing.owner.lastName}`.trim()
+          : null;
+        throw new BadRequestException({
+          title: 'Already with a colleague',
+          detail:
+            `This number is already on the book — added ${addedOn} as ${existing.reference}, ` +
+            `${owner ? `with ${owner}` : 'unassigned'}. Speak to them rather than starting a ` +
+            `second lead for the same person.`,
+        });
+      }
+      leadId = existing.id;
+      leadReference = existing.reference;
+    } else {
+      // WALK_IN by definition. The fallback chain exists because the source
+      // master is admin-managed and has drifted between environments before —
+      // `lead.source` is a foreign key, so a code that is not there loses the
+      // lead to a constraint violation at exactly the wrong moment.
+      const source =
+        (await this.masters.firstUsableSource('WALK_IN', 'PHYSICAL_VISIT', 'REFERRAL', 'OTHER')) ??
+        'OTHER';
+
+      const reference = await this.references.next('LD');
+      const created = await this.prisma.lead.create({
+        data: {
+          reference,
+          firstName: input.firstName,
+          lastName: input.lastName || null,
+          mobile: input.mobile,
+          source,
+          // Somebody who came to see you today outranks a form filled in last
+          // week. The rep can lower it later; nobody ever raises it in time.
+          priority: 'HIGH',
+          status: 'NEW',
+          ownerId: user.id,
+          orgUnitId: user.orgUnitId,
+          createdById: user.id,
+          lastActivityAt: new Date(),
+        },
+        select: { id: true, reference: true },
+      });
+      leadId = created.id;
+      leadReference = created.reference;
+
+      await this.audit.record({
+        action: 'CREATE',
+        resource: 'lead',
+        resourceId: leadId,
+        reason: 'Insta Lead — captured in person',
+      });
+    }
+
+    // Only now the meeting. Everything above is already committed.
+    const visit = await this.visits.plan(user, {
+      entityType: 'LEAD',
+      entityId: leadId,
+      purpose: 'Met in person',
+      mode: input.mode,
+      attendees: input.attendeeUserId
+        ? [{ userId: input.attendeeUserId, role: 'SUPPORT' as const }]
+        : undefined,
+    });
+
+    /*
+      Check in here only when the mode asks for no photograph.
+
+      For a client-site visit the photograph *is* the record — it is what makes
+      "I was there" answerable later — so the rep is taken to the camera rather
+      than handed a check-in that skipped it. Doing otherwise would mean every
+      off-site visit captured this way was unverified, which would hollow out
+      the control precisely where it matters most.
+    */
+    // Read straight from the master. `visitEvidenceRules` treats an unknown
+    // mode as the strictest one, so a missing row demands a photo rather than
+    // waving the visit through — the safe direction to fail in.
+    const mode = await this.prisma.meetingModeMaster.findUnique({
+      where: { code: input.mode },
+      select: { requiresPhoto: true, requiresGeo: true, requiresLink: true, allowsScreenshot: true },
+    });
+    const rules = visitEvidenceRules(mode);
+    let awaitingCheckIn = true;
+
+    if (!rules.photo) {
+      await this.visits.checkIn(user, visit.id, {
+        latitude: input.latitude,
+        longitude: input.longitude,
+        accuracy: input.accuracy,
+      });
+      awaitingCheckIn = false;
+    }
+
+    return {
+      leadId,
+      leadReference,
+      visitId: visit.id,
+      reusedExistingLead: Boolean(existing),
+      awaitingCheckIn,
+    };
   }
 
   /** The lead's products with their outcomes, for the detail panel and board. */
