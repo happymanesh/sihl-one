@@ -254,6 +254,35 @@ html.dark {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger-500) 18%, transparent);
   }
 
+  /* Date and time fields that stay inside their container on a phone.
+
+     Safari on iOS gives these native controls an intrinsic width from their own
+     content and then ignores `width: 100%`, so "Plan a visit" pushed its
+     When field past the card edge on a real handset. Chromium does not
+     reproduce it — measured at 375px the field fits exactly — which is why it
+     is fixed here in CSS for every date field rather than on the one screen it
+     was noticed on.
+
+     `appearance: none` is what releases the intrinsic width; `min-width: 0`
+     stops a flex or grid parent from honouring it anyway. The inner value needs
+     its own alignment because iOS centres it once the control is unstyled. */
+  .input[type='date'],
+  .input[type='time'],
+  .input[type='datetime-local'],
+  .input[type='month'],
+  .input[type='week'] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .input[type='date']::-webkit-date-and-time-value,
+  .input[type='time']::-webkit-date-and-time-value,
+  .input[type='datetime-local']::-webkit-date-and-time-value {
+    text-align: left;
+  }
+
   .label {
     display: block;
     font-size: 0.8125rem;
