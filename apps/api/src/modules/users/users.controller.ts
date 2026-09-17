@@ -35,6 +35,33 @@ export class UsersController {
     return this.users.assignable(user, q, target === 'transfer');
   }
 
+  @Get('colleagues')
+  /*
+    `visit:create`, not `user:read`.
+
+    This was the whole bug. The attendee picker was reading `assignable`, which
+    is guarded by `user:read` — a permission a sales executive does not hold —
+    so the call 403'd, the page swallowed it into an empty list, and the field
+    silently disappeared for exactly the people the feature was built for.
+
+    Whoever may plan a visit may see who they could bring on it. Anyone who
+    cannot still gets nothing.
+  */
+  @RequirePermissions('visit:create')
+  @ApiQuery({ name: 'q', required: false })
+  @ApiOperation({
+    summary: 'Colleagues the caller could take along on a visit',
+    description:
+      'Zonal head and above see every active internal user; everyone below sees their own ' +
+      'region. Partner logins see their own firm. Never the caller themselves.',
+  })
+  colleagues(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query('q', new ZodValidationPipe(searchSchema)) q?: string,
+  ) {
+    return this.users.colleagues(user, q);
+  }
+
   @Get('me/sessions')
   @ApiOperation({ summary: 'Active sessions for the signed-in user (device management)' })
   sessions(@CurrentUser() user: AuthenticatedPrincipal) {

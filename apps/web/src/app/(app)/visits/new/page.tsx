@@ -43,7 +43,10 @@ export default async function PlanVisitPage({
     // a visit must not fail because a master could not be read.
     apiFetch<MeetingModeItem[]>('/masters/meeting-modes').catch(() => [] as MeetingModeItem[]),
     apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
-      '/users/assignable',
+      // The attendee picker has its own endpoint and its own rule. It is not
+      // the owner picker: who you may *bring* is a wider and much lighter
+      // question than who you may hand a client to.
+      '/users/colleagues',
     ).catch(() => []),
   ]);
 

@@ -188,10 +188,15 @@ export function PlanVisitForm({
             }
             className="input min-h-[5.5rem]"
           >
+            {/*
+              The employee code in brackets is not decoration. Two people called
+              Priya Shah is ordinary at this size, and picking the wrong one puts
+              a colleague's name against a client meeting they never attended.
+            */}
             {colleagues.map((person) => (
               <option key={person.id} value={person.id}>
                 {person.fullName}
-                {person.employeeCode ? ` · ${person.employeeCode}` : ''}
+                {person.employeeCode ? ` [${person.employeeCode}]` : ''}
               </option>
             ))}
           </select>

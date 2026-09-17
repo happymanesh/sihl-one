@@ -71,7 +71,9 @@ export default async function VisitDetailPage({ params }: { params: Promise<{ id
     visit.status === 'COMPLETED' || visit.status === 'CANCELLED'
       ? []
       : await apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
-          '/users/assignable',
+          // Same picker, same rule as Plan a visit: who you may bring is a
+          // different question from who you may hand a client to.
+          '/users/colleagues',
         ).catch(() => []);
   // Only the person making the visit may act on it — a check-in asserts that a
   // specific person was somewhere, so nobody can record it on their behalf.

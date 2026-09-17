@@ -85,9 +85,33 @@ export function collectRoutes(srcDir: string): RouteEntry[] {
 
       const sub = literals(lines[index])[0] ?? '';
 
-      // Forward: every decorator between this one and the handler signature.
+      /*
+        Forward: every decorator between this one and the handler signature.
+
+        Block comments are walked through rather than treated as the end of the
+        decorator list. A `/* … *​/` explaining *why* a route carries the
+        permission it does is exactly the comment worth writing, and an earlier
+        version of this parser stopped at its first prose line and reported the
+        route as unguarded — a false alarm that teaches people to edit the
+        allow-list rather than read it, which is the opposite of the point.
+      */
       let cursor = index + 1;
-      while (cursor < lines.length && IS_DECORATOR_ISH.test(lines[cursor])) cursor += 1;
+      let inBlockComment = false;
+      while (cursor < lines.length) {
+        const line = lines[cursor]!;
+        if (inBlockComment) {
+          if (line.includes('*/')) inBlockComment = false;
+          cursor += 1;
+          continue;
+        }
+        if (/^\s*\/\*/.test(line) && !line.includes('*/')) {
+          inBlockComment = true;
+          cursor += 1;
+          continue;
+        }
+        if (!IS_DECORATOR_ISH.test(line)) break;
+        cursor += 1;
+      }
       const below = lines.slice(index + 1, cursor).join('\n');
       const handler = /^\s*(?:async\s+)?(\w+)\s*\(/.exec(lines[cursor] ?? '')?.[1] ?? '';
 

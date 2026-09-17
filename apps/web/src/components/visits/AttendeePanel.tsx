@@ -37,7 +37,7 @@ export function AttendeePanel({
   visitId: string;
   status: string;
   attendees: AttendeeView[];
-  /** People the viewer may pick, from `/users/assignable`. */
+  /** People the viewer may pick, from `/users/colleagues`. */
   colleagues: Array<{ id: string; fullName: string; employeeCode?: string | null }>;
 }) {
   const closed = status === 'COMPLETED' || status === 'CANCELLED';
@@ -142,7 +142,7 @@ export function AttendeePanel({
               {pickable.map((person) => (
                 <option key={person.id} value={person.id}>
                   {person.fullName}
-                  {person.employeeCode ? ` · ${person.employeeCode}` : ''}
+                  {person.employeeCode ? ` [${person.employeeCode}]` : ''}
                 </option>
               ))}
             </select>
