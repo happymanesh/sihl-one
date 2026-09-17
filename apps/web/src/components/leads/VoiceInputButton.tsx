@@ -20,8 +20,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Speech is intelligible far below this; higher only inflates the upload. */
 const SAMPLE_RATE = 16_000;
-/** Guard against a pocket recording: the button also stops itself here. */
-const MAX_SECONDS = 120;
+
+/**
+ * A dictated note is a sentence or two, not a monologue.
+ *
+ * Was two minutes, which was a guard against a pocket recording rather than a
+ * considered limit. Ten seconds is the length of the thing reps actually say —
+ * "met at the branch, wants an F&O account, call Tuesday" — and a short, hard
+ * window is also kinder: the counter runs down rather than up, so a rep can see
+ * how long they have instead of guessing when to stop.
+ */
+const MAX_SECONDS = 10;
 
 type Phase = 'idle' | 'requesting' | 'recording' | 'working' | 'denied' | 'failed';
 
@@ -195,63 +204,106 @@ export function VoiceInputButton({
     if (phase === 'recording' && seconds >= MAX_SECONDS) void finish();
   }, [phase, seconds, finish]);
 
+  /*
+    A column beside the field, not a labelled button above it.
+
+    `self-stretch` is what makes the whole control exactly as tall as the
+    textarea it sits next to — the mic grows to fill whatever height the field
+    has and the counter takes the line underneath, so the two read as one
+    element however many rows the caller asks for.
+  */
+  const shell =
+    'relative flex w-12 shrink-0 select-none flex-col items-stretch gap-1 self-stretch';
+  const face =
+    'flex flex-1 items-center justify-center rounded-lg border transition-colors min-h-[2.25rem]';
+  const caption = 'text-center text-[0.6875rem] leading-none tnum';
+
   if (!enabled) {
     return (
-      <span className="inline-flex items-center gap-1.5">
+      <span className={shell}>
         <button
           type="button"
           disabled
           title={reason}
           aria-label={`Dictation unavailable. ${reason}`}
-          className="inline-flex h-7 cursor-not-allowed items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2 text-xs font-semibold text-[var(--color-text-subtle)] opacity-70"
+          className={`${face} cursor-not-allowed border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-subtle)]`}
         >
           <MicIcon />
-          <span>Dictate</span>
         </button>
-        <span className="text-[0.6875rem] text-[var(--color-text-subtle)]">Coming soon</span>
+        <span className={`${caption} text-[var(--color-text-subtle)]`} title={reason}>
+          off
+        </span>
       </span>
     );
   }
 
   const recording = phase === 'recording';
   const busy = phase === 'working' || phase === 'requesting';
+  const remaining = Math.max(0, MAX_SECONDS - seconds);
 
   return (
-    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+    <span className={shell}>
       <button
         type="button"
         onClick={() => void (recording ? finish() : start())}
         disabled={busy}
-        aria-label={recording ? 'Stop recording and insert the note' : 'Dictate a note'}
-        className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2 text-xs font-semibold transition-colors ${
+        title={recording ? 'Stop and insert the note' : 'Dictate a note — 10 seconds'}
+        /*
+          The label carries the state in words, because the colour cannot. Green
+          against red is the single commonest form of colour blindness, and this
+          control is now an icon with no text on it — so what a screen reader
+          announces is the only description some people get.
+        */
+        aria-label={
+          recording
+            ? `Recording, ${remaining} seconds left. Stop and insert the note.`
+            : phase === 'working'
+              ? 'Transcribing the recording'
+              : phase === 'requesting'
+                ? 'Starting the microphone'
+                : 'Dictate a note, up to 10 seconds'
+        }
+        className={`${face} ${
           recording
             ? 'border-danger-500 bg-danger-500 text-white'
-            : 'border-teal-500 text-teal-600 hover:bg-teal-50 disabled:opacity-60 dark:text-teal-300 dark:hover:bg-teal-900/30'
+            : busy
+              ? 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-subtle)]'
+              : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'
         }`}
       >
         <MicIcon />
-        {/* The word carries the state, not the colour alone. */}
-        <span>
-          {recording
-            ? `Stop ${formatSeconds(seconds)}`
-            : phase === 'working'
-              ? 'Transcribing…'
-              : phase === 'requesting'
-                ? 'Starting…'
-                : 'Dictate'}
-        </span>
       </button>
 
-      {recording ? (
-        <span className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-          Speak in any language — the note is saved in English
-        </span>
-      ) : null}
+      <span
+        role={recording ? 'timer' : undefined}
+        aria-live={recording ? 'off' : undefined}
+        className={`${caption} ${
+          recording
+            ? 'font-bold text-danger-600 dark:text-danger-400'
+            : 'text-[var(--color-text-subtle)]'
+        }`}
+      >
+        {/* Counts down, so the number answers "how long have I got" rather than
+            "how long have I been going" — the only one of the two a speaker can
+            act on. */}
+        {recording
+          ? `${remaining}s`
+          : phase === 'working'
+            ? '…'
+            : phase === 'requesting'
+              ? '·'
+              : `${MAX_SECONDS}s`}
+      </span>
 
+      {/*
+        Out of the column's flow on purpose. "The microphone is blocked for this
+        site" does not fit in three rem, and a refusal the rep cannot read is a
+        refusal they will report as the button being broken.
+      */}
       {message ? (
         <span
           role="status"
-          className={`w-full text-right text-[0.6875rem] ${
+          className={`absolute right-0 top-full z-10 mt-1 w-48 text-right text-[0.6875rem] leading-tight ${
             phase === 'failed' || phase === 'denied'
               ? 'text-danger-500'
               : 'text-[var(--color-text-subtle)]'
@@ -262,11 +314,6 @@ export function VoiceInputButton({
       ) : null}
     </span>
   );
-}
-
-function formatSeconds(total: number): string {
-  const minutes = Math.floor(total / 60);
-  return `${minutes}:${String(total % 60).padStart(2, '0')}`;
 }
 
 /**
@@ -312,12 +359,29 @@ function encodeWav(chunks: Float32Array[], sampleRate: number): ArrayBuffer {
   return buffer;
 }
 
+/**
+ * Sized for the box it now sits in, not the one it came from.
+ *
+ * Thirteen pixels was right beside the word "Dictate"; alone in a full-height
+ * tile it read as a speck. The mic is the only thing identifying this control
+ * now that the label has gone, so it is drawn at a size somebody can recognise
+ * with a thumb over it.
+ */
 function MicIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+    <svg
+      width="26"
+      height="26"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      aria-hidden
+    >
       <rect x="9" y="2" width="6" height="11" rx="3" />
       <path d="M5 10a7 7 0 0 0 14 0" strokeLinecap="round" />
       <path d="M12 17v4" strokeLinecap="round" />
+      <path d="M8.5 21h7" strokeLinecap="round" />
     </svg>
   );
 }

@@ -405,17 +405,22 @@ function LogInteractionForm({
       </div>
 
       <div>
-        <div className="flex items-center justify-between gap-2">
-          <label className="label" htmlFor="body">Remarks</label>
+        <label className="label" htmlFor="body">Remarks</label>
+        {/*
+          `items-stretch` is what ties the two together: the mic column sizes
+          itself to the textarea rather than the other way round, so changing
+          `rows` here needs no matching change in the control.
+        */}
+        <div className="flex items-stretch gap-2">
+          <textarea
+            id="body"
+            name="body"
+            rows={3}
+            className="input min-w-0 flex-1 resize-none"
+            placeholder="Anything the next person needs to know."
+          />
           <VoiceInputButton enabled={voiceInputEnabled} targetId="body" />
         </div>
-        <textarea
-          id="body"
-          name="body"
-          rows={3}
-          className="input resize-none"
-          placeholder="Anything the next person needs to know."
-        />
       </div>
 
       <ProductValueFields products={products} />

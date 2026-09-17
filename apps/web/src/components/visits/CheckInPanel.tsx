@@ -389,21 +389,21 @@ export function CheckOutPanel({
       ) : null}
 
       <div>
-        <div className="flex items-center justify-between gap-2">
-          <label className="label" htmlFor="meetingNotes">
-            What was discussed? <span className="text-danger-500">*</span>
-          </label>
+        <label className="label" htmlFor="meetingNotes">
+          What was discussed? <span className="text-danger-500">*</span>
+        </label>
+        <div className="flex items-stretch gap-2">
+          <textarea
+            id="meetingNotes"
+            name="meetingNotes"
+            rows={5}
+            required
+            className="input min-w-0 flex-1 resize-none"
+            placeholder="Documents collected, objections raised, what was agreed…"
+            aria-invalid={Boolean(state.errors?.meetingNotes)}
+          />
           <VoiceInputButton enabled={voiceInputEnabled} targetId="meetingNotes" />
         </div>
-        <textarea
-          id="meetingNotes"
-          name="meetingNotes"
-          rows={5}
-          required
-          className="input resize-none"
-          placeholder="Documents collected, objections raised, what was agreed…"
-          aria-invalid={Boolean(state.errors?.meetingNotes)}
-        />
         {state.errors?.meetingNotes ? (
           <p className="mt-1 text-xs text-danger-500">{state.errors.meetingNotes[0]}</p>
         ) : null}
