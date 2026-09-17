@@ -11,7 +11,24 @@ export const idSchema = z.string().min(8).max(64);
 export const indianMobileSchema = z
   .string()
   .trim()
-  .transform((value) => value.replace(/[\s-]/g, '').replace(/^(\+91|91|0)/, ''))
+  .transform((value) => {
+    const digits = value.replace(/[\s-]/g, '').replace(/^\+/, '');
+
+    /*
+      Strip a country code only when what remains is still a whole number.
+
+      The previous rule stripped a leading "91" unconditionally, which is right
+      for +919876543210 and wrong for 9123456789 — a perfectly ordinary Indian
+      mobile that merely begins with those two digits. It became 23456789, failed
+      the ten-digit check, and the number could not be entered anywhere in the
+      system: not on the lead form, not through the public capture, not by
+      import. Length is what distinguishes a country code from the first two
+      digits of a subscriber number, so length is what decides.
+    */
+    if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+    if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+    return digits;
+  })
   .pipe(z.string().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'));
 
 export const emailSchema = z.string().trim().toLowerCase().email('Enter a valid email address');
