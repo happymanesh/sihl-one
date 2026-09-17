@@ -51,7 +51,7 @@ export function istTimestamp(when: Date): string {
 }
 
 /** Anything interpolated into the HTML body is escaped; names come from user input. */
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

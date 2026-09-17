@@ -92,6 +92,21 @@ export default async function LoginPage({
             <LoginForm next={next} />
           </div>
 
+          {/*
+            Under the form rather than beside the password box. Somebody who
+            knows their password never needs this, and putting it next to the
+            field invites a misclick mid-sign-in; somebody who does not know it
+            will have already failed once and be looking here.
+          */}
+          <p className="mt-4 text-center text-sm">
+            <Link
+              href="/forgot-password"
+              className="font-semibold text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+            >
+              Forgot your password?
+            </Link>
+          </p>
+
           <p className="mt-6 text-center text-sm text-[var(--color-text-muted)]">
             Looking to open an account?{' '}
             <Link href="/" className="font-semibold text-teal-600 hover:underline dark:text-teal-300">

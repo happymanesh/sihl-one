@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from 'node:crypto';
+
 import {
   BadRequestException,
   Inject,
@@ -6,10 +8,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import {
+  PASSWORD_RESET_TTL_MINUTES,
   effectiveScope,
   type AuthTokens,
   type AuthenticatedUser,
   type ChangePasswordInput,
+  type ForgotPasswordInput,
+  type ResetPasswordInput,
   type DataScope,
   type LoginInput,
   type LoginResponse,
@@ -24,6 +29,7 @@ import { AuditService } from '../../common/audit.service';
 import { RequestContextStore } from '../../common/request-context';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Mailer } from '../mail/mailer';
 import { MfaService } from './mfa.service';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
@@ -76,6 +82,7 @@ export class AuthService {
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
     private readonly audit: AuditService,
+    private readonly mailer: Mailer,
   ) {}
 
   async login(input: LoginInput): Promise<LoginResponse | MfaChallengeResponse> {
@@ -508,6 +515,199 @@ export class AuthService {
     ]);
 
     await this.audit.record({ action: 'UPDATE', resource: 'user.password', resourceId: userId });
+  }
+
+  /**
+   * Issue a reset link, and say nothing about who has an account.
+   *
+   * The response is identical whether the identifier matched a live user, a
+   * suspended one, or nobody at all — no message difference, no status
+   * difference. A forgot-password form is the classic account-enumeration
+   * oracle: "no account with that email" hands anyone a way to test whether a
+   * given person banks with SIHL, which for a broker is a disclosure in itself.
+   * It is the same mistake finding 1 of docs/pii-egress-review.md records on
+   * the capture endpoint, and it is not worth making twice.
+   *
+   * The work is therefore done quietly and the caller is told nothing:
+   * unknown identifier, locked account, no email on file, mailer not
+   * configured — all of them return the same acknowledgement.
+   */
+  async requestPasswordReset(input: ForgotPasswordInput): Promise<void> {
+    const context = RequestContextStore.get();
+    const identifier = input.identifier.trim().toLowerCase();
+    const asCode = input.identifier.trim().toUpperCase();
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        deletedAt: null,
+        OR: [
+          { email: identifier },
+          { mobile: identifier.replace(/^(\+91|91|0)/, '') },
+          { employeeCode: asCode },
+        ],
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        employeeCode: true,
+        status: true,
+      },
+    });
+
+    // Every early return below is silent by design. See the note above.
+    if (!user || user.status !== 'ACTIVE' || !user.email) {
+      this.logger.warn(
+        `Password reset requested for an identifier that resolved to ${
+          user ? `a ${user.status} account` : 'no account'
+        }`,
+      );
+      return;
+    }
+
+    /*
+      A cap on outstanding links per account.
+
+      Without it, anyone who knows an address can post the form repeatedly and
+      fill somebody's inbox — annoying for them, and an effective way to bury a
+      genuine security email under noise. Existing unspent links stay valid, so
+      a legitimate user who clicks twice is not locked out of their own reset.
+    */
+    const recent = await this.prisma.passwordResetToken.count({
+      where: {
+        userId: user.id,
+        createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+      },
+    });
+    if (recent >= 5) {
+      this.logger.warn(`Password reset throttled for user ${user.id}: ${recent} in the last hour`);
+      return;
+    }
+
+    // 32 bytes of CSPRNG, base64url. Long enough that guessing is not a
+    // strategy, short enough to survive a mail client wrapping the URL.
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+        requestedIp: context?.ipAddress ?? null,
+        requestedUa: context?.userAgent?.slice(0, 400) ?? null,
+      },
+    });
+
+    const base = (this.config.mail.appUrl ?? '').replace(/\/$/, '');
+    const resetUrl = `${base}/reset-password?token=${token}`;
+
+    // Audited before the send, and recording *that* a reset was requested
+    // rather than the token — an audit row holding a working key to an account
+    // would defeat the hashing above.
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'user.password-reset-requested',
+      resourceId: user.id,
+      reason: 'Self-service password reset requested',
+    });
+
+    try {
+      const result = await this.mailer.sendPasswordResetLink({
+        to: user.email,
+        firstName: user.firstName,
+        employeeCode: user.employeeCode,
+        resetUrl,
+        validForMinutes: PASSWORD_RESET_TTL_MINUTES,
+        productName: this.config.mail.fromName,
+      });
+      if (!result.accepted) {
+        // Loud in the logs, silent to the caller. An administrator needs to
+        // know the mailer is not configured; the person at the form must not
+        // learn anything from it either way.
+        this.logger.error(
+          `Password reset link for user ${user.id} was not sent: ${result.failureReason ?? 'unknown'}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Password reset link for user ${user.id} failed to send`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * Spend a reset link.
+   *
+   * Unlike the request side, this one does report failure — the person is
+   * holding a link they believe in, and "that link is no longer valid" is
+   * information they need and which reveals nothing about anyone else.
+   */
+  async resetPassword(input: ResetPasswordInput): Promise<void> {
+    const tokenHash = createHash('sha256').update(input.token.trim()).digest('hex');
+
+    const record = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: { select: { id: true, status: true, deletedAt: true } } },
+    });
+
+    const invalid = new BadRequestException({
+      title: 'This reset link is no longer valid',
+      detail:
+        'It may have expired, or already been used. Ask for a new one from the sign-in page.',
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) throw invalid;
+    if (!record.user || record.user.deletedAt || record.user.status !== 'ACTIVE') throw invalid;
+
+    const passwordHash = await this.passwords.hash(input.newPassword);
+    const now = new Date();
+
+    await this.prisma.$transaction([
+      // Marked used inside the same transaction as the password write, so two
+      // requests racing with one link cannot both succeed.
+      this.prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: now },
+      }),
+
+      // Every other outstanding link for this account dies too. Somebody who
+      // has just regained control should not leave live keys behind them.
+      this.prisma.passwordResetToken.updateMany({
+        where: { userId: record.userId, usedAt: null, id: { not: record.id } },
+        data: { usedAt: now },
+      }),
+
+      this.prisma.user.update({
+        where: { id: record.userId },
+        data: {
+          passwordHash,
+          mustChangePassword: false,
+          passwordChangedAt: now,
+          // A person who has forgotten their password has usually just locked
+          // themselves out trying to remember it. Proving control of the
+          // mailbox is a stronger signal than the lockout it clears.
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      }),
+
+      // As with a deliberate change: if the reset was prompted by a takeover,
+      // leaving the intruder's session alive defeats the point.
+      this.prisma.session.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: now, revokedReason: 'PASSWORD_RESET' },
+      }),
+    ]);
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'user.password',
+      resourceId: record.userId,
+      reason: 'Password reset via emailed link',
+    });
   }
 
   async currentUser(userId: string): Promise<AuthenticatedUser> {

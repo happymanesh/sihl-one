@@ -70,6 +70,45 @@ export const changePasswordSchema = z
   });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
+/**
+ * Asking for a reset link.
+ *
+ * Takes the same identifier the sign-in box does — email, mobile or employee
+ * code — because somebody who cannot remember their password is not in a state
+ * to be told they also used the wrong kind of identifier.
+ */
+export const forgotPasswordSchema = z.object({
+  identifier: z.string().trim().min(3, 'Enter your email, mobile or employee code').max(160),
+});
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+/**
+ * Spending the link.
+ *
+ * No current password: the whole point is that the person does not have one
+ * they can use. The token is the proof, which is why it is single-use, short
+ * lived, and why a successful reset ends every existing session.
+ */
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().trim().min(20).max(200),
+    newPassword: passwordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+/**
+ * How long a reset link is good for.
+ *
+ * Half an hour is long enough to find the email on another device and short
+ * enough that a link sitting in an inbox overnight is already dead.
+ */
+export const PASSWORD_RESET_TTL_MINUTES = 30;
+
 /** Claims carried in the access token. Kept small — tokens travel a lot. */
 export const accessTokenClaimsSchema = z.object({
   sub: idSchema,

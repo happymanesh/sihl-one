@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { APP_CONFIG, type AppConfig } from '../../config/configuration';
+import { passwordResetLinkEmail } from './password-reset-link.template';
 import { passwordResetEmail } from './password-reset.template';
 
 /**
@@ -55,6 +56,34 @@ export abstract class Mailer {
       email: input.to,
       temporaryPassword: input.temporaryPassword,
       appUrl: input.appUrl,
+      when: new Date(),
+      productName: input.productName,
+    });
+    return this.send({ to: input.to, ...rendered });
+  }
+
+  /**
+   * The self-service reset: a single-use link, never a credential.
+   *
+   * Kept separate from `sendPasswordReset` above rather than adding a flag to
+   * it. The two messages say genuinely different things — one hands over a
+   * working password, the other hands over a link that dies on use — and a
+   * branch inside one method is how the wrong one eventually gets sent.
+   */
+  async sendPasswordResetLink(input: {
+    to: string;
+    firstName: string;
+    employeeCode: string | null;
+    resetUrl: string;
+    validForMinutes: number;
+    productName: string;
+  }): Promise<EmailResult> {
+    const rendered = passwordResetLinkEmail({
+      firstName: input.firstName,
+      employeeCode: input.employeeCode,
+      email: input.to,
+      resetUrl: input.resetUrl,
+      validForMinutes: input.validForMinutes,
       when: new Date(),
       productName: input.productName,
     });

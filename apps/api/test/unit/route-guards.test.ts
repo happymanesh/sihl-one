@@ -32,9 +32,15 @@ const PUBLIC_ROUTES = [
   'GET /events/capture-context/:kind/:code',
   'GET /live',
   'GET /ready',
+  // Self-service password reset. Public of necessity — the whole point is that
+  // the caller cannot sign in. Both are throttled harder than login, and
+  // /auth/forgot-password answers identically whether or not the account
+  // exists, so it cannot be used to test who holds one.
+  'POST /auth/forgot-password',
   'POST /auth/login',
   'POST /auth/mfa/challenge',
   'POST /auth/refresh',
+  'POST /auth/reset-password',
   'POST /leads/capture',
 ];
 

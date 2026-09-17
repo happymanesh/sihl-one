@@ -219,6 +219,7 @@ model User {
   roles          UserRole[]
   mfaRecoveryCodes MfaRecoveryCode[]
   sessions       Session[]
+  passwordResets PasswordResetToken[]
   ownedLeads     Lead[]     @relation("LeadOwner")
   verifiedLeads  Lead[]     @relation("LeadMobileVerifier")
   editedProfiles LeadProfile[] @relation("LeadProfileEditor")
@@ -480,6 +481,36 @@ model MessageOptOut {
 
   @@unique([entityType, entityId, channel])
   @@map("message_opt_out")
+}
+
+/// A single-use link for somebody who cannot sign in.
+///
+/// The token itself is never stored. Only its SHA-256 digest is kept, for the
+/// same reason a password is hashed: this table is readable by anyone who can
+/// read the database, and a plaintext reset token is a working key to an
+/// account. The digest is unique so a leaked backup cannot be replayed.
+model PasswordResetToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  /// SHA-256 of the token that was emailed, hex encoded.
+  tokenHash String @unique @db.VarChar(64)
+
+  expiresAt DateTime
+  /// Set the moment it is spent. A reset link works exactly once.
+  usedAt    DateTime?
+
+  /// Who asked. Recorded because a burst of requests against one account is the
+  /// shape of somebody probing, and the audit trail should be able to show it.
+  requestedIp String? @db.VarChar(45)
+  requestedUa String? @db.VarChar(400)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("password_reset_token")
 }
 
 model Session {

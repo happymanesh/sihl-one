@@ -5,15 +5,19 @@ import {
   changePasswordSchema,
   disableMfaSchema,
   enableMfaSchema,
+  forgotPasswordSchema,
   loginSchema,
   mfaAnswerSchema,
   refreshSchema,
+  resetPasswordSchema,
   type ChangePasswordInput,
   type DisableMfaInput,
   type EnableMfaInput,
+  type ForgotPasswordInput,
   type LoginInput,
   type MfaAnswerInput,
   type RefreshInput,
+  type ResetPasswordInput,
 } from '@sihl-one/contracts';
 
 import { CurrentUser, Public,
@@ -52,6 +56,45 @@ export class AuthController {
   }
 
   @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  // Tighter than login. One person asking for a reset link does it once or
+  // twice; a burst from one address is somebody testing which identifiers
+  // exist, and the per-account cap inside the service is the second line.
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Ask for a password reset link',
+    description:
+      'Always answers 202, whether or not the identifier matches an account. A response ' +
+      'that varied would let anyone test whether a given person is a SIHL user.',
+  })
+  @ApiResponse({ status: 202, description: 'Acknowledged. A link is sent only if the account exists.' })
+  @ApiZodBody(forgotPasswordSchema)
+  async forgotPassword(@ZodBody(forgotPasswordSchema) body: ForgotPasswordInput) {
+    await this.auth.requestPasswordReset(body);
+    return {
+      message:
+        'If that account exists, a reset link is on its way. Check your inbox, including spam.',
+    };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Set a new password using a reset link',
+    description:
+      'Single use. Spending a link ends every session the account had, and cancels any ' +
+      'other outstanding link for it.',
+  })
+  @ApiResponse({ status: 204, description: 'Password set. Sign in with it.' })
+  @ApiResponse({ status: 400, description: 'The link was expired, already spent, or unknown.' })
+  @ApiZodBody(resetPasswordSchema)
+  async resetPassword(@ZodBody(resetPasswordSchema) body: ResetPasswordInput) {
+    await this.auth.resetPassword(body);
+  }
+
   @Public()
   @Post('mfa/challenge')
   @HttpCode(HttpStatus.OK)
