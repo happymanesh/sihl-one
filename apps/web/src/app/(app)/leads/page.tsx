@@ -58,9 +58,22 @@ export default async function LeadsPage({
     pageSize: '20',
   });
 
-  const [sources, products] = await Promise.all([
+  const [sources, products, owners] = await Promise.all([
     apiFetch<LeadSourceItem[]>('/masters/lead-sources').catch(() => [] as LeadSourceItem[]),
     apiFetch<ProductItem[]>('/masters/products').catch(() => [] as ProductItem[]),
+    /*
+      Whose leads, for the owner filter.
+
+      Guarded on `user:read`, which a sales executive does not hold — and should
+      not, since their scope is their own book and the filter would be a list of
+      one. The catch is the whole handling: no permission, no owners, no
+      control, rather than a failed page.
+    */
+    can(user, 'user:read')
+      ? apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
+          '/users/assignable',
+        ).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   const data = await apiFetch<Paginated>(`/leads${query}`);
@@ -78,7 +91,7 @@ export default async function LeadsPage({
   // not render as "Nri" and MUTUAL_FUNDS reads however the business named it.
   const productLabels = Object.fromEntries(products.map((p) => [p.code, p.name]));
   const hasFilters = Boolean(
-    first('q') || params.status || params.source || params.productInterest || first('priority') || first('overdueOnly') || first('minScore'),
+    first('q') || params.status || params.source || params.productInterest || first('priority') || first('overdueOnly') || first('minScore') || first('ownerId'),
   );
 
   return (
@@ -130,7 +143,7 @@ export default async function LeadsPage({
         </div>
       </header>
 
-      <LeadFilters sources={sources} products={products} />
+      <LeadFilters sources={sources} products={products} owners={owners} />
 
       {filteredEvent ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-sm">

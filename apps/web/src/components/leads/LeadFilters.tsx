@@ -16,19 +16,28 @@ const OWNED_KEYS = [
   'priority',
   'overdueOnly',
   'minScore',
-  'mobileVerified',
+  'ownerId',
 ] as const;
+
+export interface OwnerOption {
+  id: string;
+  fullName: string;
+  employeeCode?: string | null;
+}
 
 export function LeadFilters({
   sources,
   products,
+  owners = [],
 }: {
   sources: LeadSourceItem[];
   products: ProductItem[];
+  /** Empty for anyone who may not read users — a rep sees only their own book. */
+  owners?: OwnerOption[];
 }) {
   return (
     <FilterBarBoundary>
-      <LeadFiltersInner sources={sources} products={products} />
+      <LeadFiltersInner sources={sources} products={products} owners={owners} />
     </FilterBarBoundary>
   );
 }
@@ -36,12 +45,13 @@ export function LeadFilters({
 function LeadFiltersInner({
   sources,
   products,
+  owners,
 }: {
   sources: LeadSourceItem[];
   products: ProductItem[];
+  owners: OwnerOption[];
 }) {
   const { searchParams, apply, clear, pending, activeCount, values } = useFilters(OWNED_KEYS);
-  const unverifiedOnly = searchParams.get('mobileVerified') === 'false';
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
 
   // Keep the box in step when the URL changes from elsewhere — a dashboard
@@ -64,6 +74,7 @@ function LeadFiltersInner({
   const source = searchParams.get('source') ?? '';
   const overdueOnly = searchParams.get('overdueOnly') === 'true';
   const hotOnly = searchParams.get('minScore') === '70';
+  const ownerId = searchParams.get('ownerId') ?? '';
 
   return (
     <FilterBar
@@ -111,6 +122,27 @@ function LeadFiltersInner({
         ))}
       </select>
 
+      {/*
+        Whose leads. Absent for a rep, who only ever sees their own book, so the
+        control would be a dropdown with one entry and no purpose.
+      */}
+      {owners.length > 0 ? (
+        <select
+          value={ownerId}
+          onChange={(event) => apply({ ownerId: event.target.value || null })}
+          className="input h-9 w-auto"
+          aria-label="Filter by owner"
+        >
+          <option value="">All owners</option>
+          {owners.map((owner) => (
+            <option key={owner.id} value={owner.id}>
+              {owner.fullName}
+              {owner.employeeCode ? ` [${owner.employeeCode}]` : ''}
+            </option>
+          ))}
+        </select>
+      ) : null}
+
       <MultiSelectFilter
         label="Products"
         allLabel="All products"
@@ -128,16 +160,6 @@ function LeadFiltersInner({
 
       <ToggleChip active={hotOnly} onClick={() => apply({ minScore: hotOnly ? null : '70' })}>
         Hot leads
-      </ToggleChip>
-
-      {/* The unverified pile is the view a manager actually wants, so it is one
-          click rather than a sort. There is deliberately no "verified only"
-          chip: nobody goes looking for the numbers that are fine. */}
-      <ToggleChip
-        active={unverifiedOnly}
-        onClick={() => apply({ mobileVerified: unverifiedOnly ? null : 'false' })}
-      >
-        Mobile unverified
       </ToggleChip>
     </FilterBar>
   );
