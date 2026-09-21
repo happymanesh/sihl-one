@@ -102,6 +102,41 @@ export function UserForm({
     unchanged would then quietly clear the manager.
   */
   const [managerId, setManagerId] = useState(values?.managerId ?? '');
+  /*
+    Status and branch are controlled for the same reason as the manager, and
+    re-synced below when the record changes.
+
+    `defaultValue` is applied once, at mount. After a save the page refreshes
+    and hands this component the stored record, but an uncontrolled select keeps
+    whatever it had — so suspending somebody left the badge reading Suspended
+    and the dropdown beneath it reading Active. Two parts of one screen
+    disagreeing about the same field is what makes an administrator doubt the
+    save rather than the screen.
+  */
+  const [status, setStatus] = useState(values?.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE');
+  const [orgUnitId, setOrgUnitId] = useState(values?.orgUnitId ?? '');
+
+  /*
+    Follow the record, not the last thing typed.
+
+    Adjusted during render rather than in an effect — the pattern React
+    documents for "reset state when a prop changes". An effect would work but
+    renders once with the stale value first, and the linter is right to object.
+
+    Compared on a signature of the three fields rather than on `values`, which
+    is a fresh object on every server render and would loop.
+
+    Remounting the whole form would achieve the same and would take the "Saved."
+    confirmation with it — the one thing the reader is actually looking for.
+  */
+  const recordSignature = `${values?.status ?? ''}|${values?.orgUnitId ?? ''}|${values?.managerId ?? ''}`;
+  const [seenSignature, setSeenSignature] = useState(recordSignature);
+  if (seenSignature !== recordSignature) {
+    setSeenSignature(recordSignature);
+    setStatus(values?.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE');
+    setOrgUnitId(values?.orgUnitId ?? '');
+    setManagerId(values?.managerId ?? '');
+  }
   const [userType, setUserType] = useState(values?.userType ?? 'INTERNAL');
   const [firstName, setFirstName] = useState(values?.firstName ?? '');
   const [lastName, setLastName] = useState(values?.lastName ?? '');
@@ -365,7 +400,8 @@ export function UserForm({
               name="orgUnitId"
               className="input"
               required
-              defaultValue={values?.orgUnitId ?? ''}
+              value={orgUnitId}
+              onChange={(event) => setOrgUnitId(event.target.value)}
             >
               <option value="" disabled>
                 Choose a branch
@@ -458,7 +494,8 @@ export function UserForm({
             id="status"
             name="status"
             className="input w-auto"
-            defaultValue={values?.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE'}
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
           >
             <option value="ACTIVE">Active</option>
             <option value="SUSPENDED">Suspended</option>
