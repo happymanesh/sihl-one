@@ -4,6 +4,7 @@ import type { EventDetail, EventRepBreakdown } from '@sihl-one/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { CopyField } from '@/components/ui/CopyField';
 import { EventActions } from '@/components/events/EventActions';
+import { CollapsibleQr } from '@/components/events/CollapsibleQr';
 import { EventRepTable } from '@/components/events/EventRepTable';
 import { QrCode } from '@/components/ui/QrCode';
 import { StatTile } from '@/components/ui/StatTile';
@@ -30,6 +31,8 @@ const STATUS_TONES: Record<string, 'green' | 'navy' | 'teal' | 'neutral'> = {
 
 export default async function EventDetailPage({ params }: Props) {
   const user = await requireUser();
+  /** Runs events, rather than works them. Decides which QR greets them. */
+  const runsEvents = can(user, 'campaign:read');
   const { id } = await params;
   const event = await apiFetch<EventDetail>(`/events/${id}`);
   const byRep = await apiFetch<EventRepBreakdown[]>(`/events/${id}/by-rep`).catch(
@@ -139,11 +142,23 @@ export default async function EventDetailPage({ params }: Props) {
         ) : null}
       </section>
 
-      <section className="card p-5">
+      {/*
+        Which code greets you depends on your job.
+
+        Somebody who runs events wants the stall's QR, the one that goes on the
+        banner. A rep wants their own, because that is the one that puts leads in
+        their name. Both sections are always present; only the starting state
+        differs, and `campaign:read` is the same line the API already draws
+        between running an event and working one.
+      */}
+      <CollapsibleQr
+        title="Registration QR"
+        summary="The stall's code — every scan lands as an event lead."
+        defaultOpen={runsEvents}
+      >
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-[16rem] flex-1">
-            <h2 className="font-bold">Registration QR</h2>
-            <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+            <p className="text-sm text-[var(--color-text-muted)]">
               Print this for the desk. Every scan opens a registration form already tagged to this
               event, so nobody has to type a spreadsheet afterwards.
             </p>
@@ -168,9 +183,10 @@ export default async function EventDetailPage({ params }: Props) {
             <p className="mt-1.5 font-mono text-xs text-[var(--color-text-subtle)]">{event.code}</p>
           </div>
         </div>
+      </CollapsibleQr>
 
-        {/*
-          The rep's own QR, below the stall's.
+      {/*
+          The rep's own QR.
 
           Same event, one extra parameter carrying their employee code, so every
           scan of this one lands as their lead instead of in a common pile. Shown
@@ -178,11 +194,15 @@ export default async function EventDetailPage({ params }: Props) {
           printed for a closed event produces nothing and teaches people the
           feature is broken.
         */}
-        {event.myCaptureUrl && event.status === 'RUNNING' ? (
-          <div className="mt-5 flex flex-wrap items-start justify-between gap-5 border-t border-[var(--color-border)] pt-5">
+      {event.myCaptureUrl && event.status === 'RUNNING' ? (
+        <CollapsibleQr
+          title="Your QR"
+          summary="Tagged with your employee code — scans become your leads."
+          defaultOpen={!runsEvents}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-5">
             <div className="min-w-[16rem] flex-1">
-              <h3 className="font-bold">Your QR</h3>
-              <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+              <p className="text-sm text-[var(--color-text-muted)]">
                 Scans of this one are tagged{' '}
                 <span className="font-mono font-semibold">{event.myEmployeeCode}</span> and the lead
                 is assigned to you automatically. Use it on your phone or print your own copy.
@@ -199,8 +219,8 @@ export default async function EventDetailPage({ params }: Props) {
               </p>
             </div>
           </div>
-        ) : null}
-      </section>
+        </CollapsibleQr>
+      ) : null}
 
       <section className="card p-5">
         <div className="flex items-baseline justify-between">
