@@ -285,8 +285,8 @@ export class EventsService {
    * still appears, because the leads they brought in still exist.
    *
    * Leads from the plain banner QR are not dropped. They are collected into a
-   * single unattributed row, because "how many did nobody get credit for" is
-   * exactly the number this breakdown exists to expose.
+   * single "Unassigned Leads" row, because "how many did nobody get credit for"
+   * is exactly the number this breakdown exists to expose.
    */
   async byRep(user: AuthenticatedPrincipal, id: string): Promise<EventRepBreakdown[]> {
     const reach = this.seesEverything(user) ? {} : this.repEventFilter(user);
@@ -330,7 +330,7 @@ export class EventsService {
             ? `${person.firstName} ${person.lastName}`.trim()
             : row.capturedById
               ? 'Removed user'
-              : 'Banner QR (nobody credited)',
+              : 'Unassigned Leads',
           employeeCode: person?.employeeCode ?? null,
           total: 0,
           byStatus: [],
