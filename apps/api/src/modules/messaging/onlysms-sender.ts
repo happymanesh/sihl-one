@@ -38,7 +38,18 @@ export class OnlySmsSender extends SmsSender {
 
   async send(request: SmsRequest): Promise<SmsResult> {
     const sms = this.config.sms;
-    const url = new URL(sms.textUrl);
+    /*
+      The OTP endpoint, not the text one.
+
+      They are not interchangeable. `sms.aspx` accepts almost anything — it
+      returned `100=` for a message of "probe" sent to the number "1" — while
+      `otp.aspx` validates the body against the registered DLT template and
+      answers `-104 Invalid Message` when it does not match. An OTP-category
+      template sent down the transactional route is accepted by the gateway and
+      then dropped by the operator, which is exactly how the first live code
+      went missing: the provider said 100, and no phone ever rang.
+    */
+    const url = new URL(sms.otpUrl);
     url.searchParams.set('UserID', sms.userId);
     url.searchParams.set('UserPass', sms.password);
     url.searchParams.set('MobileNo', request.mobile);
@@ -74,24 +85,45 @@ export class OnlySmsSender extends SmsSender {
       }
 
       /*
-        The gateway answers 200 with a body that says what happened, so a 200 is
-        not on its own a send. Anything that looks like a refusal is treated as
-        one — better a resend offered than a person waiting for a message that
-        was never accepted.
+        The gateway always answers 200. What happened is in the body, as a
+        signed number before a delimiter:
+
+          100=OC_165356465_e00a6      accepted, with its reference
+          -104<br>Invalid Message     refused, with a reason
+
+        Read as a number rather than by looking for words like "error": the
+        first version searched the text for failure words, and `100=OC_...`
+        contains none of them, so a refusal and a success were indistinguishable
+        to it. A negative code is a refusal; anything else is taken as accepted.
       */
-      const refused = /error|invalid|fail|denied|insufficient|blocked/i.test(text);
-      if (refused) {
-        this.logger.warn(`SMS refused for ${maskMobile(request.mobile)}: ${text.slice(0, 160)}`);
+      const code = Number.parseInt(text, 10);
+      const description = text.replace(/^-?\d+\s*(<br\s*\/?>|=)?\s*/i, '').trim();
+
+      if (Number.isNaN(code)) {
+        this.logger.warn(
+          `SMS response not understood for ${maskMobile(request.mobile)}: ${text.slice(0, 160)}`,
+        );
         return {
           accepted: false,
           providerMessageId: null,
-          failureReason: text.slice(0, 200) || 'Provider refused the message',
+          failureReason: `Unrecognised provider response: ${text.slice(0, 160)}`,
+        };
+      }
+
+      if (code < 0) {
+        this.logger.warn(
+          `SMS refused for ${maskMobile(request.mobile)}: ${code} ${description.slice(0, 120)}`,
+        );
+        return {
+          accepted: false,
+          providerMessageId: null,
+          failureReason: `${code} ${description}`.trim().slice(0, 200),
         };
       }
 
       return {
         accepted: true,
-        providerMessageId: text.slice(0, 120) || null,
+        providerMessageId: description.slice(0, 120) || String(code),
         failureReason: null,
       };
     } catch (error) {

@@ -132,6 +132,24 @@ export class OtpService {
       templateId: this.config.sms.otpTemplateId,
     });
 
+    /*
+      Record what the provider said, on the row.
+
+      Without this, "did the message go?" can only be answered by querying the
+      provider from a production shell — which is how the first missing code was
+      eventually explained, long after the person had given up waiting.
+    */
+    await this.prisma.mobileOtp.update({
+      where: { id: record.id },
+      data: {
+        sent: result.accepted,
+        providerResponse: (result.accepted ? result.providerMessageId : result.failureReason)?.slice(
+          0,
+          200,
+        ),
+      },
+    });
+
     if (!result.accepted) {
       // The row stays. The person may still receive a delayed message, and the
       // attempt is evidence when somebody reports that nothing arrived.

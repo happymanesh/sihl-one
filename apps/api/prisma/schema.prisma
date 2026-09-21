@@ -1195,6 +1195,12 @@ model MobileOtp {
   expiresAt  DateTime
   attempts   Int       @default(0)
   consumedAt DateTime?
+
+  /// Whether the provider accepted the message.
+  sent             Boolean @default(false)
+  /// The provider's reference, or its refusal. Never the request itself, which
+  /// carries the account password in its query string.
+  providerResponse String? @db.VarChar(200)
   /// Who asked. The capture endpoint is public; this is how one address asking
   /// for codes on hundreds of numbers becomes visible.
   ipAddress  String?   @db.VarChar(64)
