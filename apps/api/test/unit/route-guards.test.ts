@@ -42,6 +42,17 @@ const PUBLIC_ROUTES = [
   'POST /auth/refresh',
   'POST /auth/reset-password',
   'POST /leads/capture',
+  /*
+    Mobile verification for a capture that has already happened. Public because
+    the person holding the phone at the stall has no account and never will.
+
+    Neither takes a mobile number — only the unguessable verification id handed
+    back at capture — so they cannot be pointed at a stranger's number or used
+    to ask whether one has a code outstanding. Both are throttled at the route,
+    and OtpService caps attempts per code and sends per number behind that.
+  */
+  'POST /leads/capture/resend-code',
+  'POST /leads/capture/verify-mobile',
 ];
 
 /**

@@ -1,6 +1,12 @@
 'use server';
 
-import { leadCaptureSchema, type LeadSource, type ProductInterest } from '@sihl-one/contracts';
+import {
+  leadCaptureSchema,
+  resendOtpSchema,
+  verifyOtpSchema,
+  type LeadSource,
+  type ProductInterest,
+} from '@sihl-one/contracts';
 
 import { ApiError } from '@/lib/api';
 
@@ -32,6 +38,19 @@ export interface CaptureState {
     mobile: string;
     productInterest: string[];
     assignedToName: string | null;
+  };
+
+  /**
+   * A code is waiting to be typed.
+   *
+   * Present only when one was actually sent. The lead is saved either way, so
+   * its absence means the registration succeeded and verification is simply
+   * unavailable — never that anything was lost.
+   */
+  verification?: {
+    verificationId: string;
+    expiresInSeconds: number;
+    maskedMobile: string;
   };
   errors?: Record<string, string[]>;
 }
@@ -121,6 +140,12 @@ export async function submitLeadCapture(
       mobile?: string;
       productInterest?: string[] | null;
       assignedToName?: string | null;
+      verification?: {
+        verificationId: string | null;
+        expiresInSeconds: number;
+        maskedMobile: string;
+        sent: boolean;
+      } | null;
     };
 
     /*
@@ -144,6 +169,14 @@ export async function submitLeadCapture(
       status: 'success',
       reference: data.reference,
       alreadyKnown,
+      verification:
+        data.verification?.sent && data.verification.verificationId
+          ? {
+              verificationId: data.verification.verificationId,
+              expiresInSeconds: data.verification.expiresInSeconds,
+              maskedMobile: data.verification.maskedMobile,
+            }
+          : undefined,
       captured: attended
         ? {
             name: [data.firstName, data.lastName].filter(Boolean).join(' ').trim(),
@@ -168,5 +201,97 @@ export async function submitLeadCapture(
       status: 'error',
       message: 'We could not reach our servers. Please try again in a moment.',
     };
+  }
+}
+
+export interface VerifyState {
+  status: 'idle' | 'verified' | 'error';
+  message?: string;
+  attemptsRemaining?: number;
+}
+
+/**
+ * Check the code the visitor was texted.
+ *
+ * Bare fetch, like the capture above: the person doing this has no account, so
+ * routing it through the authenticated client would be wrong.
+ */
+export async function verifyCaptureMobile(
+  _previous: VerifyState,
+  formData: FormData,
+): Promise<VerifyState> {
+  const parsed = verifyOtpSchema.safeParse({
+    verificationId: formData.get('verificationId'),
+    code: formData.get('code'),
+  });
+
+  if (!parsed.success) {
+    return { status: 'error', message: parsed.error.issues[0]?.message ?? 'Check the code.' };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/leads/capture/verify-mobile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed.data),
+      cache: 'no-store',
+    });
+
+    if (response.status === 429) {
+      return { status: 'error', message: 'Too many attempts. Wait a minute and try again.' };
+    }
+    if (!response.ok) {
+      return { status: 'error', message: 'We could not check that code. Please try again.' };
+    }
+
+    const result = (await response.json()) as {
+      verified: boolean;
+      reason: string | null;
+      attemptsRemaining: number;
+    };
+
+    return result.verified
+      ? { status: 'verified' }
+      : {
+          status: 'error',
+          message: result.reason ?? 'That code is not right.',
+          attemptsRemaining: result.attemptsRemaining,
+        };
+  } catch {
+    return { status: 'error', message: 'We could not reach our servers. Please try again.' };
+  }
+}
+
+/** Send the code again. Capped per number by the API, not here. */
+export async function resendCaptureCode(
+  _previous: VerifyState,
+  formData: FormData,
+): Promise<VerifyState> {
+  const parsed = resendOtpSchema.safeParse({ verificationId: formData.get('verificationId') });
+  if (!parsed.success) return { status: 'error', message: 'Could not resend.' };
+
+  try {
+    const response = await fetch(`${API_BASE}/leads/capture/resend-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed.data),
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      return { status: 'error', message: 'We could not send another code just now.' };
+    }
+
+    const result = (await response.json()) as { sent: boolean };
+    return result.sent
+      ? { status: 'idle', message: 'A new code is on its way.' }
+      : {
+          status: 'error',
+          // The per-number cap is the likeliest reason, and saying so is more
+          // useful than a generic failure to somebody pressing it repeatedly.
+          message: 'No more codes can be sent to this number for now. Ask the desk for help.',
+        };
+  } catch {
+    return { status: 'error', message: 'We could not reach our servers. Please try again.' };
   }
 }

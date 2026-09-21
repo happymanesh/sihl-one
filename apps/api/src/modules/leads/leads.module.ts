@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 
 import { VisitsModule } from '../visits/visits.module';
+import { APP_CONFIG, type AppConfig } from '../../config/configuration';
+import { OnlySmsSender } from '../messaging/onlysms-sender';
+import { RecordingSmsSender, SmsSender } from '../messaging/sms-sender';
+import { OtpService } from './otp.service';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
 
@@ -16,7 +20,23 @@ import { LeadsService } from './leads.service';
 @Module({
   imports: [VisitsModule],
   controllers: [LeadsController],
-  providers: [LeadsService],
+  providers: [
+    LeadsService,
+    OtpService,
+    /*
+      The SMS driver is chosen here, once, from configuration — the same shape
+      as MessagingModule binds MessageSender. `noop` is the default, so a build
+      with no credentials logs the code and texts nobody.
+    */
+    {
+      provide: SmsSender,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig): SmsSender =>
+        config.sms.driver === 'onlysms'
+          ? new OnlySmsSender(config)
+          : new RecordingSmsSender(),
+    },
+  ],
   exports: [LeadsService],
 })
 export class LeadsModule {}

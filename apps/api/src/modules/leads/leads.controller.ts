@@ -27,6 +27,10 @@ import {
   createLeadSchema,
   instaLeadSchema,
   leadCaptureSchema,
+  resendOtpSchema,
+  verifyOtpSchema,
+  type ResendOtpInput,
+  type VerifyOtpInput,
   leadQuerySchema,
   updateLeadSchema,
   type AssignLeadInput,
@@ -68,6 +72,45 @@ export class LeadsController {
    * be used to probe whether a number is already known to SIHL (`duplicate` is
    * returned, but the reference of an existing lead is not).
    */
+  /*
+    Verifying a code, and asking for another.
+
+    Both public, because the person doing it has no account — they are standing
+    at a stall with a phone. Both throttled harder than the capture they follow:
+    a verify is one person typing six digits, and anything faster than a few a
+    minute from one address is a script working through codes.
+
+    Neither takes a mobile number. The verification id handed back at capture is
+    unguessable and scoped to that submission, so these endpoints cannot be used
+    to ask questions about somebody else's number.
+  */
+  @Public()
+  @Post('capture/verify-mobile')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiZodBody(verifyOtpSchema)
+  @ApiOperation({
+    summary: 'Verify a mobile number with the code sent at registration',
+    description:
+      'Marks the lead created at capture as mobile-verified. Failure never says which check ' +
+      'failed, only what the person should do next.',
+  })
+  verifyCaptureMobile(@ZodBody(verifyOtpSchema) body: VerifyOtpInput) {
+    return this.leads.verifyCaptureMobile(body);
+  }
+
+  @Public()
+  @Post('capture/resend-code')
+  @HttpCode(HttpStatus.OK)
+  // Tighter than verify. A resend costs money and rings somebody's phone; the
+  // per-number cap inside the service is the second line behind this one.
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiZodBody(resendOtpSchema)
+  @ApiOperation({ summary: 'Send the verification code again' })
+  resendCaptureCode(@ZodBody(resendOtpSchema) body: ResendOtpInput) {
+    return this.leads.resendCaptureCode(body);
+  }
+
   @Public()
   @Post('capture')
   @HttpCode(HttpStatus.CREATED)
@@ -176,6 +219,21 @@ export class LeadsController {
     @ZodQuery(checkLeadMobileSchema) query: CheckLeadMobileInput,
   ) {
     return this.leads.checkMobile(user, query);
+  }
+
+  /*
+    Declared before `:id`, or Nest would read "owners" as a lead id.
+  */
+  @Get('owners')
+  @RequirePermissions('lead:read')
+  @ApiOperation({
+    summary: 'Distinct owners of the leads this caller can see',
+    description:
+      'Backs the owner filter. Derived from the leads themselves rather than from the user ' +
+      'directory, so the list can never offer a name that returns nothing.',
+  })
+  owners(@CurrentUser() user: AuthenticatedPrincipal) {
+    return this.leads.owners(user);
   }
 
   @Get(':id')

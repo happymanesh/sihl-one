@@ -53,6 +53,14 @@ import { RequestContextStore } from '../../common/request-context';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type {
+  OtpChallenge,
+  OtpPurpose,
+  OtpVerifyResult,
+  ResendOtpInput,
+  VerifyOtpInput,
+} from '@sihl-one/contracts';
+import { OtpService } from './otp.service';
 import { CaptureCodeService } from '../events/capture-code.service';
 import { MastersService } from '../masters/masters.service';
 import { VisitsService } from '../visits/visits.service';
@@ -139,6 +147,7 @@ export class LeadsService {
     private readonly outbox: OutboxService,
     private readonly allocation: AllocationService,
     private readonly captureCodes: CaptureCodeService,
+    private readonly otp: OtpService,
     private readonly masters: MastersService,
     private readonly visits: VisitsService,
   ) {}
@@ -710,6 +719,7 @@ export class LeadsService {
       select: {
         id: true,
         reference: true,
+        mobileVerifiedAt: true,
         owner: { select: { firstName: true, lastName: true } },
       },
     });
@@ -779,9 +789,25 @@ export class LeadsService {
         at the desk needs to be able to say who will call. It is disclosed for a
         mobile number the submitter already holds.
       */
+      /*
+        A returning client gets a code too, but only if their number has never
+        been proven. Re-verifying a number that is already verified spends money
+        and troubles somebody for nothing.
+      */
+      const repeatChallenge =
+        coded.eventId && !existing.mobileVerifiedAt
+          ? await this.otp.issue({
+              mobile: input.mobile,
+              purpose: 'EVENT_REGISTRATION',
+              leadId: existing.id,
+              ipAddress: context?.ipAddress ?? null,
+            })
+          : null;
+
       return {
         reference: existing.reference,
         duplicate: true,
+        verification: repeatChallenge,
         firstName: input.firstName,
         lastName: input.lastName || null,
         mobile: input.mobile,
@@ -920,6 +946,24 @@ export class LeadsService {
       changes: { reference, source: input.source },
     });
 
+    /*
+      The lead is written and committed above. Only now is a code sent.
+
+      That order is the whole point of the design: somebody who fills in the
+      form and then loses signal, mistypes their number or wanders off is still
+      a person who was interested, and they are on the book either way. The
+      verification improves a record that already exists; it never gates
+      creating one.
+    */
+    const challenge = coded.eventId
+      ? await this.otp.issue({
+          mobile: input.mobile,
+          purpose: 'EVENT_REGISTRATION',
+          leadId: lead.id,
+          ipAddress: context?.ipAddress ?? null,
+        })
+      : null;
+
     const assignedTo = coded.suggestedOwnerId
       ? await this.prisma.user.findUnique({
           where: { id: coded.suggestedOwnerId },
@@ -937,6 +981,7 @@ export class LeadsService {
       assignedToName: assignedTo
         ? `${assignedTo.firstName} ${assignedTo.lastName}`.trim()
         : null,
+      verification: challenge,
     };
   }
 
@@ -1493,6 +1538,85 @@ export class LeadsService {
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Everyone who owns a lead this caller can see.
+   *
+   * Derived from the leads, not from the user directory. The obvious source was
+   * the assignable-users endpoint, but that answers a different question — who
+   * may this person hand work *to* — and for a team-scoped manager it returns
+   * their own team only. The result was an owner filter that offered a handful
+   * of names while the list underneath showed leads owned by dozens of others,
+   * with no way to filter to them.
+   *
+   * Taking the owners from the same scope the list uses means the filter can
+   * never offer a name that returns nothing, and never omit one that would.
+   *
+   * Unowned leads are not represented here; the filter is "whose", and "nobody's"
+   * is a different question the list does not currently ask.
+   */
+  async owners(
+    user: AuthenticatedPrincipal,
+  ): Promise<Array<{ id: string; fullName: string; employeeCode: string | null }>> {
+    const grouped = await this.prisma.lead.groupBy({
+      by: ['ownerId'],
+      where: { AND: [this.scope.leadScope(user), { deletedAt: null, ownerId: { not: null } }] },
+      _count: { _all: true },
+    });
+
+    const ids = grouped.map((row) => row.ownerId).filter((id): id is string => Boolean(id));
+    if (ids.length === 0) return [];
+
+    const people = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, firstName: true, lastName: true, employeeCode: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+
+    return people.map((person) => ({
+      id: person.id,
+      fullName: `${person.firstName} ${person.lastName}`.trim(),
+      employeeCode: person.employeeCode,
+    }));
+  }
+
+  /**
+   * Check the code somebody was sent at registration.
+   *
+   * Thin on purpose: every decision lives in OtpService, which is also where
+   * the attempt cap and the uniform failure wording live. Putting any of it
+   * here would mean two places deciding whether a number is proven.
+   */
+  async verifyCaptureMobile(input: VerifyOtpInput): Promise<OtpVerifyResult> {
+    return this.otp.verify(input.verificationId, input.code);
+  }
+
+  /**
+   * Send the code again.
+   *
+   * Resolved from the verification id rather than a number, so this cannot be
+   * pointed at somebody else's phone. A spent or unknown id returns the same
+   * unavailable challenge as a rate-limited one — the caller is public, and the
+   * difference is not its business.
+   */
+  async resendCaptureCode(input: ResendOtpInput): Promise<OtpChallenge> {
+    const existing = await this.prisma.mobileOtp.findUnique({
+      where: { id: input.verificationId },
+      select: { mobile: true, leadId: true, purpose: true },
+    });
+
+    if (!existing) {
+      return { verificationId: null, expiresInSeconds: 0, maskedMobile: '', sent: false };
+    }
+
+    const context = RequestContextStore.get();
+    return this.otp.issue({
+      mobile: existing.mobile,
+      purpose: existing.purpose as OtpPurpose,
+      leadId: existing.leadId,
+      ipAddress: context?.ipAddress ?? null,
+    });
+  }
 
   private buildWhere(user: AuthenticatedPrincipal, query: LeadQuery): Record<string, unknown> {
     const and: Record<string, unknown>[] = [this.scope.leadScope(user)];

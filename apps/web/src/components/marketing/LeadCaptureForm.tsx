@@ -6,6 +6,7 @@ import { useFormStatus } from 'react-dom';
 import type { CaptureProduct } from '@sihl-one/contracts';
 
 import { submitLeadCapture, type CaptureState } from '@/app/actions/lead-capture';
+import { MobileVerification } from '@/components/marketing/MobileVerification';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 
 const INITIAL: CaptureState = { status: 'idle' };
@@ -134,6 +135,18 @@ export function LeadCaptureForm({
             Your reference is{' '}
             <span className="font-mono font-bold tnum">{state.reference}</span>
           </p>
+        ) : null}
+
+        {/*
+          The code step sits above the read-back, because it is the only thing
+          on this screen that still asks something of the visitor.
+        */}
+        {state.verification ? (
+          <MobileVerification
+            verificationId={state.verification.verificationId}
+            maskedMobile={state.verification.maskedMobile}
+            expiresInSeconds={state.verification.expiresInSeconds}
+          />
         ) : null}
 
         {/*

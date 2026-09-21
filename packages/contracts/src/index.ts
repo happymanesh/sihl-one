@@ -33,3 +33,4 @@ export * from './notification';
 export * from './service-account';
 export * from './report';
 export * from './daily-activity';
+export * from './otp';

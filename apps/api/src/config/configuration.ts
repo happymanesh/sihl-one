@@ -67,6 +67,26 @@ const envSchema = z
      */
     MAIL_APP_URL: z.string().url().optional(),
 
+    /**
+     * SMS, for mobile verification at event registration.
+     *
+     * `noop` by default and for the same reason as mail: a developer or a CI
+     * run must never be able to text a real person by accident, and every send
+     * costs money. Switching to `onlysms` requires every credential below,
+     * checked at boot rather than discovered at a stall.
+     */
+    SMS_DRIVER: z.enum(['noop', 'onlysms']).default('noop'),
+    SMS_USER_ID: z.string().min(1).optional(),
+    SMS_PASSWORD: z.string().min(1).optional(),
+    /** The six-character sender header registered on DLT. */
+    SMS_SENDER_ID: z.string().min(1).optional(),
+    /** Principal Entity ID — identifies SIHL to the operator. */
+    SMS_PE_ID: z.string().min(1).optional(),
+    /** Content template id. Must match the text being sent, exactly. */
+    SMS_OTP_TEMPLATE_ID: z.string().min(1).optional(),
+    SMS_TEXT_URL: z.string().url().default('https://onlysms.co.in/api/sms.aspx'),
+    SMS_OTP_URL: z.string().url().default('https://onlysms.co.in/api/otp.aspx'),
+
     STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
     STORAGE_LOCAL_ROOT: z.string().default('storage'),
     // Opt-in acknowledgement that STORAGE_LOCAL_ROOT points at a persistent
@@ -170,6 +190,32 @@ const envSchema = z
     // Caught at boot rather than at the first password reset. A missing key or
     // sender would otherwise surface as a member of staff locked out and
     // waiting for an email that was never going to arrive.
+    /*
+      Every credential, or none. A half-configured SMS driver fails at the
+      worst possible moment — a rep at a stall with a queue, watching somebody
+      wait for a code that was never going to arrive. Checked at boot instead,
+      where it is a startup error somebody reads.
+    */
+    if (env.SMS_DRIVER === 'onlysms') {
+      const required = [
+        ['SMS_USER_ID', env.SMS_USER_ID],
+        ['SMS_PASSWORD', env.SMS_PASSWORD],
+        ['SMS_SENDER_ID', env.SMS_SENDER_ID],
+        ['SMS_PE_ID', env.SMS_PE_ID],
+        ['SMS_OTP_TEMPLATE_ID', env.SMS_OTP_TEMPLATE_ID],
+      ] as const;
+
+      for (const [name, value] of required) {
+        if (!value) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `SMS_DRIVER=onlysms requires ${name}.`,
+            path: [name],
+          });
+        }
+      }
+    }
+
     if (env.MAIL_DRIVER === 'sendgrid') {
       if (!env.SENDGRID_API_KEY) {
         ctx.addIssue({
@@ -308,6 +354,16 @@ export interface AppConfig {
     fromName: string;
     appUrl: string | undefined;
   };
+  sms: {
+    driver: Env['SMS_DRIVER'];
+    userId: string;
+    password: string;
+    senderId: string;
+    peId: string;
+    otpTemplateId: string;
+    textUrl: string;
+    otpUrl: string;
+  };
   storage: {
     driver: Env['STORAGE_DRIVER'];
     localRoot: string;
@@ -368,6 +424,22 @@ export function buildAppConfig(env: Env): AppConfig {
       from: env.MAIL_FROM,
       fromName: env.MAIL_FROM_NAME,
       appUrl: env.MAIL_APP_URL,
+    },
+    /*
+      Empty strings rather than undefined for the credentials: the refinement
+      below guarantees they are present whenever the driver is `onlysms`, and
+      the adapter would otherwise be littered with non-null assertions for a
+      case that cannot happen.
+    */
+    sms: {
+      driver: env.SMS_DRIVER,
+      userId: env.SMS_USER_ID ?? '',
+      password: env.SMS_PASSWORD ?? '',
+      senderId: env.SMS_SENDER_ID ?? '',
+      peId: env.SMS_PE_ID ?? '',
+      otpTemplateId: env.SMS_OTP_TEMPLATE_ID ?? '',
+      textUrl: env.SMS_TEXT_URL,
+      otpUrl: env.SMS_OTP_URL,
     },
     storage: {
       driver: env.STORAGE_DRIVER,

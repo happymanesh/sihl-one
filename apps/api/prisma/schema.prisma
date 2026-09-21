@@ -679,6 +679,9 @@ model Lead {
   capturedById String?
   capturedBy   User?   @relation("LeadCapturedBy", fields: [capturedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
+  /// Codes issued against this lead's mobile number.
+  mobileOtps MobileOtp[]
+
   /// Every event this lead has turned up at.
   eventAttendances EventAttendance[]
 
@@ -1172,6 +1175,36 @@ enum EventStatus {
 /// that spend produce anything", an event asks "who did we meet on Saturday and
 /// has anyone called them yet". An event may sit under a campaign, and the
 /// leads it captures roll up to both.
+/// A one-time code sent to a mobile number, and its verification state.
+///
+/// The code is stored hashed, never in clear: it is a credential for the ten
+/// minutes it lives, and a dump of this table must not let anyone verify
+/// somebody else's number.
+model MobileOtp {
+  id       String @id @default(cuid())
+  mobile   String @db.VarChar(10)
+  /// What the code is for. Only event registration issues them today.
+  purpose  String @db.VarChar(30)
+  codeHash String
+
+  /// The lead created before the code was sent — saved unverified, so an
+  /// abandoned registration still leaves a record of somebody interested.
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  /// Who asked. The capture endpoint is public; this is how one address asking
+  /// for codes on hundreds of numbers becomes visible.
+  ipAddress  String?   @db.VarChar(64)
+  createdAt  DateTime  @default(now())
+
+  @@index([mobile, createdAt])
+  @@index([expiresAt])
+  @@map("mobile_otp")
+}
+
 model Event {
   id        String @id @default(cuid())
   reference String @unique @db.VarChar(24)

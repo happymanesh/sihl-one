@@ -32,7 +32,7 @@ export function LeadFilters({
 }: {
   sources: LeadSourceItem[];
   products: ProductItem[];
-  /** Empty for anyone who may not read users — a rep sees only their own book. */
+  /** Distinct owners of the leads in scope. One entry means the control hides. */
   owners?: OwnerOption[];
 }) {
   return (
@@ -123,10 +123,11 @@ function LeadFiltersInner({
       </select>
 
       {/*
-        Whose leads. Absent for a rep, who only ever sees their own book, so the
-        control would be a dropdown with one entry and no purpose.
+        Whose leads. Hidden when there is only one owner in scope — a sales
+        executive owns everything they can see, so the control would be a
+        dropdown with a single entry and filtering by it would change nothing.
       */}
-      {owners.length > 0 ? (
+      {owners.length > 1 ? (
         <select
           value={ownerId}
           onChange={(event) => apply({ ownerId: event.target.value || null })}

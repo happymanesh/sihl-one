@@ -64,16 +64,19 @@ export default async function LeadsPage({
     /*
       Whose leads, for the owner filter.
 
-      Guarded on `user:read`, which a sales executive does not hold — and should
-      not, since their scope is their own book and the filter would be a list of
-      one. The catch is the whole handling: no permission, no owners, no
-      control, rather than a failed page.
+      From the leads themselves, not the user directory. The first version asked
+      the assignable-users endpoint, which answers "who may I hand work to" — for
+      a team-scoped manager that is their own team, so the filter listed a
+      handful of names while the table below showed leads owned by dozens of
+      other people, with no way to reach them.
+
+      Needs only `lead:read`, so it no longer depends on holding `user:read`.
+      A sales executive owns everything in their own scope, so the list comes
+      back with just them and the control hides itself.
     */
-    can(user, 'user:read')
-      ? apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
-          '/users/assignable',
-        ).catch(() => [])
-      : Promise.resolve([]),
+    apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
+      '/leads/owners',
+    ).catch(() => []),
   ]);
 
   const data = await apiFetch<Paginated>(`/leads${query}`);
