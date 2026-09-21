@@ -111,6 +111,7 @@ export default async function ManageUserPage({
               designationId: person.designation?.id ?? null,
               orgUnitId: person.orgUnit?.id ?? null,
               managerId: person.manager?.id ?? null,
+              managerName: person.manager?.fullName ?? null,
               roleCodes: person.roles,
               status: person.status,
             }}

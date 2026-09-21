@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { ROLES, suggestWorkEmail, type DesignationSummary } from '@sihl-one/contracts';
@@ -25,6 +26,8 @@ export interface UserFormValues {
   designationId?: string | null;
   orgUnitId?: string | null;
   managerId?: string | null;
+  /** Shown while the option list is loading, so the field is never blank. */
+  managerName?: string | null;
   roleCodes?: string[];
   status?: string;
 }
@@ -69,7 +72,36 @@ export function UserForm({
   grantableRoles: string[];
 }) {
   const [state, action] = useActionState(mode === 'create' ? createUser : updateUser, INITIAL);
+  const router = useRouter();
+
+  /*
+    Pull the saved record back after a successful edit.
+
+    `revalidatePath` in the action clears the server cache, but nothing on this
+    page re-reads it: the administrator stays put, and the heading, the badges
+    and the Users list they go back to all keep showing what was there before.
+    That is the "changes are not reflected until I go back to Users and open the
+    person again" complaint.
+
+    Keyed on `state`, not `state.status`. The status is the string "success"
+    both times, so two saves in a row look identical to the effect and the
+    second one would not refresh. `useActionState` hands back a new object per
+    dispatch, which does not.
+  */
+  useEffect(() => {
+    if (state.status === 'success') router.refresh();
+  }, [state, router]);
   const [designationId, setDesignationId] = useState(values?.designationId ?? '');
+  /*
+    Controlled, not `defaultValue`.
+
+    The options are fetched after mount, so on first render this select holds
+    only "No manager". `defaultValue` is applied once, at that moment, and React
+    never re-applies it when the real options arrive — which is why a user with
+    a manager on record read "No manager" on every edit, and why saving the form
+    unchanged would then quietly clear the manager.
+  */
+  const [managerId, setManagerId] = useState(values?.managerId ?? '');
   const [userType, setUserType] = useState(values?.userType ?? 'INTERNAL');
   const [firstName, setFirstName] = useState(values?.firstName ?? '');
   const [lastName, setLastName] = useState(values?.lastName ?? '');
@@ -297,7 +329,15 @@ export function UserForm({
               className="input"
               required
               value={designationId}
-              onChange={(event) => setDesignationId(event.target.value)}
+              onChange={(event) => {
+                setDesignationId(event.target.value);
+                // Who may manage whom depends on the level, so a manager
+                // chosen under the old one may no longer be eligible. Clearing
+                // is the honest default: better an empty field the
+                // administrator must fill than a stale name that silently
+                // fails validation on save.
+                setManagerId('');
+              }}
             >
               <option value="" disabled>
                 Choose a level
@@ -348,10 +388,22 @@ export function UserForm({
             id="managerId"
             name="managerId"
             className="input"
-            defaultValue={values?.managerId ?? ''}
+            value={managerId}
+            onChange={(event) => setManagerId(event.target.value)}
             disabled={!designationId || loadingManagers}
           >
             <option value="">No manager</option>
+            {/*
+              The person on record is listed even when the options have not
+              arrived, or no longer include them — somebody may report to a
+              manager the current rules would not offer. Without this the select
+              has no option matching its value and silently renders blank.
+            */}
+            {values?.managerId && !managers.some((m) => m.id === values.managerId) ? (
+              <option value={values.managerId}>
+                {values.managerName ?? 'Current manager'}
+              </option>
+            ) : null}
             {managers.map((manager) => (
               <option key={manager.id} value={manager.id}>
                 {manager.fullName}
