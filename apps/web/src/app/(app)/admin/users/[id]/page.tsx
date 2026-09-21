@@ -107,6 +107,7 @@ export default async function ManageUserPage({
               firstName,
               lastName: rest.join(' '),
               email: person.email,
+              mobile: person.mobile,
               employeeCode: person.employeeCode,
               designationId: person.designation?.id ?? null,
               orgUnitId: person.orgUnit?.id ?? null,

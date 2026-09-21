@@ -157,6 +157,7 @@ export class UserAdminService {
       reference: user.reference,
       fullName: `${user.firstName} ${user.lastName}`.trim(),
       email: user.email,
+      mobile: user.mobile,
       employeeCode: user.employeeCode,
       status: user.status,
       designation: user.designation,

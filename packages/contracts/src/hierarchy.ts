@@ -375,6 +375,16 @@ export interface UserSummary {
   reference: string;
   fullName: string;
   email: string;
+  /**
+   * Needed by the edit form, which cannot show a field it was never given.
+   *
+   * Without it the mobile box rendered empty on every edit, so a number that
+   * saved perfectly well looked as though it had not — the only way to see the
+   * stored value was to query the database. No data was lost: the action maps
+   * an empty box to `undefined` rather than to null, so the column was left
+   * alone rather than blanked. It simply could never be read back.
+   */
+  mobile: string | null;
   employeeCode: string | null;
   status: string;
   designation: { id: string; name: string; level: number } | null;
