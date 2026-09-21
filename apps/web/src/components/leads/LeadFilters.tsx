@@ -78,6 +78,10 @@ function LeadFiltersInner({
 
   return (
     <FilterBar
+      // The longest filter row in the product: search, status, source, owner,
+      // products and two chips. Folded, the leads themselves start at the top
+      // of the screen where a rep expects them.
+      collapsible
       pending={pending}
       activeCount={activeCount}
       onClear={() => {
