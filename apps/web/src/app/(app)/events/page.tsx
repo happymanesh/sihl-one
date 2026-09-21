@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import type { EventListItem } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
@@ -26,7 +25,33 @@ export default async function EventsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
-  if (!can(user, 'event:view')) redirect('/dashboard');
+
+  /*
+    Explain, do not bounce.
+
+    The menu shows Events to everybody, so somebody without access will land
+    here — and being thrown back to the dashboard with no message reads as a
+    broken link. Naming the two switches turns a dead end into a request the
+    reader can actually make of their administrator.
+  */
+  if (!can(user, 'event:view')) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <div className="card p-8 text-center">
+          <h1 className="text-xl font-bold">Events are not switched on for you</h1>
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+            Seeing events, and getting your own registration QR, is switched on per hierarchy
+            level and per branch. Both have to be on before it reaches you.
+          </p>
+          <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+            Ask your administrator to switch on your level under Administration → Users →
+            Hierarchy levels, and your office under Branches &amp; Regions. It takes effect on
+            your next page load — you will not need to sign in again.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const params = await searchParams;
   const data = await apiFetch<{

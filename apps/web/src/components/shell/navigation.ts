@@ -71,7 +71,15 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { label: 'Campaigns', href: '/campaigns', icon: 'megaphone', permissions: ['campaign:read'], section: 'grow' },
   { label: 'Messaging', href: '/messaging', icon: 'bell', permissions: ['campaign:read'], section: 'grow' },
-  { label: 'Events', href: '/events', icon: 'pin', permissions: ['event:view'], section: 'grow' },
+  /*
+    No permission listed, deliberately.
+
+    Events is shown to everybody so that the option is discoverable — a rep who
+    cannot see it has no way to know it exists, and no reason to ask their
+    manager to switch it on. The page itself still enforces access and explains
+    what is missing, so the item is informative rather than a dead end.
+  */
+  { label: 'Events', href: '/events', icon: 'pin', section: 'grow' },
   { label: 'Partners', href: '/partners', icon: 'handshake', permissions: ['partner:read'], section: 'grow' },
 
   { label: 'Users', href: '/admin/users' as Route, icon: 'shield', permissions: ['user:read'], section: 'admin' },

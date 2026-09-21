@@ -28,6 +28,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/configuration';
 import { AuditService } from '../../common/audit.service';
 import { RequestContextStore } from '../../common/request-context';
 import type { Prisma } from '../../generated/prisma/client';
+import { hasEventAccess } from '../../common/event-access';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Mailer } from '../mail/mailer';
 import { MfaService } from './mfa.service';
@@ -722,6 +723,27 @@ export class AuthService {
     const permissions = [
       ...new Set(user.roles.flatMap((a) => a.role.permissions as Permission[])),
     ];
+
+    /*
+      The same event-access grant the request guard applies.
+
+      This endpoint is what the web client asks for the signed-in user, and it
+      is what every `can(...)` check in the interface reads. Without this it
+      answers from the role rows alone, so a rep whose level and branch are both
+      switched on would be refused by the screen while the API happily served
+      the same data — the menu and the endpoint disagreeing about the same
+      permission, which is worse than either being wrong on its own.
+    */
+    if (
+      !permissions.includes('event:view') &&
+      (await hasEventAccess(this.prisma, {
+        designationId: user.designationId,
+        orgUnitId: user.orgUnitId,
+      }))
+    ) {
+      permissions.push('event:view');
+    }
+
     return this.toAuthenticatedUser(
       user,
       roles,
