@@ -55,6 +55,14 @@ export const createDesignationSchema = z.object({
   level: z.number().int().min(1).max(1000),
   defaultScope: z.enum(DATA_SCOPES),
   isActive: z.boolean().default(true),
+  /**
+   * May people at this level see events and their own registration QR?
+   *
+   * ANDed with the same switch on their branch, so this alone grants nothing.
+   * Off by default: a level that arrived switched on would widen what existing
+   * users can see the moment it is created.
+   */
+  canAccessEvents: z.boolean().default(false),
 });
 export type CreateDesignationInput = z.infer<typeof createDesignationSchema>;
 
@@ -358,6 +366,7 @@ export interface DesignationSummary {
   level: number;
   defaultScope: string;
   isActive: boolean;
+  canAccessEvents: boolean;
   userCount?: number;
 }
 

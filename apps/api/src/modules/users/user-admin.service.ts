@@ -69,6 +69,7 @@ export class UserAdminService {
       level: designation.level,
       defaultScope: designation.defaultScope,
       isActive: designation.isActive,
+      canAccessEvents: designation.canAccessEvents,
       userCount: designation._count.users,
     }));
   }
@@ -117,7 +118,12 @@ export class UserAdminService {
       action: 'UPDATE',
       resource: 'designation',
       resourceId: id,
-      changes: { name: designation.name, level: designation.level, isActive: designation.isActive },
+      changes: {
+        name: designation.name,
+        level: designation.level,
+        isActive: designation.isActive,
+        canAccessEvents: designation.canAccessEvents,
+      },
     });
     return designation;
   }

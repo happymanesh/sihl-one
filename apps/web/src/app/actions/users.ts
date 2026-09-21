@@ -233,3 +233,36 @@ export async function toggleDesignation(
   revalidatePath('/admin/designations');
   return { status: 'success', message: isActive ? 'Level activated.' : 'Level deactivated.' };
 }
+
+/**
+ * Switch event access on or off for a hierarchy level.
+ *
+ * Separate action from `toggleDesignation` rather than a shared one with a
+ * field name in the payload: the two answer different questions, and a single
+ * "toggle anything" action is how a mis-keyed form ends up deactivating a level
+ * when it meant to grant it a permission.
+ */
+export async function toggleDesignationEvents(
+  _previous: UserFormState,
+  formData: FormData,
+): Promise<UserFormState> {
+  const id = String(formData.get('designationId'));
+  const canAccessEvents = formData.get('canAccessEvents') === 'true';
+
+  const parsed = updateDesignationSchema.safeParse({ canAccessEvents });
+  if (!parsed.success) return { status: 'error', message: 'Invalid change.' };
+
+  try {
+    await apiFetch(`/admin/designations/${id}`, { method: 'PATCH', body: parsed.data });
+  } catch (error) {
+    return toErrorState(error, 'Event access could not be changed.');
+  }
+
+  revalidatePath('/admin/designations');
+  return {
+    status: 'success',
+    message: canAccessEvents
+      ? 'Event access allowed at this level.'
+      : 'Event access withdrawn at this level.',
+  };
+}

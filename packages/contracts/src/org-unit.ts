@@ -65,6 +65,14 @@ export type CreateOrgUnitInput = z.infer<typeof createOrgUnitSchema>;
 export const updateOrgUnitSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   isActive: z.boolean().optional(),
+  /**
+   * May people posted here see events?
+   *
+   * Applies to this unit **and everything beneath it**, so a region can be
+   * opened once rather than branch by branch. ANDed with the same switch on the
+   * person's hierarchy level, so neither alone grants anything.
+   */
+  canAccessEvents: z.boolean().optional(),
 });
 export type UpdateOrgUnitInput = z.infer<typeof updateOrgUnitSchema>;
 
@@ -88,6 +96,10 @@ export interface OrgUnitNode {
   parentId: string | null;
   path: string;
   isActive: boolean;
+  /** Event access switched on here. Inherited by everything below. */
+  canAccessEvents: boolean;
+  /** True when an ancestor has it on, so this unit has it without setting it. */
+  eventsInherited: boolean;
   /** Depth from the root, for indenting the tree. */
   depth: number;
   userCount: number;

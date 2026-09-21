@@ -7,12 +7,14 @@ import {
 import {
   captureUrl,
   canTransitionEvent,
+  repCaptureUrl,
   EVENT_STATUS_TRANSITIONS,
   type ChangeEventStatusInput,
   type CreateEventInput,
   type EventDetail,
   type EventListItem,
   type EventQuery,
+  type EventRepBreakdown,
   type EventStatus,
   type UpdateEventInput,
 } from '@sihl-one/contracts';
@@ -37,8 +39,41 @@ export class EventsService {
     private readonly outbox: OutboxService,
   ) {}
 
-  async list(query: EventQuery): Promise<PaginatedResult<EventListItem>> {
+  /**
+   * Whether this viewer sees the event book whole.
+   *
+   * `campaign:read` is what marketing and management hold; `event:view` on its
+   * own is what a rep is given by the branch switch. The first sees every event
+   * and every lead on it, the second sees the events their office is running
+   * and only the leads their own QR brought in.
+   */
+  private seesEverything(user: AuthenticatedPrincipal): boolean {
+    return user.permissions.includes('campaign:read');
+  }
+
+  /** The events a rep may see: their branch's and their ancestors', still open. */
+  private repEventFilter(user: AuthenticatedPrincipal): Record<string, unknown> {
+    // The principal already carries the materialised path, so the chain of
+    // ancestors is in hand without touching the database.
+    const orgUnitIds = (user.orgUnitPath ?? '').split('/').filter(Boolean);
+    return {
+      // An event with no org unit belongs to the whole company, so everybody
+      // with access sees it. Matching only the chain would have hidden exactly
+      // the national events a branch is most likely to be working.
+      OR: [{ orgUnitId: { in: orgUnitIds } }, { orgUnitId: null }],
+      // Closed and cancelled events are of no use to somebody holding a phone
+      // at a desk, and showing them invites a QR being printed from one.
+      status: { in: ['PLANNED', 'RUNNING'] },
+    };
+  }
+
+  async list(
+    user: AuthenticatedPrincipal,
+    query: EventQuery,
+  ): Promise<PaginatedResult<EventListItem>> {
     const and: Record<string, unknown>[] = [];
+
+    if (!this.seesEverything(user)) and.push(this.repEventFilter(user));
 
     if (query.q) {
       and.push({
@@ -92,9 +127,19 @@ export class EventsService {
     );
   }
 
-  async findOne(id: string): Promise<EventDetail> {
+  async findOne(user: AuthenticatedPrincipal, id: string): Promise<EventDetail> {
+    /*
+      A rep may only open an event their own office is running.
+
+      Filtered in the query rather than checked afterwards, so an event outside
+      their reach answers "not found" rather than "forbidden" — the same answer
+      an id that does not exist gets, which is what stops the endpoint being
+      used to discover which events other branches are running.
+    */
+    const reach = this.seesEverything(user) ? {} : this.repEventFilter(user);
+
     const event = await this.prisma.event.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...reach },
       include: {
         owner: { select: { id: true, firstName: true, lastName: true } },
         campaign: { select: { id: true, name: true } },
@@ -103,12 +148,62 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException({ title: 'Event not found' });
 
+    /*
+      A rep sees their own numbers, not the stall's.
+
+      Keyed on `capturedById` rather than `ownerId` so that a lead later handed
+      to a colleague still counts for the person whose QR actually brought it
+      in. Credit for the scan does not move with the work.
+    */
+    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
+
+    /*
+      The viewer's own employee code, for their personal QR.
+
+      Read here rather than carried on the token: putting it in the JWT would
+      mean everyone already signed in has no code until they sign in again, and
+      this is one indexed lookup on a page that already runs several.
+    */
+    const employeeCode = user.isService
+      ? null
+      : ((
+          await this.prisma.user.findUnique({
+            where: { id: user.id },
+            select: { employeeCode: true },
+          })
+        )?.employeeCode ?? null);
+
     const byStatus = await this.prisma.lead.groupBy({
       by: ['status'],
-      where: { eventId: id, deletedAt: null },
+      where: { eventId: id, deletedAt: null, ...mine },
       _count: { _all: true },
       orderBy: { status: 'asc' },
     });
+
+    /*
+      How many of this event's leads came through somebody's personal QR.
+
+      The plain banner QR carries no employee code, so its leads land with
+      `capturedById` null. The split is the only way to tell whether handing
+      reps their own codes actually changed anything.
+    */
+    const [assignedLeads, unassignedLeads] = this.seesEverything(user)
+      ? await Promise.all([
+          this.prisma.lead.count({
+            where: { eventId: id, deletedAt: null, capturedById: { not: null } },
+          }),
+          this.prisma.lead.count({
+            where: { eventId: id, deletedAt: null, capturedById: null },
+          }),
+        ])
+      : /*
+          For a rep the split is not a question: everything they can see here
+          came through their own QR, so it is all assigned and none of it is
+          unattributed. Spreading the viewer filter over a `capturedById: null`
+          clause produced the opposite — the later key won, and the rep's own
+          leads were counted a second time as unattributed.
+        */
+        [byStatus.reduce((sum, row) => sum + row._count._all, 0), 0];
 
     /*
       Everyone who registered at the stall, and how many of them we already
@@ -133,10 +228,15 @@ export class EventsService {
       this.prisma.lead.count({
         where: {
           deletedAt: null,
+          ...mine,
           OR: [{ eventId: id }, { eventAttendances: { some: { eventId: id } } }],
         },
       }),
-      this.prisma.eventAttendance.count({ where: { eventId: id, returning: true } }),
+      // Not scoped by rep: a returning client is a fact about the event, and
+      // attendance carries no capturing rep to filter on.
+      this.seesEverything(user)
+        ? this.prisma.eventAttendance.count({ where: { eventId: id, returning: true } })
+        : Promise.resolve(0),
     ]);
 
     const total = byStatus.reduce((sum, row) => sum + row._count._all, 0);
@@ -155,11 +255,99 @@ export class EventsService {
       pipeline: byStatus
         .map((row) => ({ status: row.status, count: row._count._all }))
         .sort((a, b) => b.count - a.count),
+      assignedLeads,
+      unassignedLeads,
+      scopedToViewer: !this.seesEverything(user),
+      /*
+        The rep's own QR, carrying their employee code.
+
+        Only offered to somebody who has one. A viewer with no employee code —
+        an admin account, say — gets null and the plain event QR above, because
+        a link tagged with an empty code is worse than no link at all.
+      */
+      myCaptureUrl: employeeCode
+        ? repCaptureUrl(PUBLIC_WEB_URL(), event.code, employeeCode)
+        : null,
+      myEmployeeCode: employeeCode,
       uncontacted,
       attended,
       returningAttendees: returning,
       conversionRate: total > 0 ? Math.round((converted / total) * 1000) / 10 : 0,
     };
+  }
+
+  /**
+   * This event's leads grouped by the rep whose QR captured them.
+   *
+   * Two queries rather than a join: one grouping to get the counts, one to put
+   * names to the ids. Grouping in the database and naming in a second pass
+   * keeps the count honest when a rep has since been deactivated — their row
+   * still appears, because the leads they brought in still exist.
+   *
+   * Leads from the plain banner QR are not dropped. They are collected into a
+   * single unattributed row, because "how many did nobody get credit for" is
+   * exactly the number this breakdown exists to expose.
+   */
+  async byRep(user: AuthenticatedPrincipal, id: string): Promise<EventRepBreakdown[]> {
+    const reach = this.seesEverything(user) ? {} : this.repEventFilter(user);
+    const event = await this.prisma.event.findFirst({
+      where: { id, deletedAt: null, ...reach },
+      select: { id: true },
+    });
+    if (!event) throw new NotFoundException({ title: 'Event not found' });
+
+    // A rep gets their own row and nothing else. Showing them a league table of
+    // colleagues is a different product decision from the one asked for.
+    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
+
+    const grouped = await this.prisma.lead.groupBy({
+      by: ['capturedById', 'status'],
+      where: { eventId: id, deletedAt: null, ...mine },
+      _count: { _all: true },
+      orderBy: [{ capturedById: 'asc' }, { status: 'asc' }],
+    });
+
+    const userIds = [
+      ...new Set(grouped.map((row) => row.capturedById).filter((v): v is string => Boolean(v))),
+    ];
+    const people = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true, employeeCode: true },
+        })
+      : [];
+    const byId = new Map(people.map((p) => [p.id, p]));
+
+    const rows = new Map<string, EventRepBreakdown>();
+    for (const row of grouped) {
+      const key = row.capturedById ?? '';
+      let entry = rows.get(key);
+      if (!entry) {
+        const person = row.capturedById ? byId.get(row.capturedById) : null;
+        entry = {
+          userId: row.capturedById,
+          fullName: person
+            ? `${person.firstName} ${person.lastName}`.trim()
+            : row.capturedById
+              ? 'Removed user'
+              : 'Banner QR (nobody credited)',
+          employeeCode: person?.employeeCode ?? null,
+          total: 0,
+          byStatus: [],
+        };
+        rows.set(key, entry);
+      }
+      entry.total += row._count._all;
+      entry.byStatus.push({ status: row.status, count: row._count._all });
+    }
+
+    // Busiest first; the unattributed row last whatever its size, because it is
+    // a footnote to the table rather than a competitor in it.
+    return [...rows.values()].sort((a, b) => {
+      if (!a.userId) return 1;
+      if (!b.userId) return -1;
+      return b.total - a.total;
+    });
   }
 
   async create(user: AuthenticatedPrincipal, input: CreateEventInput) {
@@ -202,7 +390,7 @@ export class EventsService {
       changes: { name: event.name, code: event.code, startsAt: event.startsAt.toISOString() },
     });
 
-    return this.findOne(event.id);
+    return this.findOne(user, event.id);
   }
 
   async update(user: AuthenticatedPrincipal, id: string, input: UpdateEventInput) {
@@ -243,7 +431,7 @@ export class EventsService {
       changes: diffRecords(before as never, after as never),
     });
 
-    return this.findOne(id);
+    return this.findOne(user, id);
   }
 
   async changeStatus(user: AuthenticatedPrincipal, id: string, input: ChangeEventStatusInput) {
@@ -251,7 +439,7 @@ export class EventsService {
     if (!event) throw new NotFoundException({ title: 'Event not found' });
 
     const from = event.status as EventStatus;
-    if (from === input.status) return this.findOne(id);
+    if (from === input.status) return this.findOne(user, id);
 
     if (!canTransitionEvent(from, input.status)) {
       throw new BadRequestException({
@@ -280,7 +468,7 @@ export class EventsService {
       changes: { status: { from, to: input.status } },
     });
 
-    return this.findOne(id);
+    return this.findOne(user, id);
   }
 
   // -------------------------------------------------------------------------

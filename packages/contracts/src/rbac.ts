@@ -48,6 +48,21 @@ export const PERMISSIONS = [
   'campaign:create',
   'campaign:update',
 
+  /*
+    Seeing events, separate from running them.
+
+    `campaign:read` is a marketing grant: campaigns, spend, attribution. A rep
+    standing at a stall needs none of that — they need the event list and their
+    own QR. Splitting the two is what lets a sales executive be given the second
+    without the first, which is the whole point of the branch-level switch.
+
+    Granted statically to the roles that already held `campaign:read`, so this
+    change takes nothing away from anyone, and granted per request in
+    `PrincipalService` to anyone whose hierarchy level and branch are both
+    switched on — which is what makes the switch take effect immediately.
+  */
+  'event:view',
+
   // Analytics
   'analytics:sales:read',
   'analytics:marketing:read',
@@ -89,6 +104,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'partner:read',
     'partner:payout:read',
     'campaign:read',
+    'event:view',
     'analytics:sales:read',
     'analytics:marketing:read',
     'analytics:partner:read',
@@ -123,6 +139,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'campaign:read',
     'campaign:create',
     'campaign:update',
+    'event:view',
     'analytics:marketing:read',
     'analytics:sales:read',
   ],

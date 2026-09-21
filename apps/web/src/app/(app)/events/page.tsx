@@ -26,7 +26,7 @@ export default async function EventsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
-  if (!can(user, 'campaign:read')) redirect('/dashboard');
+  if (!can(user, 'event:view')) redirect('/dashboard');
 
   const params = await searchParams;
   const data = await apiFetch<{

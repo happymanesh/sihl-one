@@ -85,6 +85,10 @@ model OrgUnit {
   children  OrgUnit[]   @relation("OrgUnitTree")
   path      String      @db.VarChar(1000)
   isActive  Boolean     @default(true)
+  /// May people posted here see events? Applies to this unit and everything
+  /// beneath it, so a region can be switched on once instead of branch by
+  /// branch. ANDed with Designation.canAccessEvents.
+  canAccessEvents Boolean @default(false)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
@@ -118,6 +122,9 @@ model Designation {
   isActive     Boolean   @default(true)
   /// Seeded levels cannot be deleted, only deactivated.
   isSystem     Boolean   @default(false)
+  /// May people at this level see events and their own registration QR?
+  /// ANDed with the same switch on their branch — see OrgUnit.canAccessEvents.
+  canAccessEvents Boolean @default(false)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -221,6 +228,7 @@ model User {
   sessions       Session[]
   passwordResets PasswordResetToken[]
   ownedLeads     Lead[]     @relation("LeadOwner")
+  capturedLeads  Lead[]     @relation("LeadCapturedBy")
   verifiedLeads  Lead[]     @relation("LeadMobileVerifier")
   editedProfiles LeadProfile[] @relation("LeadProfileEditor")
   ownedEvents    Event[]    @relation("EventOwner")
@@ -661,6 +669,15 @@ model Lead {
   /// in `eventAttendances`, so that event's "leads generated" stays honest.
   eventId String?
   event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// The rep whose personal event QR produced this lead.
+  ///
+  /// Deliberately separate from `owner`. The owner is where the lead sits now
+  /// and moves with a transfer; this records who actually brought it in and
+  /// never changes. Collapsing the two would mean one reassignment silently
+  /// rewrites which rep's QR is credited on the event report.
+  capturedById String?
+  capturedBy   User?   @relation("LeadCapturedBy", fields: [capturedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   /// Every event this lead has turned up at.
   eventAttendances EventAttendance[]

@@ -160,6 +160,24 @@ export interface EventDetail extends EventListItem {
   /** How many captured leads nobody has contacted yet. */
   uncontacted: number;
 
+  /** Captured through a rep's personal QR, so somebody is credited. */
+  assignedLeads: number;
+  /** Captured through the plain banner QR, credited to nobody. */
+  unassignedLeads: number;
+
+  /**
+   * True when the numbers above are this viewer's own rather than the event's.
+   *
+   * A rep sees only what their QR brought in; management sees the whole stall.
+   * The page has to say which of the two it is showing, or a rep reads four
+   * leads and concludes the event was a failure.
+   */
+  scopedToViewer: boolean;
+
+  /** This viewer's personal capture link, when they have an employee code. */
+  myCaptureUrl: string | null;
+  myEmployeeCode: string | null;
+
   /**
    * Everyone who registered at the stall, including clients we already had.
    *
@@ -271,4 +289,41 @@ export interface CaptureContext {
 export function captureUrl(baseUrl: string, kind: 'PARTNER' | 'EVENT', code: string): string {
   const segment = kind === 'PARTNER' ? 'p' : 'e';
   return new URL(`/join/${segment}/${encodeURIComponent(code)}`, baseUrl).toString();
+}
+
+/** The query parameter carrying the rep's employee code on a personal QR. */
+export const REP_CAPTURE_PARAM = 'utm_content';
+
+/**
+ * An event's capture URL tagged with one rep's employee code.
+ *
+ * `utm_content` rather than a parameter of our own: it is already captured on
+ * every lead, already carried through the public form, and already understood
+ * by anything that reads campaign attribution. Inventing `?rep=` would have
+ * meant a new column and a new field on the form for no gain.
+ *
+ * The code in the link is a claim, not proof — the URL is public and the codes
+ * are short. The server resolves it and honours it only when it names somebody
+ * who actually has event access, which is what stops a scan being attributed to
+ * a colleague by anyone who can edit an address bar.
+ */
+export function repCaptureUrl(baseUrl: string, eventCode: string, employeeCode: string): string {
+  const url = new URL(captureUrl(baseUrl, 'EVENT', eventCode));
+  url.searchParams.set(REP_CAPTURE_PARAM, employeeCode);
+  return url.toString();
+}
+
+/**
+ * One rep's share of an event, for the breakdown under "what the leads became".
+ *
+ * Shaped like the daily activity report on purpose — a name, a total, and the
+ * stage split — because the people reading it already know how to read that one.
+ */
+export interface EventRepBreakdown {
+  /** Null for the row covering leads from the plain banner QR. */
+  userId: string | null;
+  fullName: string;
+  employeeCode: string | null;
+  total: number;
+  byStatus: Array<{ status: string; count: number }>;
 }

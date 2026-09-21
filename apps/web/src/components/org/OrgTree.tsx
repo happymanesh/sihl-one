@@ -8,9 +8,11 @@ import { Badge } from '@/components/ui/Badge';
 import {
   createOrgUnit,
   moveOrgUnit,
+  toggleOrgUnitEvents,
   updateOrgUnit,
   type OrgState,
 } from '@/app/actions/org-units';
+import { EventAccessSwitch } from '@/components/admin/EventAccessSwitch';
 import { formatNumber, humanise } from '@/lib/format';
 
 const INITIAL: OrgState = { status: 'idle' };
@@ -70,7 +72,28 @@ function UnitRow({ unit, units }: { unit: OrgUnitNode; units: OrgUnitNode[] }) {
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 text-xs font-semibold">
+        <div className="flex shrink-0 items-center gap-3 text-xs font-semibold">
+          {/*
+            Events, switched on here and inherited downwards.
+
+            A unit covered by an ancestor shows its own switch off with a note
+            saying where the access comes from, rather than showing it on — a
+            switch that reads on when nothing is set here would be a lie the
+            moment somebody turned the parent off.
+          */}
+          <EventAccessSwitch
+            action={toggleOrgUnitEvents}
+            idField="id"
+            id={unit.id}
+            enabled={unit.canAccessEvents}
+            hint={
+              unit.canAccessEvents
+                ? 'Events on'
+                : unit.eventsInherited
+                  ? 'On, from above'
+                  : 'Events off'
+            }
+          />
           <button
             type="button"
             onClick={() => setPanel(panel === 'rename' ? 'none' : 'rename')}

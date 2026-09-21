@@ -18,6 +18,21 @@ export interface CaptureState {
    * on the internet with a phone number.
    */
   alreadyKnown?: boolean;
+
+  /**
+   * What was captured, read back on the acknowledgement.
+   *
+   * Set under exactly the same condition as `alreadyKnown` and for the same
+   * reason: at a stall it confirms to the rep and the visitor that the right
+   * details went in, while on the open website it would hand anybody a way to
+   * probe. The values are the ones just submitted, never the ones on file.
+   */
+  captured?: {
+    name: string;
+    mobile: string;
+    productInterest: string[];
+    assignedToName: string | null;
+  };
   errors?: Record<string, string[]>;
 }
 
@@ -59,6 +74,9 @@ export async function submitLeadCapture(
       utmSource: (formData.get('utmSource') as string) || undefined,
       utmMedium: (formData.get('utmMedium') as string) || undefined,
       utmCampaign: (formData.get('utmCampaign') as string) || undefined,
+      // Carries the rep's employee code from their personal QR. The API
+      // resolves it and decides whether to honour it; the browser only relays.
+      utmContent: (formData.get('utmContent') as string) || undefined,
       landingPath: (formData.get('landingPath') as string) || undefined,
     },
   });
@@ -95,7 +113,15 @@ export async function submitLeadCapture(
       };
     }
 
-    const data = (await response.json()) as { reference: string; duplicate: boolean };
+    const data = (await response.json()) as {
+      reference: string;
+      duplicate: boolean;
+      firstName?: string;
+      lastName?: string | null;
+      mobile?: string;
+      productInterest?: string[] | null;
+      assignedToName?: string | null;
+    };
 
     /*
       Whether we say "we already have you" depends on who is asking.
@@ -118,6 +144,14 @@ export async function submitLeadCapture(
       status: 'success',
       reference: data.reference,
       alreadyKnown,
+      captured: attended
+        ? {
+            name: [data.firstName, data.lastName].filter(Boolean).join(' ').trim(),
+            mobile: data.mobile ?? parsed.data.mobile,
+            productInterest: data.productInterest ?? [],
+            assignedToName: data.assignedToName ?? null,
+          }
+        : undefined,
       // Warm on purpose. This is read by an existing client who has just
       // queued at a stall to tell us something — "you are already registered"
       // lands as a correction, and nobody enjoys being told they did a

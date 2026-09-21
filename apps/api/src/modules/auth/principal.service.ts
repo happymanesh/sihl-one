@@ -31,6 +31,7 @@ export class PrincipalService {
       include: {
         roles: { include: { role: true } },
         orgUnit: { select: { id: true, path: true } },
+        designation: { select: { canAccessEvents: true, isActive: true } },
         reports: { where: { deletedAt: null }, select: { id: true } },
       },
     });
@@ -51,6 +52,35 @@ export class PrincipalService {
     const permissions = [
       ...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[])),
     ];
+
+    /*
+      Event access, granted by two switches rather than by a role.
+
+      This belongs here and not at sign-in, because this is the only place
+      permissions are actually decided — the token's `perms` claim is never read
+      by the guard. Putting it here also makes the switch take effect on the
+      very next request instead of at the next token refresh, which is the
+      behaviour an administrator expects from something that looks like a
+      switch.
+
+      Costs a query only for the people it could apply to: roles that already
+      carry the permission short-circuit, and so does a level with the switch
+      off, which is almost everyone.
+    */
+    if (
+      !permissions.includes('event:view') &&
+      user.designation?.isActive &&
+      user.designation.canAccessEvents &&
+      user.orgUnit
+    ) {
+      const chain = user.orgUnit.path.split('/').filter(Boolean);
+      if (chain.length > 0) {
+        const opened = await this.prisma.orgUnit.count({
+          where: { id: { in: chain }, canAccessEvents: true, isActive: true },
+        });
+        if (opened > 0) permissions.push('event:view');
+      }
+    }
 
     // Touch lastSeenAt without awaiting, so it never adds a write round-trip to
     // the critical path of every request.

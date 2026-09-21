@@ -49,22 +49,43 @@ export class EventsController {
     return this.captureCodes.context(kind === 'p' ? 'PARTNER' : 'EVENT', code);
   }
 
+  /*
+    `event:view`, not `campaign:read`.
+
+    A rep at a stall needs the event list and their own QR; they have no
+    business in campaign spend and attribution. Every role that could reach
+    these two routes before still holds `event:view` statically, so this takes
+    nothing away — it only opens a door for the reps whose hierarchy level and
+    branch have both been switched on.
+
+    The management routes below keep `campaign:update`: seeing an event and
+    running one are different things.
+  */
   @Get()
   @ApiBearerAuth()
-  @RequirePermissions('campaign:read')
+  @RequirePermissions('event:view')
   @ApiOperation({ summary: 'List events with captured lead counts' })
   @ApiZodQuery(eventQuerySchema)
-  list(@ZodQuery(eventQuerySchema) query: EventQuery) {
-    return this.events.list(query);
+  list(@CurrentUser() user: AuthenticatedPrincipal, @ZodQuery(eventQuerySchema) query: EventQuery) {
+    return this.events.list(user, query);
   }
 
   @Get(':id')
   @ApiBearerAuth()
-  @RequirePermissions('campaign:read')
+  @RequirePermissions('event:view')
   @ApiParam({ name: 'id', description: 'Event id' })
   @ApiOperation({ summary: 'Event detail with its QR capture URL and what the leads became' })
-  findOne(@Param('id', IdParamPipe) id: string) {
-    return this.events.findOne(id);
+  findOne(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
+    return this.events.findOne(user, id);
+  }
+
+  @Get(':id/by-rep')
+  @ApiBearerAuth()
+  @RequirePermissions('event:view')
+  @ApiParam({ name: 'id', description: 'Event id' })
+  @ApiOperation({ summary: 'Leads this event produced, broken down by the rep whose QR captured them' })
+  byRep(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
+    return this.events.byRep(user, id);
   }
 
   @Post()

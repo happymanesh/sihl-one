@@ -71,7 +71,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { label: 'Campaigns', href: '/campaigns', icon: 'megaphone', permissions: ['campaign:read'], section: 'grow' },
   { label: 'Messaging', href: '/messaging', icon: 'bell', permissions: ['campaign:read'], section: 'grow' },
-  { label: 'Events', href: '/events', icon: 'pin', permissions: ['campaign:read'], section: 'grow' },
+  { label: 'Events', href: '/events', icon: 'pin', permissions: ['event:view'], section: 'grow' },
   { label: 'Partners', href: '/partners', icon: 'handshake', permissions: ['partner:read'], section: 'grow' },
 
   { label: 'Users', href: '/admin/users' as Route, icon: 'shield', permissions: ['user:read'], section: 'admin' },

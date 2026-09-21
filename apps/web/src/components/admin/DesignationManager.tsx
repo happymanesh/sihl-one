@@ -5,7 +5,13 @@ import { useFormStatus } from 'react-dom';
 import { DATA_SCOPES, type DesignationSummary } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
-import { createDesignation, toggleDesignation, type UserFormState } from '@/app/actions/users';
+import {
+  createDesignation,
+  toggleDesignation,
+  toggleDesignationEvents,
+  type UserFormState,
+} from '@/app/actions/users';
+import { EventAccessSwitch } from '@/components/admin/EventAccessSwitch';
 import { humanise } from '@/lib/format';
 
 const INITIAL: UserFormState = { status: 'idle' };
@@ -66,7 +72,7 @@ export function DesignationManager({ designations }: { designations: Designation
         <table className="w-full text-sm">
           <thead className="border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] text-left">
             <tr>
-              {['Level', 'Designation', 'Sees', 'People', ''].map((heading) => (
+              {['Level', 'Designation', 'Sees', 'People', 'Events', ''].map((heading) => (
                 <th
                   key={heading}
                   className="px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
@@ -96,6 +102,19 @@ export function DesignationManager({ designations }: { designations: Designation
                 </td>
                 <td className="px-4 py-3 text-xs">{humanise(designation.defaultScope)}</td>
                 <td className="px-4 py-3 text-xs tnum">{designation.userCount ?? 0}</td>
+                <td className="px-4 py-3">
+                  {/* Half the rule. The branch has to be switched on too, which
+                      is why the hint points at the other screen rather than
+                      letting someone switch this and wonder why nothing
+                      changed. */}
+                  <EventAccessSwitch
+                    action={toggleDesignationEvents}
+                    idField="designationId"
+                    id={designation.id}
+                    enabled={designation.canAccessEvents}
+                    disabled={!designation.isActive}
+                  />
+                </td>
                 <td className="px-4 py-3 text-right">
                   <ToggleButton
                     id={designation.id}

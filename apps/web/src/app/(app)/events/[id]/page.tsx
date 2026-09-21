@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import type { EventDetail } from '@sihl-one/contracts';
+import type { EventDetail, EventRepBreakdown } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
 import { CopyField } from '@/components/ui/CopyField';
 import { EventActions } from '@/components/events/EventActions';
+import { EventRepTable } from '@/components/events/EventRepTable';
 import { QrCode } from '@/components/ui/QrCode';
 import { StatTile } from '@/components/ui/StatTile';
 import { apiFetch } from '@/lib/api';
@@ -31,6 +32,9 @@ export default async function EventDetailPage({ params }: Props) {
   const user = await requireUser();
   const { id } = await params;
   const event = await apiFetch<EventDetail>(`/events/${id}`);
+  const byRep = await apiFetch<EventRepBreakdown[]>(`/events/${id}/by-rep`).catch(
+    () => [] as EventRepBreakdown[],
+  );
 
   return (
     <div className="space-y-5">
@@ -102,6 +106,37 @@ export default async function EventDetailPage({ params }: Props) {
           <StatTile label="Converted" value={formatNumber(event.converted)} />
           <StatTile label="Conversion" value={`${event.conversionRate}%`} />
         </div>
+
+        {/*
+          Whose QR brought them in.
+
+          Second row rather than squeezed into the first: the row above is about
+          the event, this one is about how it was worked. A stall where every
+          lead is unattributed means the personal QRs were printed and never
+          used, which is worth seeing at a glance.
+        */}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <StatTile
+            label="Assigned to a rep"
+            value={formatNumber(event.assignedLeads)}
+            hint="Scanned someone's personal QR"
+          />
+          <StatTile
+            label="Not assigned"
+            value={formatNumber(event.unassignedLeads)}
+            hint="Scanned the plain banner QR"
+            tone={event.unassignedLeads > 0 ? 'warning' : 'default'}
+          />
+        </div>
+
+        {event.scopedToViewer ? (
+          <p className="mt-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+            {/* Without this a rep reads four leads off a stall that took two
+                hundred and concludes the event failed. */}
+            These are your own numbers — leads your QR brought in. The stall total
+            will be higher.
+          </p>
+        ) : null}
       </section>
 
       <section className="card p-5">
@@ -133,6 +168,38 @@ export default async function EventDetailPage({ params }: Props) {
             <p className="mt-1.5 font-mono text-xs text-[var(--color-text-subtle)]">{event.code}</p>
           </div>
         </div>
+
+        {/*
+          The rep's own QR, below the stall's.
+
+          Same event, one extra parameter carrying their employee code, so every
+          scan of this one lands as their lead instead of in a common pile. Shown
+          only while the event is actually accepting scans — a personal QR
+          printed for a closed event produces nothing and teaches people the
+          feature is broken.
+        */}
+        {event.myCaptureUrl && event.status === 'RUNNING' ? (
+          <div className="mt-5 flex flex-wrap items-start justify-between gap-5 border-t border-[var(--color-border)] pt-5">
+            <div className="min-w-[16rem] flex-1">
+              <h3 className="font-bold">Your QR</h3>
+              <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+                Scans of this one are tagged{' '}
+                <span className="font-mono font-semibold">{event.myEmployeeCode}</span> and the lead
+                is assigned to you automatically. Use it on your phone or print your own copy.
+              </p>
+              <div className="mt-4">
+                <CopyField value={event.myCaptureUrl} label="Your personal registration URL" />
+              </div>
+            </div>
+
+            <div className="text-center">
+              <QrCode value={event.myCaptureUrl} size={190} />
+              <p className="mt-1.5 font-mono text-xs text-[var(--color-text-subtle)]">
+                {event.myEmployeeCode}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="card p-5">
@@ -165,6 +232,16 @@ export default async function EventDetailPage({ params }: Props) {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="card p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="font-bold">By rep</h2>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            Who each lead&apos;s QR belonged to
+          </span>
+        </div>
+        <EventRepTable eventId={event.id} rows={byRep} />
       </section>
     </div>
   );

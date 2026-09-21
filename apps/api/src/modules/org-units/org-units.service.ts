@@ -52,6 +52,21 @@ export class OrgUnitsService {
       },
     });
 
+    /*
+      Event access is inherited, so the screen has to show two different things:
+      the switch on this unit, and whether it is already on because a parent has
+      it. Without the second, an administrator looking at a branch under an
+      opened region sees an off switch and concludes nobody there has access.
+    */
+    const openedIds = new Set(
+      rows.filter((row) => row.canAccessEvents).map((row) => row.id),
+    );
+    const inheritsEvents = (row: { id: string; path: string }): boolean =>
+      row.path
+        .split('/')
+        .filter(Boolean)
+        .some((id) => id !== row.id && openedIds.has(id));
+
     return toTreeOrder(
       rows.map((row) => ({
         id: row.id,
@@ -61,6 +76,8 @@ export class OrgUnitsService {
         parentId: row.parentId,
         path: row.path,
         isActive: row.isActive,
+        canAccessEvents: row.canAccessEvents,
+        eventsInherited: inheritsEvents(row),
         depth: depthOf(row.path),
         userCount: row._count.users,
         leadCount: row._count.leads,

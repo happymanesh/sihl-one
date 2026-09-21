@@ -289,6 +289,14 @@ export const leadQuerySchema = paginationQuerySchema.extend({
    * and `eventId` must not say it did.
    */
   attendedEventId: idSchema.optional(),
+  /**
+   * Leads brought in by one rep's personal event QR.
+   *
+   * Separate from `ownerId`: this asks who captured the lead, not who holds it
+   * now. The event breakdown drills down on this, and the two answers diverge
+   * the moment a lead is transferred.
+   */
+  capturedById: idSchema.optional(),
   /** `true` restricts to leads whose follow-up date has passed. */
   overdueOnly: z.coerce.boolean().optional(),
   createdFrom: z.coerce.date().optional(),

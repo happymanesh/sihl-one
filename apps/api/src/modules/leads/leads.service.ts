@@ -696,6 +696,9 @@ export class LeadsService {
     const coded = await this.captureCodes.resolve({
       partnerCode: input.partnerCode,
       eventCode: input.eventCode,
+      // The rep's employee code rides in on utm_content, which the public form
+      // already collects and already posts. Validated inside the resolver.
+      repCode: input.attribution?.utmContent,
     });
 
     const existing = await this.prisma.lead.findFirst({
@@ -704,7 +707,11 @@ export class LeadsService {
         deletedAt: null,
         status: { notIn: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
       },
-      select: { id: true, reference: true },
+      select: {
+        id: true,
+        reference: true,
+        owner: { select: { firstName: true, lastName: true } },
+      },
     });
 
     if (existing) {
@@ -759,7 +766,30 @@ export class LeadsService {
         });
       });
 
-      return { reference: existing.reference, duplicate: true };
+      /*
+        Echoed back, not read back.
+
+        The name, mobile and product on the acknowledgement are the ones the
+        visitor just typed, never the ones already on file. Reading the stored
+        record out to whoever submitted the form would turn this page into a
+        lookup: type a number, learn the client's name. The number was already
+        enough to tell you a lead exists; it should not also tell you who it is.
+
+        The owner's name is the one exception, and it is deliberate — the person
+        at the desk needs to be able to say who will call. It is disclosed for a
+        mobile number the submitter already holds.
+      */
+      return {
+        reference: existing.reference,
+        duplicate: true,
+        firstName: input.firstName,
+        lastName: input.lastName || null,
+        mobile: input.mobile,
+        productInterest: input.productInterest ?? null,
+        assignedToName: existing.owner
+          ? `${existing.owner.firstName} ${existing.owner.lastName}`.trim()
+          : null,
+      };
     }
 
     await this.masters.assertValid({
@@ -810,8 +840,10 @@ export class LeadsService {
           partnerId: coded.partnerId,
           eventId: coded.eventId,
           // An event names the person running the stall, so the lead reaches
-          // them rather than sitting in an unowned queue over a weekend.
+          // them rather than sitting in an unowned queue over a weekend. When a
+          // personal QR was scanned, that rep is the owner instead.
           ownerId: coded.suggestedOwnerId,
+          capturedById: coded.capturedById,
           utmSource: input.attribution?.utmSource ?? null,
           utmMedium: input.attribution?.utmMedium ?? null,
           utmCampaign: input.attribution?.utmCampaign ?? null,
@@ -888,7 +920,24 @@ export class LeadsService {
       changes: { reference, source: input.source },
     });
 
-    return { reference, duplicate: false };
+    const assignedTo = coded.suggestedOwnerId
+      ? await this.prisma.user.findUnique({
+          where: { id: coded.suggestedOwnerId },
+          select: { firstName: true, lastName: true },
+        })
+      : null;
+
+    return {
+      reference,
+      duplicate: false,
+      firstName: input.firstName,
+      lastName: input.lastName || null,
+      mobile: input.mobile,
+      productInterest: input.productInterest ?? null,
+      assignedToName: assignedTo
+        ? `${assignedTo.firstName} ${assignedTo.lastName}`.trim()
+        : null,
+    };
   }
 
   async update(user: AuthenticatedPrincipal, id: string, input: UpdateLeadInput) {
@@ -1484,6 +1533,8 @@ export class LeadsService {
     if (query.partnerId) and.push({ partnerId: query.partnerId });
     if (query.campaignId) and.push({ campaignId: query.campaignId });
     if (query.eventId) and.push({ eventId: query.eventId });
+    if (query.capturedById) and.push({ capturedById: query.capturedById });
+
     if (query.attendedEventId) {
       // Captured here, or recorded as having turned up. The first covers every
       // event that ran before attendance was recorded at all; without it this

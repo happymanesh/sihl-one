@@ -55,6 +55,7 @@ export function LeadCaptureForm({
     utmSource: '',
     utmMedium: '',
     utmCampaign: '',
+    utmContent: '',
     landingPath: '',
   });
 
@@ -71,6 +72,8 @@ export function LeadCaptureForm({
       utmSource: params.get('utm_source') ?? '',
       utmMedium: params.get('utm_medium') ?? '',
       utmCampaign: params.get('utm_campaign') ?? '',
+      // The rep's employee code, when the QR scanned was a personal one.
+      utmContent: params.get('utm_content') ?? '',
       landingPath: window.location.pathname,
     });
   }, []);
@@ -132,6 +135,44 @@ export function LeadCaptureForm({
             <span className="font-mono font-bold tnum">{state.reference}</span>
           </p>
         ) : null}
+
+        {/*
+          What we recorded, read back.
+
+          Present only for a capture made against an event or partner code —
+          the same condition as the greeting above, for the same reason. At a
+          stall the rep reads this over the visitor's shoulder and catches a
+          mistyped digit while the person is still standing there, which is the
+          only moment it is cheap to fix.
+        */}
+        {state.captured ? (
+          <dl className="mx-auto mt-4 max-w-sm space-y-1.5 rounded-lg bg-white/70 px-4 py-3 text-left text-sm dark:bg-black/20">
+            <div className="flex justify-between gap-3">
+              <dt className="text-[var(--color-text-muted)]">Name</dt>
+              <dd className="font-semibold">{state.captured.name}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-[var(--color-text-muted)]">Mobile</dt>
+              <dd className="font-semibold tnum">{state.captured.mobile}</dd>
+            </div>
+            {state.captured.productInterest.length > 0 ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-[var(--color-text-muted)]">Interested in</dt>
+                <dd className="text-right font-semibold">
+                  {state.captured.productInterest
+                    .map((code) => products.find((p) => p.code === code)?.name ?? code)
+                    .join(', ')}
+                </dd>
+              </div>
+            ) : null}
+            {state.captured.assignedToName ? (
+              <div className="flex justify-between gap-3 border-t border-[var(--color-border)] pt-1.5">
+                <dt className="text-[var(--color-text-muted)]">Will call you</dt>
+                <dd className="font-semibold">{state.captured.assignedToName}</dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : null}
       </div>
     );
   }
@@ -141,6 +182,7 @@ export function LeadCaptureForm({
       <input type="hidden" name="utmSource" value={attribution.utmSource} />
       <input type="hidden" name="utmMedium" value={attribution.utmMedium} />
       <input type="hidden" name="utmCampaign" value={attribution.utmCampaign} />
+      <input type="hidden" name="utmContent" value={attribution.utmContent} />
       <input type="hidden" name="landingPath" value={attribution.landingPath} />
       {partnerCode ? <input type="hidden" name="partnerCode" value={partnerCode} /> : null}
       {eventCode ? <input type="hidden" name="eventCode" value={eventCode} /> : null}

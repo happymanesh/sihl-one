@@ -6,6 +6,7 @@ import {
   type EventStatus,
 } from '@sihl-one/contracts';
 
+import { hasEventAccess } from '../../common/event-access';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface ResolvedCapture {
@@ -14,6 +15,8 @@ export interface ResolvedCapture {
   campaignId: string | null;
   /** Where the lead should land, when the code names an owner. */
   suggestedOwnerId: string | null;
+  /** The rep whose personal QR was scanned, when one was and it checks out. */
+  capturedById: string | null;
   source: 'PARTNER' | 'REFERRAL' | 'BRANCH_EVENT' | null;
 }
 
@@ -90,6 +93,58 @@ export class CaptureCodeService {
   }
 
   /**
+   * The rep behind a personal QR, or null.
+   *
+   * The employee code arrives on a public URL that anybody can retype, so it is
+   * a claim and nothing more. Three things have to hold before it is honoured:
+   * the code names a live account, that person actually has event access, and
+   * the event belongs to their own branch or one above it.
+   *
+   * Together those stop the obvious abuse — editing a colleague's code into the
+   * address bar to take credit for their stall — without ever refusing the
+   * lead. A code that fails any check is simply ignored: the capture proceeds
+   * unattributed, because a real person filling in a real form must never be
+   * lost to a bad parameter.
+   *
+   * It is not airtight, and cannot be while the link is public and the codes
+   * are short. Two reps at the same stall can still claim each other's scans.
+   * The audit trail records what was submitted, which is the realistic control.
+   */
+  private async resolveRep(
+    repCode: string | undefined,
+    eventOrgUnitId: string | null,
+  ): Promise<string | null> {
+    const code = repCode?.trim();
+    if (!code) return null;
+
+    const rep = await this.prisma.user.findFirst({
+      where: {
+        employeeCode: { equals: code, mode: 'insensitive' },
+        deletedAt: null,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        designationId: true,
+        orgUnitId: true,
+        orgUnit: { select: { path: true } },
+      },
+    });
+    if (!rep) return null;
+
+    if (!(await hasEventAccess(this.prisma, rep))) return null;
+
+    // The event must sit in this rep's own chain. An event with no org unit is
+    // a national one and belongs to everybody.
+    if (eventOrgUnitId) {
+      const chain = (rep.orgUnit?.path ?? '').split('/').filter(Boolean);
+      if (!chain.includes(eventOrgUnitId)) return null;
+    }
+
+    return rep.id;
+  }
+
+  /**
    * Active products, for the public form.
    *
    * The capture page is unauthenticated, so it cannot call the masters
@@ -128,12 +183,15 @@ export class CaptureCodeService {
   async resolve(input: {
     partnerCode?: string;
     eventCode?: string;
+    /** Employee code from the rep's personal QR, straight off the query string. */
+    repCode?: string;
   }): Promise<ResolvedCapture> {
     const empty: ResolvedCapture = {
       partnerId: null,
       eventId: null,
       campaignId: null,
       suggestedOwnerId: null,
+      capturedById: null,
       source: null,
     };
 
@@ -159,6 +217,7 @@ export class CaptureCodeService {
           status: true,
           ownerId: true,
           campaignId: true,
+          orgUnitId: true,
           startsAt: true,
           endsAt: true,
         },
@@ -174,11 +233,16 @@ export class CaptureCodeService {
           endsAt: event.endsAt,
         })
       ) {
+        const rep = await this.resolveRep(input.repCode, event.orgUnitId);
+
         return {
           ...empty,
           eventId: event.id,
           campaignId: event.campaignId,
-          suggestedOwnerId: event.ownerId,
+          capturedById: rep,
+          // The rep who was actually standing there beats the event's nominal
+          // owner. If nobody scanned a personal QR this is unchanged.
+          suggestedOwnerId: rep ?? event.ownerId,
           // BRANCH_EVENT, not WALK_IN. Both are seeded and active, and the
           // difference matters in every report: a QR scanned at a stall and
           // somebody wandering into a branch are different acquisition
