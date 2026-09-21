@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Route } from 'next';
 import type { LeadListItem } from '@sihl-one/contracts';
 
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -161,12 +162,30 @@ export default async function LeadsPage({
             {byAttendance ? 'Showing everyone we met at' : 'Showing leads captured at'}
           </span>
           <span className="font-semibold">{filteredEvent.name}</span>
-          <Link
-            href="/leads"
-            className="ml-auto text-xs font-semibold text-[var(--color-text-muted)] underline underline-offset-2"
-          >
-            Show all leads
-          </Link>
+
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            {/*
+              Back to where they came from.
+
+              This list is reached by clicking through from an event — from a
+              stat tile or a rep's row in the breakdown — and the only way back
+              was the browser button. Somebody comparing two reps' leads goes
+              back and forth several times, so the return trip deserves to be
+              on the page.
+            */}
+            <Link
+              href={`/events/${filteredEvent.id}` as Route}
+              className="text-xs font-semibold text-teal-600 underline underline-offset-2 dark:text-teal-300"
+            >
+              ← Back to {filteredEvent.name}
+            </Link>
+            <Link
+              href="/leads"
+              className="text-xs font-semibold text-[var(--color-text-muted)] underline underline-offset-2"
+            >
+              Show all leads
+            </Link>
+          </div>
         </div>
       ) : null}
 
