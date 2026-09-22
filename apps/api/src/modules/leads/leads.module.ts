@@ -4,6 +4,7 @@ import { VisitsModule } from '../visits/visits.module';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration';
 import { OnlySmsSender } from '../messaging/onlysms-sender';
 import { RecordingSmsSender, SmsSender } from '../messaging/sms-sender';
+import { ExistingClientService } from './existing-client.service';
 import { OtpService } from './otp.service';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
@@ -23,6 +24,7 @@ import { LeadsService } from './leads.service';
   providers: [
     LeadsService,
     OtpService,
+    ExistingClientService,
     /*
       The SMS driver is chosen here, once, from configuration — the same shape
       as MessagingModule binds MessageSender. `noop` is the default, so a build

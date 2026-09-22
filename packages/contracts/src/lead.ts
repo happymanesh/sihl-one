@@ -297,6 +297,35 @@ export const leadQuerySchema = paginationQuerySchema.extend({
    * the moment a lead is transferred.
    */
   capturedById: idSchema.optional(),
+
+  /**
+   * Whether the lead is held by anybody at all, without naming who.
+   *
+   * `ownerId` answers "whose", this answers "anyone's". The unowned pile is the
+   * one that needs the filter most — nobody is looking at those leads by
+   * definition, so nothing else surfaces them — and it cannot be expressed as
+   * an id because its defining feature is the absence of one.
+   */
+  owned: z.enum(['any', 'none']).optional(),
+
+  /**
+   * Whether a rep's personal QR brought the lead in, without naming which rep.
+   *
+   * `capturedById` answers "whose", this answers "anyone's". The event tiles
+   * need the second — "assigned" and "not assigned" are counts across every
+   * rep, and a filter that required an id could not express either.
+   */
+  captured: z.enum(['any', 'none']).optional(),
+
+  /**
+   * People we already knew who turned up at this event.
+   *
+   * Distinct from `attendedEventId`, which is everyone who registered. This is
+   * the "Welcome back" slice: somebody already on the book before they walked
+   * in, which is a different conversation for the rep and a different number
+   * for the event.
+   */
+  returningAtEventId: idSchema.optional(),
   /** `true` restricts to leads whose follow-up date has passed. */
   overdueOnly: z.coerce.boolean().optional(),
   createdFrom: z.coerce.date().optional(),
@@ -313,6 +342,19 @@ export const leadQuerySchema = paginationQuerySchema.extend({
     .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 export type LeadQuery = z.infer<typeof leadQuerySchema>;
+
+/**
+ * What the owner filter offers.
+ *
+ * Derived from the leads in scope rather than the user directory, so the
+ * control can never list a name that returns nothing — and `hasUnassigned`
+ * carries the same guarantee for the unowned option, which is otherwise
+ * invisible: there is no row to read it off, only the absence of one.
+ */
+export interface LeadOwnerFilterOptions {
+  items: Array<{ id: string; fullName: string; employeeCode: string | null }>;
+  hasUnassigned: boolean;
+}
 
 export interface LeadListItem {
   id: string;

@@ -135,6 +135,7 @@ export async function submitLeadCapture(
     const data = (await response.json()) as {
       reference: string;
       duplicate: boolean;
+      existingClient?: boolean;
       firstName?: string;
       lastName?: string | null;
       mobile?: string;
@@ -163,7 +164,19 @@ export async function submitLeadCapture(
       details twice.
     */
     const attended = Boolean(parsed.data.partnerCode || parsed.data.eventCode);
-    const alreadyKnown = attended && data.duplicate;
+    /*
+      Two different ways of already being known, and they need different words.
+
+      `duplicate` means there is an open enquiry from this number here.
+      `existingClient` means the back office holds an account for it — someone
+      who may never have enquired in their life. Telling that person their
+      details were "added to your existing enquiry" describes something that
+      does not exist, and they are the one visitor on the floor most likely to
+      notice.
+    */
+    const repeatEnquiry = attended && data.duplicate;
+    const knownClient = attended && Boolean(data.existingClient);
+    const alreadyKnown = repeatEnquiry || knownClient;
 
     return {
       status: 'success',
@@ -189,9 +202,11 @@ export async function submitLeadCapture(
       // queued at a stall to tell us something — "you are already registered"
       // lands as a correction, and nobody enjoys being told they did a
       // redundant thing. Lead with what we did with what they said.
-      message: alreadyKnown
+      message: repeatEnquiry
         ? 'We already have your details, so nothing you have told us today is lost — it has been added to your existing enquiry, and your relationship manager will call you shortly.'
-        : 'Thank you. A relationship manager will call you shortly.',
+        : knownClient
+          ? 'Good to see you again. We have your details on file, and your relationship manager will call you shortly.'
+          : 'Thank you. A relationship manager will call you shortly.',
     };
   } catch (error) {
     if (error instanceof ApiError) {

@@ -300,12 +300,30 @@ export class EventsService {
     // colleagues is a different product decision from the one asked for.
     const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
 
+    /*
+      Grouped by rep and by whether the number was proven.
+
+      Verification is the question this table is read for: a lead whose mobile
+      nobody confirmed is a lead somebody may not be able to ring. Grouping on
+      the timestamp's null-ness rather than fetching every row keeps it one
+      query however large the event.
+    */
     const grouped = await this.prisma.lead.groupBy({
-      by: ['capturedById', 'status'],
+      by: ['capturedById'],
       where: { eventId: id, deletedAt: null, ...mine },
       _count: { _all: true },
-      orderBy: [{ capturedById: 'asc' }, { status: 'asc' }],
+      orderBy: [{ capturedById: 'asc' }],
     });
+
+    const verifiedGrouped = await this.prisma.lead.groupBy({
+      by: ['capturedById'],
+      where: { eventId: id, deletedAt: null, mobileVerifiedAt: { not: null }, ...mine },
+      _count: { _all: true },
+      orderBy: [{ capturedById: 'asc' }],
+    });
+    const verifiedBy = new Map(
+      verifiedGrouped.map((row) => [row.capturedById ?? '', row._count._all]),
+    );
 
     const userIds = [
       ...new Set(grouped.map((row) => row.capturedById).filter((v): v is string => Boolean(v))),
@@ -321,24 +339,23 @@ export class EventsService {
     const rows = new Map<string, EventRepBreakdown>();
     for (const row of grouped) {
       const key = row.capturedById ?? '';
-      let entry = rows.get(key);
-      if (!entry) {
-        const person = row.capturedById ? byId.get(row.capturedById) : null;
-        entry = {
-          userId: row.capturedById,
-          fullName: person
-            ? `${person.firstName} ${person.lastName}`.trim()
-            : row.capturedById
-              ? 'Removed user'
-              : 'Unassigned Leads',
-          employeeCode: person?.employeeCode ?? null,
-          total: 0,
-          byStatus: [],
-        };
-        rows.set(key, entry);
-      }
-      entry.total += row._count._all;
-      entry.byStatus.push({ status: row.status, count: row._count._all });
+      const person = row.capturedById ? byId.get(row.capturedById) : null;
+      const total = row._count._all;
+      const verified = verifiedBy.get(key) ?? 0;
+      rows.set(key, {
+        userId: row.capturedById,
+        fullName: person
+          ? `${person.firstName} ${person.lastName}`.trim()
+          : row.capturedById
+            ? 'Removed user'
+            : 'Unassigned Leads',
+        employeeCode: person?.employeeCode ?? null,
+        verified,
+        // Derived rather than queried a third time: every lead is one or the
+        // other, so a second count would only be a chance to disagree.
+        unverified: total - verified,
+        total,
+      });
     }
 
     // Busiest first; the unattributed row last whatever its size, because it is

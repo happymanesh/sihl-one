@@ -37,6 +37,7 @@ import {
   type InstaLeadResult,
   type LeadCaptureInput,
   type LeadListItem,
+  type LeadOwnerFilterOptions,
   type LeadQuery,
   type LeadStatus,
   type LeadProfileInput,
@@ -60,6 +61,7 @@ import type {
   ResendOtpInput,
   VerifyOtpInput,
 } from '@sihl-one/contracts';
+import { ExistingClientService } from './existing-client.service';
 import { OtpService } from './otp.service';
 import { CaptureCodeService } from '../events/capture-code.service';
 import { MastersService } from '../masters/masters.service';
@@ -137,6 +139,31 @@ function istStamp(when: Date): string {
   return `${part('day')}-${month}-${part('year')} ${part('hour')}:${part('minute')}`;
 }
 
+/** Rows one export may contain. A ceiling, so one click cannot exhaust memory. */
+const LEAD_EXPORT_MAX_ROWS = 20_000;
+
+/**
+ * One CSV cell, escaped and defused.
+ *
+ * Two separate problems, both silent:
+ *
+ * **Quoting.** A comma, a quote or a newline inside a value breaks the row into
+ * pieces, and a client called `Shah, Manesh` quietly becomes two columns.
+ * Everything is quoted and inner quotes doubled, which is what RFC 4180 asks
+ * for and what every spreadsheet actually implements.
+ *
+ * **Formula injection.** A value beginning `=`, `+`, `-`, `@`, tab or carriage
+ * return is executed as a formula when the file is opened — so a lead whose
+ * name is `=HYPERLINK("http://…")` runs on the machine of whoever exports the
+ * book. The fix is a leading apostrophe, which spreadsheets strip on display
+ * and never execute. Quoting alone does **not** prevent this: the quotes are
+ * consumed by the CSV parser before the formula parser ever sees the value.
+ */
+function csvCell(value: string): string {
+  const risky = /^[=+\-@\t\r]/.test(value);
+  const text = risky ? `'${value}` : value;
+  return `"${text.replace(/"/g, '""')}"`;
+}
 @Injectable()
 export class LeadsService {
   constructor(
@@ -150,6 +177,7 @@ export class LeadsService {
     private readonly otp: OtpService,
     private readonly masters: MastersService,
     private readonly visits: VisitsService,
+    private readonly existingClients: ExistingClientService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -710,6 +738,17 @@ export class LeadsService {
       repCode: input.attribution?.utmContent,
     });
 
+    /*
+      Do we already bank this person?
+
+      Asked of the back office stand-in, not of our own leads — the two are
+      different questions. `existing` below finds somebody who has enquired
+      here before; this finds somebody who holds an account and may never have
+      enquired at all. Before this, a client of ten years walking up to a stall
+      was indistinguishable from a stranger.
+    */
+    const client = await this.existingClients.lookup(input.mobile);
+
     const existing = await this.prisma.lead.findFirst({
       where: {
         mobile: input.mobile,
@@ -807,6 +846,7 @@ export class LeadsService {
       return {
         reference: existing.reference,
         duplicate: true,
+        existingClient: client.known,
         verification: repeatChallenge,
         firstName: input.firstName,
         lastName: input.lastName || null,
@@ -865,11 +905,14 @@ export class LeadsService {
           campaignId,
           partnerId: coded.partnerId,
           eventId: coded.eventId,
-          // An event names the person running the stall, so the lead reaches
-          // them rather than sitting in an unowned queue over a weekend. When a
-          // personal QR was scanned, that rep is the owner instead.
+          // A personal QR puts the lead in that rep's name. A common-QR scan
+          // arrives unowned, to be handed out deliberately.
           ownerId: coded.suggestedOwnerId,
           capturedById: coded.capturedById,
+          // Where it came in. Without this an unowned lead matches no data
+          // scope but a super admin's, and the branch that ran the stall never
+          // sees its own registrations.
+          orgUnitId: coded.orgUnitId,
           utmSource: input.attribution?.utmSource ?? null,
           utmMedium: input.attribution?.utmMedium ?? null,
           utmCampaign: input.attribution?.utmCampaign ?? null,
@@ -930,9 +973,36 @@ export class LeadsService {
       // one query against one table rather than a union of two lists whose
       // meanings differ — and the redundancy costs a row.
       if (coded.eventId) {
+        // `returning` means "was already on the book when they arrived", and
+        // an existing client is exactly that even though this is their first
+        // lead. Without this they are counted as a new enquiry on the event's
+        // figures, which overstates what the stall actually won.
         await tx.eventAttendance.createMany({
-          data: [{ eventId: coded.eventId, leadId: created.id, returning: false }],
+          data: [{ eventId: coded.eventId, leadId: created.id, returning: client.known }],
           skipDuplicates: true,
+        });
+      }
+
+      /*
+        Say so on the lead itself.
+
+        A flag that only ever reaches a count changes nobody's behaviour. The
+        rep who opens this lead is about to pitch account opening, and this is
+        the line that stops them.
+      */
+      if (client.known) {
+        await tx.activity.create({
+          data: {
+            entityType: 'LEAD',
+            entityId: created.id,
+            type: 'NOTE',
+            direction: 'INTERNAL',
+            subject: 'Existing client',
+            body: client.clientCode
+              ? `This mobile matches an existing SIHL client (${client.clientCode}). Confirm before discussing a new account.`
+              : 'This mobile matches an existing SIHL client. Confirm before discussing a new account.',
+            isSystemGenerated: true,
+          },
         });
       }
 
@@ -974,6 +1044,9 @@ export class LeadsService {
     return {
       reference,
       duplicate: false,
+      // Distinct from `duplicate`, which means "we have an open enquiry from
+      // this number". Somebody can be one, the other, or both.
+      existingClient: client.known,
       firstName: input.firstName,
       lastName: input.lastName || null,
       mobile: input.mobile,
@@ -1286,11 +1359,20 @@ export class LeadsService {
     // reassign leads they cannot see by guessing ids. Ids outside scope are
     // silently skipped and reported in the count, not rejected — otherwise the
     // error message confirms which ids exist.
+    //
+    // `ownerId: null` is the important one: this endpoint hands out work nobody
+    // holds, and nothing else. Taking a lead off the person who already owns it
+    // is a transfer — a different act, with a mandatory reason and its own
+    // endpoint, because somebody is losing a relationship they were working.
+    // Bulk is exactly where that must not happen by accident: one careless
+    // select-all would silently move a hundred live relationships, and the
+    // person who lost them finds out when a client calls.
     const inScope = await this.prisma.lead.findMany({
       where: {
         id: { in: input.leadIds },
         deletedAt: null,
         status: { notIn: ['CONVERTED'] },
+        ownerId: null,
         AND: [this.scope.leadScope(user)],
       },
       select: { id: true },
@@ -1555,17 +1637,19 @@ export class LeadsService {
    * Unowned leads are not represented here; the filter is "whose", and "nobody's"
    * is a different question the list does not currently ask.
    */
-  async owners(
-    user: AuthenticatedPrincipal,
-  ): Promise<Array<{ id: string; fullName: string; employeeCode: string | null }>> {
+  async owners(user: AuthenticatedPrincipal): Promise<LeadOwnerFilterOptions> {
+    // The unowned rows come back from the same grouping rather than a second
+    // query: "is anything unassigned" is one of the buckets this already
+    // counts, and asking twice invites the two answers to disagree.
     const grouped = await this.prisma.lead.groupBy({
       by: ['ownerId'],
-      where: { AND: [this.scope.leadScope(user), { deletedAt: null, ownerId: { not: null } }] },
+      where: { AND: [this.scope.leadScope(user), { deletedAt: null }] },
       _count: { _all: true },
     });
 
+    const hasUnassigned = grouped.some((row) => row.ownerId === null);
     const ids = grouped.map((row) => row.ownerId).filter((id): id is string => Boolean(id));
-    if (ids.length === 0) return [];
+    if (ids.length === 0) return { items: [], hasUnassigned };
 
     const people = await this.prisma.user.findMany({
       where: { id: { in: ids } },
@@ -1573,11 +1657,14 @@ export class LeadsService {
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });
 
-    return people.map((person) => ({
-      id: person.id,
-      fullName: `${person.firstName} ${person.lastName}`.trim(),
-      employeeCode: person.employeeCode,
-    }));
+    return {
+      items: people.map((person) => ({
+        id: person.id,
+        fullName: `${person.firstName} ${person.lastName}`.trim(),
+        employeeCode: person.employeeCode,
+      })),
+      hasUnassigned,
+    };
   }
 
   /**
@@ -1616,6 +1703,116 @@ export class LeadsService {
       leadId: existing.leadId,
       ipAddress: context?.ipAddress ?? null,
     });
+  }
+
+  /**
+   * The current view of the lead list, as a CSV.
+   *
+   * Takes the same query as `list`, so the file matches what the person was
+   * looking at when they pressed Export — a filtered screen that exports the
+   * whole book is a data-protection incident waiting for an explanation.
+   *
+   * Scope is applied exactly as it is for the list, so a rep exports their own
+   * leads and nobody else's. The permission on the route decides *whether* a
+   * person may export; this decides *what*, and the two must not be confused.
+   */
+  async exportCsv(
+    user: AuthenticatedPrincipal,
+    query: LeadQuery,
+  ): Promise<{ csv: string; rows: number }> {
+    const where = this.buildWhere(user, await this.withSubProducts(query));
+
+    const leads = await this.prisma.lead.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      // A ceiling, not a page. Someone exporting the book wants the book, but
+      // an unbounded query on a growing table eventually takes the API down
+      // for everybody else. The row count is returned so the caller can say so.
+      take: LEAD_EXPORT_MAX_ROWS,
+      select: {
+        reference: true,
+        firstName: true,
+        lastName: true,
+        mobile: true,
+        email: true,
+        city: true,
+        status: true,
+        source: true,
+        priority: true,
+        productInterest: true,
+        estimatedValue: true,
+        mobileVerifiedAt: true,
+        createdAt: true,
+        lastActivityAt: true,
+        nextFollowUpAt: true,
+        owner: { select: { firstName: true, lastName: true, employeeCode: true } },
+        event: { select: { name: true } },
+        capturedBy: { select: { firstName: true, lastName: true, employeeCode: true } },
+      },
+    });
+
+    const header = [
+      'Reference',
+      'First name',
+      'Last name',
+      'Mobile',
+      'Mobile verified',
+      'Email',
+      'City',
+      'Status',
+      'Source',
+      'Priority',
+      'Products',
+      'Estimated value',
+      'Owner',
+      'Owner code',
+      'Event',
+      'Captured by',
+      'Created',
+      'Last activity',
+      'Next follow-up',
+    ];
+
+    const asDate = (value: Date | null): string =>
+      value ? value.toISOString().slice(0, 10) : '';
+
+    const body = leads.map((lead) => [
+      lead.reference,
+      lead.firstName,
+      lead.lastName ?? '',
+      lead.mobile,
+      lead.mobileVerifiedAt ? 'Yes' : 'No',
+      lead.email ?? '',
+      lead.city ?? '',
+      lead.status,
+      lead.source,
+      lead.priority,
+      (lead.productInterest ?? []).join('; '),
+      lead.estimatedValue ? lead.estimatedValue.toString() : '',
+      lead.owner ? `${lead.owner.firstName} ${lead.owner.lastName}`.trim() : '',
+      lead.owner?.employeeCode ?? '',
+      lead.event?.name ?? '',
+      lead.capturedBy
+        ? `${lead.capturedBy.firstName} ${lead.capturedBy.lastName}`.trim()
+        : '',
+      asDate(lead.createdAt),
+      asDate(lead.lastActivityAt),
+      asDate(lead.nextFollowUpAt),
+    ]);
+
+    /*
+      A byte-order mark, so Excel reads this as UTF-8.
+
+      Without it Excel assumes the system codepage and mangles every name with
+      a character outside ASCII — which for an Indian client book is a lot of
+      them. Nobody reports it as a bug; they just retype the names.
+    */
+    const csv =
+      '\uFEFF' +
+      [header, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n') +
+      '\r\n';
+
+    return { csv, rows: leads.length };
   }
 
   private buildWhere(user: AuthenticatedPrincipal, query: LeadQuery): Record<string, unknown> {
@@ -1658,6 +1855,20 @@ export class LeadsService {
     if (query.campaignId) and.push({ campaignId: query.campaignId });
     if (query.eventId) and.push({ eventId: query.eventId });
     if (query.capturedById) and.push({ capturedById: query.capturedById });
+    if (query.captured === 'any') and.push({ capturedById: { not: null } });
+    if (query.captured === 'none') and.push({ capturedById: null });
+
+    if (query.owned === 'any') and.push({ ownerId: { not: null } });
+    if (query.owned === 'none') and.push({ ownerId: null });
+
+    if (query.returningAtEventId) {
+      // Recorded on the attendance row, not on the lead: "already on the book
+      // when they arrived" is a fact about that visit, and the same person can
+      // be new at one event and returning at the next.
+      and.push({
+        eventAttendances: { some: { eventId: query.returningAtEventId, returning: true } },
+      });
+    }
 
     if (query.attendedEventId) {
       // Captured here, or recorded as having turned up. The first covers every

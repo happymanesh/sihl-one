@@ -2,13 +2,9 @@ import Link from 'next/link';
 import type { LeadListItem } from '@sihl-one/contracts';
 
 import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
+import { LeadCheckbox, LeadSelectAllCheckbox } from '@/components/leads/LeadSelection';
 import { ProductChips } from '@/components/ui/ProductChips';
-import {
-  formatCompactCurrency,
-  formatDateCompact,
-  formatRelative,
-  humanise,
-} from '@/lib/format';
+import { formatCompactCurrency, formatDateCompact, formatRelative, humanise } from '@/lib/format';
 
 /**
  * Two layouts, one dataset.
@@ -21,10 +17,20 @@ import {
 export function LeadTable({
   leads,
   productLabels,
+  selectable = false,
 }: {
   leads: LeadListItem[];
   /** Code → name from the product master, so chips read "NRI" not "Nri". */
   productLabels?: Record<string, string>;
+  /*
+    Whether rows can be ticked for a bulk action.
+
+    Off by default, and passed rather than inferred from the context being
+    present: an empty column on every lead list anyone ever opens is a worse
+    cost than one prop, and the column should exist only where the action it
+    feeds does.
+  */
+  selectable?: boolean;
 }) {
   return (
     <>
@@ -34,6 +40,11 @@ export function LeadTable({
           <table className="w-full text-sm">
             <thead className="border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] text-left">
               <tr>
+                {selectable ? (
+                  <Th className="w-10">
+                    <LeadSelectAllCheckbox />
+                  </Th>
+                ) : null}
                 <Th>Lead</Th>
                 <Th>Status</Th>
                 <Th>Score</Th>
@@ -51,6 +62,15 @@ export function LeadTable({
                   key={lead.id}
                   className="transition-colors hover:bg-[var(--color-surface-muted)]"
                 >
+                  {selectable ? (
+                    <td className="px-4 py-3 align-top">
+                      {/* Only unowned leads can be ticked. An owned lead moves
+                          by transfer, which asks for a reason — so there is
+                          nothing to offer here, and a box that looked tickable
+                          then refused would be worse than none. */}
+                      {lead.owner ? null : <LeadCheckbox id={lead.id} label={lead.fullName} />}
+                    </td>
+                  ) : null}
                   <td className="px-4 py-3">
                     <Link
                       href={`/leads/${lead.id}`}
@@ -62,8 +82,23 @@ export function LeadTable({
                       <span className="font-mono">{lead.reference}</span>
                       <span aria-hidden>·</span>
                       {/* Masked, because a list view is the easiest place for a
-                          bulk PII leak — a screenshot of 20 phone numbers. */}
-                      <span className="tnum">{lead.mobileMasked}</span>
+                          bulk PII leak — a screenshot of 20 phone numbers.
+
+                          Coloured by whether the number has been proven. A rep
+                          scanning this list is deciding who to ring, and a
+                          number nobody has verified is the one likely to waste
+                          the call. Green is the quiet default and red is the
+                          exception, so the eye goes to the unverified. */}
+                      <span
+                        className={`tnum font-semibold ${
+                          lead.mobileVerifiedAt
+                            ? 'text-brand-green-700 dark:text-brand-green-400'
+                            : 'text-danger-600 dark:text-danger-500'
+                        }`}
+                        title={lead.mobileVerifiedAt ? 'Mobile verified' : 'Mobile not verified'}
+                      >
+                        {lead.mobileMasked}
+                      </span>
                       {lead.city ? (
                         <>
                           <span aria-hidden>·</span>
@@ -84,7 +119,11 @@ export function LeadTable({
                     <ScoreBadge score={lead.score} band={lead.scoreBand} />
                   </td>
                   <td className="px-4 py-3">
-                    <ProductChips codes={lead.productInterest ?? []} labels={productLabels} tone="outline" />
+                    <ProductChips
+                      codes={lead.productInterest ?? []}
+                      labels={productLabels}
+                      tone="outline"
+                    />
                   </td>
                   <td className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
                     {humanise(lead.source)}
@@ -140,13 +179,28 @@ export function LeadTable({
       {/* Mobile */}
       <ul className="space-y-2.5 md:hidden">
         {leads.map((lead) => (
-          <li key={lead.id}>
-            <Link href={`/leads/${lead.id}`} className="card block p-4">
+          <li key={lead.id} className="flex items-start gap-2">
+            {selectable ? (
+              <span className="mt-4 w-4 shrink-0">
+                {lead.owner ? null : <LeadCheckbox id={lead.id} label={lead.fullName} />}
+              </span>
+            ) : null}
+            <Link href={`/leads/${lead.id}`} className="card block flex-1 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-bold">{lead.fullName}</p>
                   <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
-                    {lead.reference} · {lead.mobileMasked}
+                    {lead.reference} ·{' '}
+                    <span
+                      className={
+                        lead.mobileVerifiedAt
+                          ? 'font-semibold text-brand-green-700 dark:text-brand-green-400'
+                          : 'font-semibold text-danger-600 dark:text-danger-500'
+                      }
+                      title={lead.mobileVerifiedAt ? 'Mobile verified' : 'Mobile not verified'}
+                    >
+                      {lead.mobileMasked}
+                    </span>
                   </p>
                 </div>
                 <LeadStatusBadge status={lead.status} />
@@ -162,7 +216,9 @@ export function LeadTable({
 
               <p className="mt-2 text-xs text-[var(--color-text-subtle)]">
                 Added {formatDateCompact(lead.createdAt)}
-                {lead.lastActivityAt ? ` · updated ${formatDateCompact(lead.lastActivityAt)}` : ' · not touched'}
+                {lead.lastActivityAt
+                  ? ` · updated ${formatDateCompact(lead.lastActivityAt)}`
+                  : ' · not touched'}
               </p>
 
               {lead.nextFollowUpAt ? (

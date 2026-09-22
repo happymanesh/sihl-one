@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { OTP_LENGTH } from '@sihl-one/contracts';
 
@@ -54,6 +54,34 @@ export function MobileVerification({
   const [state, action] = useActionState(verifyCaptureMobile, INITIAL);
   const [resendState, resendAction] = useActionState(resendCaptureCode, INITIAL);
   const [secondsLeft, setSecondsLeft] = useState(expiresInSeconds);
+  const codeRef = useRef<HTMLInputElement>(null);
+
+  /*
+    Put the cursor in the code box the moment this step appears.
+
+    This screen exists to receive six digits and nothing else, and the person
+    reading it is holding the phone the code just landed on — often standing at
+    a stall with a queue behind them. Making them tap the field first is a step
+    that serves nobody, and on a phone it is also the step that raises the
+    keyboard, so skipping it saves two actions rather than one.
+  */
+  useEffect(() => {
+    codeRef.current?.focus();
+  }, []);
+
+  /*
+    And again after a rejected code, with the wrong digits selected.
+
+    A failed attempt has to be retyped in full, so leaving focus on the button
+    would make the visitor tap back into a field they have to clear anyway.
+    Selecting rather than clearing means the next keystroke replaces it, while
+    someone who wants to correct one digit still can.
+  */
+  useEffect(() => {
+    if (state.status !== 'error') return;
+    codeRef.current?.focus();
+    codeRef.current?.select();
+  }, [state]);
 
   /*
     A countdown, because "valid for 10 minutes" is what the SMS says and a
@@ -75,9 +103,7 @@ export function MobileVerification({
     return (
       <div className="mt-4 rounded-lg border border-teal-500/40 bg-teal-50 px-4 py-3 text-center dark:bg-teal-900/30">
         <p className="font-bold">Mobile number confirmed</p>
-        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
-          Thank you — we know we can reach you on {maskedMobile}.
-        </p>
+        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">Thank you.</p>
       </div>
     );
   }
@@ -96,6 +122,7 @@ export function MobileVerification({
       <form action={action} className="mt-3 space-y-2">
         <input type="hidden" name="verificationId" value={verificationId} />
         <input
+          ref={codeRef}
           name="code"
           inputMode="numeric"
           autoComplete="one-time-code"

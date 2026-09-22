@@ -8,7 +8,9 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -49,6 +51,7 @@ import {
   type UpdateLeadInput,
 } from '@sihl-one/contracts';
 
+import { AuditService } from '../../common/audit.service';
 import { Audited, CurrentUser, Public, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ApiZodBody, ApiZodQuery, IdParamPipe, ZodBody, ZodQuery } from '../../common/zod';
@@ -62,6 +65,7 @@ export class LeadsController {
   constructor(
     private readonly leads: LeadsService,
     private readonly allocation: AllocationService,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -219,6 +223,49 @@ export class LeadsController {
     @ZodQuery(checkLeadMobileSchema) query: CheckLeadMobileInput,
   ) {
     return this.leads.checkMobile(user, query);
+  }
+
+  /**
+   * The current view of the list, as a CSV.
+   *
+   * Takes the same query as the list itself, so what downloads is what the
+   * person was looking at. Guarded on `lead:export` rather than `lead:read`:
+   * reading a screenful and walking out with the book are different acts, and
+   * the permission matrix already separates them.
+   *
+   * Audited as an EXPORT. A copy of the client book leaving the system is
+   * precisely the event a compliance reader needs to find later, and the row
+   * records the filters so "what did they take" has an answer.
+   *
+   * Declared before `:id`, or Nest reads "export" as a lead id.
+   */
+  @Get('export')
+  @RequirePermissions('lead:export')
+  @ApiOperation({ summary: 'Download the filtered lead list as CSV' })
+  @ApiZodQuery(leadQuerySchema)
+  async exportCsv(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodQuery(leadQuerySchema) query: LeadQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { csv, rows } = await this.leads.exportCsv(user, query);
+
+    await this.audit.record({
+      action: 'EXPORT',
+      resource: 'lead',
+      reason: `Lead list exported as CSV - ${rows} rows`,
+      changes: { rows, scope: user.dataScope, filters: query as never },
+    });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="sihl-leads-${stamp}.csv"`);
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    // Never cached: the contents depend on who asked, and a shared cache
+    // serving one person's scoped book to another is a data-protection
+    // incident.
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(csv);
   }
 
   /*
@@ -428,8 +475,12 @@ export class LeadsController {
   @Post('bulk-assign')
   @RequirePermissions('lead:assign')
   @ApiOperation({
-    summary: 'Assign many leads at once',
-    description: 'Ids outside the caller’s data scope are skipped and reported in the response.',
+    summary: 'Hand out many unowned leads at once',
+    description:
+      'Only leads that nobody currently owns are moved. Ids that are already owned, are ' +
+      'converted, or fall outside the caller’s data scope are skipped and reported in the ' +
+      'response. To move a lead away from its current owner, use transfer, which requires a ' +
+      'reason.',
   })
   @ApiZodBody(bulkAssignLeadSchema)
   bulkAssign(@CurrentUser() user: AuthenticatedPrincipal, @ZodBody(bulkAssignLeadSchema) body: BulkAssignLeadInput) {

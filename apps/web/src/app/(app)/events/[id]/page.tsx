@@ -4,7 +4,8 @@ import type { EventDetail, EventRepBreakdown } from '@sihl-one/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { CopyField } from '@/components/ui/CopyField';
 import { EventActions } from '@/components/events/EventActions';
-import { CollapsibleQr } from '@/components/events/CollapsibleQr';
+import { QrSwitcher } from '@/components/events/QrSwitcher';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { EventRepTable } from '@/components/events/EventRepTable';
 import { QrCode } from '@/components/ui/QrCode';
 import { StatTile } from '@/components/ui/StatTile';
@@ -57,20 +58,28 @@ export default async function EventDetailPage({ params }: Props) {
             <Badge tone={STATUS_TONES[event.status] ?? 'neutral'}>{humanise(event.status)}</Badge>
           </div>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            <span className="font-mono">{event.reference}</span> ·{' '}
-            {formatDateTime(event.startsAt)}
+            <span className="font-mono">{event.reference}</span> · {formatDateTime(event.startsAt)}
             {event.venue ? ` · ${event.venue}` : ''}
             {event.owner ? ` · ${event.owner.fullName}` : ''}
           </p>
         </div>
 
-        {can(user, 'campaign:update') ? (
-          <EventActions
-            eventId={event.id}
-            status={event.status}
-            allowedTransitions={event.allowedTransitions}
-          />
-        ) : null}
+        {/*
+          Refresh sits outside the permission check, because reading again is
+          not a privilege. While an event is running these figures move every
+          few minutes and the page is server-rendered, so without this the only
+          way to see a new scan is a full reload.
+        */}
+        <div className="flex flex-wrap items-center gap-2">
+          <RefreshButton />
+          {can(user, 'campaign:update') ? (
+            <EventActions
+              eventId={event.id}
+              status={event.status}
+              allowedTransitions={event.allowedTransitions}
+            />
+          ) : null}
+        </div>
       </header>
 
       <section aria-label="Capture">
@@ -106,7 +115,12 @@ export default async function EventDetailPage({ params }: Props) {
             tone={event.uncontacted > 0 ? 'warning' : 'default'}
             href={`/leads?eventId=${event.id}&status=NEW`}
           />
-          <StatTile label="Converted" value={formatNumber(event.converted)} />
+          <StatTile
+            label="Converted"
+            value={formatNumber(event.converted)}
+            href={`/leads?eventId=${event.id}&status=CONVERTED`}
+          />
+          {/* A ratio, not a set of rows — nothing to drill into. */}
           <StatTile label="Conversion" value={`${event.conversionRate}%`} />
         </div>
 
@@ -118,17 +132,33 @@ export default async function EventDetailPage({ params }: Props) {
           lead is unattributed means the personal QRs were printed and never
           used, which is worth seeing at a glance.
         */}
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <StatTile
             label="Assigned to a rep"
             value={formatNumber(event.assignedLeads)}
             hint="Scanned someone's personal QR"
+            href={`/leads?eventId=${event.id}&captured=any`}
           />
           <StatTile
             label="Not assigned"
             value={formatNumber(event.unassignedLeads)}
             hint="Scanned the plain banner QR"
             tone={event.unassignedLeads > 0 ? 'warning' : 'default'}
+            href={`/leads?eventId=${event.id}&captured=none`}
+          />
+          {/*
+            People we already knew who came back.
+
+            Counted from the attendance record rather than from leads, because
+            these are not leads this event produced — they were on the book
+            before they walked in. Kept beside the other two so the three
+            together describe everyone who registered.
+          */}
+          <StatTile
+            label="Welcome back"
+            value={formatNumber(event.returningAttendees)}
+            hint="Already on the book when they arrived"
+            href={`/leads?returningAtEventId=${event.id}`}
           />
         </div>
 
@@ -136,8 +166,7 @@ export default async function EventDetailPage({ params }: Props) {
           <p className="mt-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
             {/* Without this a rep reads four leads off a stall that took two
                 hundred and concludes the event failed. */}
-            These are your own numbers — leads your QR brought in. The stall total
-            will be higher.
+            These are your own numbers — leads your QR brought in. The stall total will be higher.
           </p>
         ) : null}
       </section>
@@ -147,118 +176,83 @@ export default async function EventDetailPage({ params }: Props) {
 
         Somebody who runs events wants the stall's QR, the one that goes on the
         banner. A rep wants their own, because that is the one that puts leads in
-        their name. Both sections are always present; only the starting state
-        differs, and `campaign:read` is the same line the API already draws
+        their name. Both are always reachable through the switch; only which one
+        opens differs, and `campaign:read` is the same line the API already draws
         between running an event and working one.
       */}
-      <CollapsibleQr
-        title="Registration QR"
-        summary="The stall's code — every scan lands as an event lead."
-        defaultOpen={runsEvents}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div className="min-w-[16rem] flex-1">
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Print this for the desk. Every scan opens a registration form already tagged to this
-              event, so nobody has to type a spreadsheet afterwards.
-            </p>
-
-            <div className="mt-4">
-              <CopyField value={event.captureUrl} label="Event registration URL" />
-            </div>
-
-            {event.status !== 'RUNNING' ? (
-              <p className="mt-3 rounded-lg border border-warn-500/40 bg-warn-50 px-3 py-2 text-xs text-warn-600 dark:bg-warn-500/15">
-                {/* The QR outlives the event. Saying so here is what stops
-                    someone printing a banner for an event nobody opened. */}
-                {event.status === 'PLANNED'
-                  ? 'Scans are not being accepted yet — set the event to Running on the day.'
-                  : 'This event is closed, so scans are no longer accepted.'}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="text-center">
-            <QrCode value={event.captureUrl} size={190} />
-            <p className="mt-1.5 font-mono text-xs text-[var(--color-text-subtle)]">{event.code}</p>
-          </div>
-        </div>
-      </CollapsibleQr>
-
-      {/*
-          The rep's own QR.
-
-          Same event, one extra parameter carrying their employee code, so every
-          scan of this one lands as their lead instead of in a common pile. Shown
-          only while the event is actually accepting scans — a personal QR
-          printed for a closed event produces nothing and teaches people the
-          feature is broken.
-        */}
-      {event.myCaptureUrl && event.status === 'RUNNING' ? (
-        <CollapsibleQr
-          title="Your QR"
-          summary="Tagged with your employee code — scans become your leads."
-          defaultOpen={!runsEvents}
-        >
+      <QrSwitcher
+        defaultTab={runsEvents ? 'common' : 'mine'}
+        common={
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div className="min-w-[16rem] flex-1">
               <p className="text-sm text-[var(--color-text-muted)]">
-                Scans of this one are tagged{' '}
-                <span className="font-mono font-semibold">{event.myEmployeeCode}</span> and the lead
-                is assigned to you automatically. Use it on your phone or print your own copy.
+                Print this for the desk. Every scan opens a registration form already tagged to this
+                event, so nobody has to type a spreadsheet afterwards.
               </p>
+
               <div className="mt-4">
-                <CopyField value={event.myCaptureUrl} label="Your personal registration URL" />
+                <CopyField value={event.captureUrl} label="Event registration URL" />
               </div>
+
+              {event.status !== 'RUNNING' ? (
+                <p className="mt-3 rounded-lg border border-warn-500/40 bg-warn-50 px-3 py-2 text-xs text-warn-600 dark:bg-warn-500/15">
+                  {/* The QR outlives the event. Saying so here is what stops
+                    someone printing a banner for an event nobody opened. */}
+                  {event.status === 'PLANNED'
+                    ? 'Scans are not being accepted yet — set the event to Running on the day.'
+                    : 'This event is closed, so scans are no longer accepted.'}
+                </p>
+              ) : null}
             </div>
 
             <div className="text-center">
-              <QrCode value={event.myCaptureUrl} size={190} />
+              <QrCode value={event.captureUrl} size={190} />
               <p className="mt-1.5 font-mono text-xs text-[var(--color-text-subtle)]">
-                {event.myEmployeeCode}
+                {event.code}
               </p>
             </div>
           </div>
-        </CollapsibleQr>
-      ) : null}
+        }
+        /*
+          The rep's own QR.
 
-      <section className="card p-5">
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-bold">What the leads became</h2>
-          {event.leads > 0 ? (
-            <Link
-              // An exact filter on the event, not a free-text search for its
-              // code — which matched nothing, because the lead search only ever
-              // looked at the person.
-              href={`/leads?eventId=${event.id}`}
-              className="text-xs font-semibold text-teal-600 hover:underline dark:text-teal-300"
-            >
-              View the leads
-            </Link>
-          ) : null}
-        </div>
+          Same event, one extra parameter carrying their employee code, so every
+          scan of this one lands as their lead instead of in a common pile.
+          Offered only while the event is actually accepting scans — a personal
+          QR printed for a closed event produces nothing and teaches people the
+          feature is broken.
+        */
+        mine={
+          event.myCaptureUrl && event.status === 'RUNNING' ? (
+            <div className="flex flex-wrap items-start justify-between gap-5">
+              <div className="min-w-[16rem] flex-1">
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  Scans of this one are tagged{' '}
+                  <span className="font-mono font-semibold">{event.myEmployeeCode}</span> and the
+                  lead is assigned to you automatically. Use it on your phone or print your own
+                  copy.
+                </p>
+                <div className="mt-4">
+                  <CopyField value={event.myCaptureUrl} label="Your personal registration URL" />
+                </div>
+              </div>
 
-        {event.pipeline.length === 0 ? (
-          <p className="mt-3 text-sm text-[var(--color-text-muted)]">
-            Nothing captured yet.
-          </p>
-        ) : (
-          <ul className="mt-3 divide-y divide-[var(--color-border)]">
-            {event.pipeline.map((stage) => (
-              <li key={stage.status} className="flex items-center justify-between gap-3 py-2">
-                <span className="text-sm">{humanise(stage.status)}</span>
-                <span className="text-sm tnum">{formatNumber(stage.count)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+              <div className="text-center">
+                <QrCode value={event.myCaptureUrl} size={190} />
+                <p className="mt-1.5 font-mono text-xs text-[var(--color-text-subtle)]">
+                  {event.myEmployeeCode}
+                </p>
+              </div>
+            </div>
+          ) : null
+        }
+      />
 
       <section className="card p-5">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="font-bold">By rep</h2>
+          <h2 className="font-bold">Lead Assigned</h2>
           <span className="text-xs text-[var(--color-text-muted)]">
-            Who each lead&apos;s QR belonged to
+            Whose QR brought each lead in, and whether the number was proven
           </span>
         </div>
         <EventRepTable eventId={event.id} rows={byRep} />

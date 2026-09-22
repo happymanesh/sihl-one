@@ -15,6 +15,16 @@ export interface ResolvedCapture {
   campaignId: string | null;
   /** Where the lead should land, when the code names an owner. */
   suggestedOwnerId: string | null;
+  /**
+   * The branch or region the capture belongs to.
+   *
+   * Carried separately from the owner because a lead can have one without the
+   * other. An unowned lead still has to be *findable*: the data scopes match a
+   * lead either by who owns it or by its place in the org tree, so a lead with
+   * neither is visible to nobody but a super admin. Recording where it came in
+   * is what keeps an unclaimed registration on the branch's screen.
+   */
+  orgUnitId: string | null;
   /** The rep whose personal QR was scanned, when one was and it checks out. */
   capturedById: string | null;
   source: 'PARTNER' | 'REFERRAL' | 'BRANCH_EVENT' | null;
@@ -192,6 +202,7 @@ export class CaptureCodeService {
       campaignId: null,
       suggestedOwnerId: null,
       capturedById: null,
+      orgUnitId: null,
       source: null,
     };
 
@@ -240,9 +251,22 @@ export class CaptureCodeService {
           eventId: event.id,
           campaignId: event.campaignId,
           capturedById: rep,
-          // The rep who was actually standing there beats the event's nominal
-          // owner. If nobody scanned a personal QR this is unchanged.
-          suggestedOwnerId: rep ?? event.ownerId,
+          /*
+            A personal QR names its rep as the owner. The common QR names
+            nobody.
+
+            It used to fall back to the event's owner so nothing sat unclaimed
+            over a weekend, but that made every walk-up the property of one
+            person who never asked for it and often never saw it — and it meant
+            the stall's registrations could not be handed out, because they were
+            already owned. Leaving them unowned is what makes distributing them
+            a decision somebody takes rather than one the QR took for them.
+          */
+          suggestedOwnerId: rep,
+          // Unowned, but not invisible: the branch the event belongs to still
+          // sees it, and that is the only reason an unclaimed lead reaches
+          // anybody at all.
+          orgUnitId: event.orgUnitId,
           // BRANCH_EVENT, not WALK_IN. Both are seeded and active, and the
           // difference matters in every report: a QR scanned at a stall and
           // somebody wandering into a branch are different acquisition

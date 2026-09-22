@@ -324,6 +324,9 @@ export interface EventRepBreakdown {
   userId: string | null;
   fullName: string;
   employeeCode: string | null;
+  /** Leads whose mobile number was proven by a one-time code. */
+  verified: number;
+  /** Captured, but the number was never confirmed. */
+  unverified: number;
   total: number;
-  byStatus: Array<{ status: string; count: number }>;
 }

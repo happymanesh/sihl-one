@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
+  bulkAssignLeadSchema,
   changeLeadStatusSchema,
   verifyLeadMobileSchema,
   convertLeadSchema,
@@ -73,7 +74,9 @@ function readProfile(formData: FormData) {
       location: locations[index]?.trim() || undefined,
       maritalStatus: statuses[index]?.trim() || undefined,
     }))
-    .filter((member) => member.name || member.occupation || member.location || member.maritalStatus);
+    .filter(
+      (member) => member.name || member.occupation || member.location || member.maritalStatus,
+    );
 
   const investments = formData.getAll('profile.existingInvestments').map(String);
 
@@ -149,10 +152,7 @@ export async function updateLeadProfile(
  * consequence inside a general "edit lead" form is how it would get triggered
  * by somebody fixing a spelling.
  */
-export async function renameLead(
-  _previous: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
+export async function renameLead(_previous: ActionState, formData: FormData): Promise<ActionState> {
   const leadId = String(formData.get('leadId'));
 
   const parsed = updateLeadSchema.safeParse({
@@ -600,6 +600,58 @@ export async function assignLead(_previous: ActionState, formData: FormData): Pr
   revalidatePath(`/leads/${leadId}`);
   revalidatePath('/leads');
   return { status: 'success', message: 'Lead reassigned.' };
+}
+
+/**
+ * Hand a batch of leads to one person.
+ *
+ * Ids travel as one comma-separated field rather than a repeated input: the
+ * bar posts whatever is ticked, and a single value keeps the form honest about
+ * being one action on a set rather than a loop over many.
+ *
+ * The API decides what actually moves. It filters the ids by the caller's data
+ * scope and skips converted leads, so a count comes back that may be smaller
+ * than what was asked for — and that gets reported rather than rounded up. A
+ * message saying twelve when ten moved is how people stop trusting the screen.
+ */
+export async function bulkAssignLeads(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = bulkAssignLeadSchema.safeParse({
+    ownerId: formData.get('ownerId') || undefined,
+    leadIds: String(formData.get('leadIds') ?? '')
+      .split(',')
+      .filter(Boolean),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: 'error',
+      message: 'Choose someone to assign to, and at least one lead.',
+      errors: zodErrors(parsed.error.issues),
+    };
+  }
+
+  let result: { assigned: number; skipped: number };
+  try {
+    result = await apiFetch<{ assigned: number; skipped: number }>('/leads/bulk-assign', {
+      method: 'POST',
+      body: parsed.data,
+    });
+  } catch (error) {
+    return toErrorState(error, 'The leads could not be assigned.');
+  }
+
+  revalidatePath('/leads');
+
+  const moved = `${result.assigned} ${result.assigned === 1 ? 'lead' : 'leads'} assigned.`;
+  return {
+    status: 'success',
+    message: result.skipped
+      ? `${moved} ${result.skipped} skipped — already converted, or outside your scope.`
+      : moved,
+  };
 }
 
 export async function convertLead(
