@@ -1,11 +1,12 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 import { APP_CONFIG, type AppConfig } from './config/configuration';
 import { ConfigurationModule } from './config/configuration.module';
 import { CommonModule } from './common/common.module';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
+import { ClientIpThrottlerGuard } from './common/guards/client-ip-throttler.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -88,7 +89,7 @@ import { MailModule } from './modules/mail/mail.module';
   providers: [
     // Guard order matters. Throttling first — it is the cheapest check and it
     // protects the two that follow. Then authentication, then authorisation.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: ClientIpThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
 

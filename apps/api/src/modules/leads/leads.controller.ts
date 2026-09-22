@@ -11,7 +11,14 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import {
   assignLeadSchema,
@@ -58,6 +65,38 @@ import { ApiZodBody, ApiZodQuery, IdParamPipe, ZodBody, ZodQuery } from '../../c
 import { AllocationService } from '../performance/allocation.service';
 import { LeadsService } from './leads.service';
 
+/*
+  Throttles for the three public capture endpoints.
+
+  Read straight from the environment rather than through the config service,
+  because a decorator is evaluated when the class is defined — before any
+  injector exists. The trade is deliberate and narrow: these three numbers can
+  be raised during a release freeze, on the evening before an exhibition, by
+  setting a variable and restarting. That is the difference between a tunable
+  limit and a limit that needs a deployment nobody is allowed to make.
+
+  The defaults are sized for a crowd rather than a website. Registrations at a
+  stall arrive in bursts, and a hall's wifi puts every visitor behind one
+  address, so the whole floor can share a single bucket however carefully the
+  caller is identified. These numbers are meant to shape load and stop a runaway
+  script; what actually protects the SMS spend is the per-number cap inside
+  OtpService, and what protects the data is the duplicate check.
+*/
+function captureLimit(variable: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[variable] ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const CAPTURE_WINDOW_MS = 60_000;
+const CAPTURE_LIMITS = {
+  /** A registration. The expensive part is one SMS, capped again per number. */
+  capture: captureLimit('CAPTURE_RATE_LIMIT', 600),
+  /** Checking a code costs nothing and people mistype under pressure. */
+  verify: captureLimit('CAPTURE_VERIFY_RATE_LIMIT', 600),
+  /** A resend rings a phone and spends money, so it stays the tightest. */
+  resend: captureLimit('CAPTURE_RESEND_RATE_LIMIT', 60),
+} as const;
+
 @ApiTags('Leads')
 @ApiBearerAuth()
 @Controller('leads')
@@ -71,8 +110,8 @@ export class LeadsController {
   /**
    * Public capture endpoint for marketing landing pages and the website.
    *
-   * Unauthenticated by design, so it carries its own protections: a tight rate
-   * limit, mandatory consent in the payload, and no response detail that could
+   * Unauthenticated by design, so it carries its own protections: a rate limit
+   * sized for a crowd, mandatory consent in the payload, and no response detail that could
    * be used to probe whether a number is already known to SIHL (`duplicate` is
    * returned, but the reference of an existing lead is not).
    */
@@ -80,9 +119,10 @@ export class LeadsController {
     Verifying a code, and asking for another.
 
     Both public, because the person doing it has no account — they are standing
-    at a stall with a phone. Both throttled harder than the capture they follow:
-    a verify is one person typing six digits, and anything faster than a few a
-    minute from one address is a script working through codes.
+    at a stall with a phone. Verifying is as generously limited as capturing,
+    since every registration is followed by one and people mistype under
+    pressure. Resending stays tighter: it rings a phone and spends money, and
+    the per-number cap inside OtpService is the line that actually holds.
 
     Neither takes a mobile number. The verification id handed back at capture is
     unguessable and scoped to that submission, so these endpoints cannot be used
@@ -91,7 +131,7 @@ export class LeadsController {
   @Public()
   @Post('capture/verify-mobile')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: CAPTURE_LIMITS.verify, ttl: CAPTURE_WINDOW_MS } })
   @ApiZodBody(verifyOtpSchema)
   @ApiOperation({
     summary: 'Verify a mobile number with the code sent at registration',
@@ -108,7 +148,7 @@ export class LeadsController {
   @HttpCode(HttpStatus.OK)
   // Tighter than verify. A resend costs money and rings somebody's phone; the
   // per-number cap inside the service is the second line behind this one.
-  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Throttle({ default: { limit: CAPTURE_LIMITS.resend, ttl: CAPTURE_WINDOW_MS } })
   @ApiZodBody(resendOtpSchema)
   @ApiOperation({ summary: 'Send the verification code again' })
   resendCaptureCode(@ZodBody(resendOtpSchema) body: ResendOtpInput) {
@@ -118,7 +158,7 @@ export class LeadsController {
   @Public()
   @Post('capture')
   @HttpCode(HttpStatus.CREATED)
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: CAPTURE_LIMITS.capture, ttl: CAPTURE_WINDOW_MS } })
   @ApiOperation({
     summary: 'Public lead capture',
     description:
@@ -149,7 +189,10 @@ export class LeadsController {
   @RequirePermissions('lead:read')
   @ApiOperation({ summary: 'Lead counts and value by status, for the kanban board' })
   @ApiZodQuery(leadQuerySchema)
-  pipeline(@CurrentUser() user: AuthenticatedPrincipal, @ZodQuery(leadQuerySchema) query: LeadQuery) {
+  pipeline(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodQuery(leadQuerySchema) query: LeadQuery,
+  ) {
     return this.leads.pipeline(user, query);
   }
 
@@ -320,7 +363,10 @@ export class LeadsController {
     description: 'A lead already exists for this mobile number; the reply says when it was added.',
   })
   @ApiZodBody(createLeadSchema)
-  create(@CurrentUser() user: AuthenticatedPrincipal, @ZodBody(createLeadSchema) body: CreateLeadInput) {
+  create(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(createLeadSchema) body: CreateLeadInput,
+  ) {
     return this.leads.create(user, body);
   }
 
@@ -333,7 +379,10 @@ export class LeadsController {
       'touched, so a failed check-in never costs the client. A mobile that already has an ' +
       'open lead attaches to it rather than being refused.',
   })
-  @ApiResponse({ status: 201, description: 'Lead and visit created. `awaitingCheckIn` says whether a photo is still needed.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Lead and visit created. `awaitingCheckIn` says whether a photo is still needed.',
+  })
   @ApiZodBody(instaLeadSchema)
   instaLead(
     @CurrentUser() user: AuthenticatedPrincipal,
@@ -459,7 +508,6 @@ export class LeadsController {
     return this.leads.transfer(user, id, body);
   }
 
-
   @Post(':id/assign')
   @RequirePermissions('lead:assign')
   @ApiOperation({ summary: 'Assign a lead to a relationship manager' })
@@ -483,7 +531,10 @@ export class LeadsController {
       'reason.',
   })
   @ApiZodBody(bulkAssignLeadSchema)
-  bulkAssign(@CurrentUser() user: AuthenticatedPrincipal, @ZodBody(bulkAssignLeadSchema) body: BulkAssignLeadInput) {
+  bulkAssign(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(bulkAssignLeadSchema) body: BulkAssignLeadInput,
+  ) {
     return this.leads.bulkAssign(user, body);
   }
 

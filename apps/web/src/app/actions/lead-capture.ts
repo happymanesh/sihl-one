@@ -9,6 +9,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { ApiError } from '@/lib/api';
+import { forwardedHeaders } from '@/lib/forwarded';
 
 export interface CaptureState {
   status: 'idle' | 'success' | 'error';
@@ -112,7 +113,17 @@ export async function submitLeadCapture(
   try {
     const response = await fetch(`${API_BASE}/leads/capture`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      /*
+        Carry the visitor's address across the web → API hop.
+
+        Without this the API sees the Next server as its caller, and two things
+        that look right in the code are wrong in production: the rate limit
+        buckets every visitor in the country together, so a busy stall locks
+        itself out after a handful of registrations; and the `ipAddress` stored
+        on the consent record — the evidence of where consent was given — reads
+        the same for everybody.
+      */
+      headers: { 'Content-Type': 'application/json', ...(await forwardedHeaders()) },
       body: JSON.stringify(parsed.data),
       cache: 'no-store',
     });
@@ -247,7 +258,17 @@ export async function verifyCaptureMobile(
   try {
     const response = await fetch(`${API_BASE}/leads/capture/verify-mobile`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      /*
+        Carry the visitor's address across the web → API hop.
+
+        Without this the API sees the Next server as its caller, and two things
+        that look right in the code are wrong in production: the rate limit
+        buckets every visitor in the country together, so a busy stall locks
+        itself out after a handful of registrations; and the `ipAddress` stored
+        on the consent record — the evidence of where consent was given — reads
+        the same for everybody.
+      */
+      headers: { 'Content-Type': 'application/json', ...(await forwardedHeaders()) },
       body: JSON.stringify(parsed.data),
       cache: 'no-store',
     });
@@ -288,7 +309,17 @@ export async function resendCaptureCode(
   try {
     const response = await fetch(`${API_BASE}/leads/capture/resend-code`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      /*
+        Carry the visitor's address across the web → API hop.
+
+        Without this the API sees the Next server as its caller, and two things
+        that look right in the code are wrong in production: the rate limit
+        buckets every visitor in the country together, so a busy stall locks
+        itself out after a handful of registrations; and the `ipAddress` stored
+        on the consent record — the evidence of where consent was given — reads
+        the same for everybody.
+      */
+      headers: { 'Content-Type': 'application/json', ...(await forwardedHeaders()) },
       body: JSON.stringify(parsed.data),
       cache: 'no-store',
     });
