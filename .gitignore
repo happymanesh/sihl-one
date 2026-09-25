@@ -39,3 +39,13 @@ apps/api/prisma/generated/
 .secrets.production.local
 
 .vercel
+
+# The brochure masters, edited here and copied into apps/web/public/brochures/
+# when they are ready to publish. Anchored with a leading slash so it matches
+# only this folder at the root, never the served copy.
+#
+# Ignored because the published copies are already in the repository — 73MB of
+# them — and a `git add -A` from the root would commit the same files a second
+# time. That is 73MB more in the history and no way to take it back out without
+# rewriting it.
+/Brochures/
