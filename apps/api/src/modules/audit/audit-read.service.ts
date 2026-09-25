@@ -11,6 +11,7 @@ import {
 import { AuditService } from '../../common/audit.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { istDayEnd, istDayStart } from '../../common/ist-day';
 
 /**
  * Reading the audit trail.
@@ -64,10 +65,10 @@ export class AuditReadService {
     if (query.from || query.to) {
       and.push({
         createdAt: {
-          ...(query.from ? { gte: query.from } : {}),
+          ...(query.from ? { gte: istDayStart(query.from) } : {}),
           // Inclusive of the whole "to" day. A compliance officer filtering to
           // today and seeing nothing from today is a bug report every time.
-          ...(query.to ? { lte: endOfDay(query.to) } : {}),
+          ...(query.to ? { lte: istDayEnd(query.to) } : {}),
         },
       });
     }
@@ -173,12 +174,6 @@ export class AuditReadService {
       distinctActors: actors.length,
     };
   }
-}
-
-function endOfDay(date: Date): Date {
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-  return end;
 }
 
 interface AuditRow {

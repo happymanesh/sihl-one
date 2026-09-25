@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { ScopeService } from '../../common/scope.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { istDayKey } from '../../common/ist-day';
 import type { Prisma } from '../../generated/prisma/client';
 import { decimalToString } from '../leads/lead.mapper';
 
@@ -117,7 +118,11 @@ export class DashboardService {
       this.prisma.customer.count({ where: { ...customerWhere, status: 'ONBOARDING' } }),
       this.prisma.customer.count({ where: { ...customerWhere, activatedAt: { gte: last30 } } }),
       this.prisma.task.count({
-        where: { deletedAt: null, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } }, AND: [taskScope] },
+        where: {
+          deletedAt: null,
+          statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
+          AND: [taskScope],
+        },
       }),
       this.prisma.task.count({
         where: {
@@ -203,16 +208,16 @@ export class DashboardService {
     const buckets = new Map<string, { created: number; converted: number }>();
     for (let index = days - 1; index >= 0; index -= 1) {
       const day = new Date(Date.now() - index * DAY_MS);
-      buckets.set(day.toISOString().slice(0, 10), { created: 0, converted: 0 });
+      buckets.set(istDayKey(day), { created: 0, converted: 0 });
     }
 
     for (const row of rows) {
-      const createdKey = row.createdAt.toISOString().slice(0, 10);
+      const createdKey = istDayKey(row.createdAt);
       const createdBucket = buckets.get(createdKey);
       if (createdBucket) createdBucket.created += 1;
 
       if (row.convertedAt) {
-        const convertedKey = row.convertedAt.toISOString().slice(0, 10);
+        const convertedKey = istDayKey(row.convertedAt);
         const convertedBucket = buckets.get(convertedKey);
         if (convertedBucket) convertedBucket.converted += 1;
       }

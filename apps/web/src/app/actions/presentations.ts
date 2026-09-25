@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createPresentationSlotSchema, updatePresentationSlotSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
+import { istInstantFrom } from '@/lib/time';
 import type { ActionState } from '@/app/actions/leads';
 
 function toErrorState(error: unknown, fallback: string): ActionState {
@@ -26,34 +27,13 @@ function zodErrors(issues: Array<{ path: PropertyKey[]; message: string }>) {
 }
 
 /**
- * The business timezone, written into the value rather than assumed.
- *
- * `2026-09-26T14:30` carries no offset, so whoever parses it applies their own
- * clock. On Railway that is UTC, so a talk entered as half past two in the
- * afternoon was stored as 14:30Z and read back — correctly, in IST — as eight
- * in the evening. Every save shifted it another five and a half hours, which is
- * why editing a slot appeared to change its time by itself.
- *
- * Stating the offset makes the value mean the same thing on every machine that
- * reads it, whatever that machine's own timezone happens to be.
- */
-const IST_OFFSET = '+05:30';
-
-/**
  * The form asks for a date and a time; the API wants one instant.
  *
- * Joined here rather than in the component so there is one place that decides
- * what "26 September, 2pm" means. Two fields that travel separately are two
- * fields that can disagree, and the result is a talk at midnight on the wrong
- * day.
+ * Both halves are read in the business timezone by the shared helper, so a
+ * talk near midnight cannot end up on one day with the other day's time.
  */
 function instantFrom(formData: FormData): string | undefined {
-  const date = String(formData.get('date') ?? '').trim();
-  const time = String(formData.get('time') ?? '').trim();
-  if (!date || !time) return undefined;
-  // Seconds included because an offset without them is not a valid ISO value
-  // in every parser, and a silently unparsed date becomes "now".
-  return `${date}T${time}:00${IST_OFFSET}`;
+  return istInstantFrom(formData.get('date'), formData.get('time'));
 }
 
 export async function addPresentationSlot(

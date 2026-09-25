@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { DailyActivityReport } from '@sihl-one/contracts';
 
 import { apiFetch } from '@/lib/api';
+import { istDayKey } from '@/lib/time';
 import { requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 import { DayPicker } from '@/components/reports/DayPicker';
@@ -25,7 +26,7 @@ export const metadata = { title: 'Daily activity' };
 
 /** Today in IST. The report's day boundary is IST, not the server's UTC. */
 function istToday(): string {
-  return new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  return istDayKey();
 }
 
 export default async function DailyActivityPage({
@@ -55,9 +56,7 @@ export default async function DailyActivityPage({
               {report.peopleCount === 1 ? 'person' : 'people'} ·{' '}
               <span
                 className={
-                  report.idleCount > 0
-                    ? 'font-semibold text-[var(--color-warn-strong)]'
-                    : ''
+                  report.idleCount > 0 ? 'font-semibold text-[var(--color-warn-strong)]' : ''
                 }
               >
                 {formatNumber(report.idleCount)} with nothing recorded
@@ -66,7 +65,6 @@ export default async function DailyActivityPage({
           </div>
           <DayPicker date={report.date} today={istToday()} />
         </div>
-
       </header>
 
       {report.partial ? (
@@ -161,9 +159,7 @@ export default async function DailyActivityPage({
                     )}
                   </td>
                 ))}
-                <td className="px-4 py-2 text-right tnum">
-                  {formatNumber(report.overall.total)}
-                </td>
+                <td className="px-4 py-2 text-right tnum">{formatNumber(report.overall.total)}</td>
               </tr>
             </tbody>
 
@@ -184,9 +180,9 @@ export default async function DailyActivityPage({
       )}
 
       <p className="text-xs text-[var(--color-text-subtle)]">
-        Counts work recorded in the system — a lead handed over, a mobile verified, a visit
-        checked into. It does not track presence, sign-in times or idle periods. Open leads is a
-        backlog at the end of that day, not something done on it, so it is not part of the total.{' '}
+        Counts work recorded in the system — a lead handed over, a mobile verified, a visit checked
+        into. It does not track presence, sign-in times or idle periods. Open leads is a backlog at
+        the end of that day, not something done on it, so it is not part of the total.{' '}
         <Link href="/reports" className="underline underline-offset-2">
           The period report
         </Link>{' '}

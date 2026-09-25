@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { forwardedHeaders } from '@/lib/forwarded';
 import { getAccessToken } from '@/lib/session';
+import { istDayKey } from '@/lib/time';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -47,7 +48,7 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = istDayKey();
   return new NextResponse(upstream.body, {
     status: 200,
     headers: {

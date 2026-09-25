@@ -35,6 +35,7 @@ import { createFollowUpTask } from '../tasks/follow-up-task';
 import { ScopeService } from '../../common/scope.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { istToday } from '../../common/ist-day';
 import { StorageService } from '../storage/storage.service';
 
 type VisitRow = {
@@ -480,11 +481,7 @@ export class VisitsService {
    * the purpose and the owner all stay put, because every one of those changes
    * what the visit *is* rather than correcting when it was meant to happen.
    */
-  async reschedule(
-    user: AuthenticatedPrincipal,
-    visitId: string,
-    input: RescheduleVisitInput,
-  ) {
+  async reschedule(user: AuthenticatedPrincipal, visitId: string, input: RescheduleVisitInput) {
     // Deliberately *not* mustFindOwn. That rule exists because a check-in
     // asserts a specific person was somewhere, so nobody may record one on
     // another's behalf. Moving a date asserts nothing of the kind — it is a
@@ -568,16 +565,16 @@ export class VisitsService {
         take: query.pageSize,
         include: {
           user: { select: { id: true, firstName: true, lastName: true } },
-        modeMaster: {
-          select: {
-            code: true,
-            label: true,
-            requiresPhoto: true,
-            requiresGeo: true,
-            requiresLink: true,
-            allowsScreenshot: true,
+          modeMaster: {
+            select: {
+              code: true,
+              label: true,
+              requiresPhoto: true,
+              requiresGeo: true,
+              requiresLink: true,
+              allowsScreenshot: true,
+            },
           },
-        },
         },
       }),
       this.prisma.visit.count({ where }),
@@ -653,7 +650,10 @@ export class VisitsService {
   async removeAttendee(user: AuthenticatedPrincipal, visitId: string, attendeeId: string) {
     const attendee = await this.prisma.attendee.findFirst({
       where: { id: attendeeId, visitId, visit: { AND: [this.scope.visitScope(user)] } },
-      include: { user: { select: { firstName: true, lastName: true } }, visit: { select: { status: true } } },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        visit: { select: { status: true } },
+      },
     });
     if (!attendee) throw new NotFoundException({ title: 'Not on this visit' });
 
@@ -818,8 +818,7 @@ export class VisitsService {
 
   /** Today's plan for the signed-in user, for the mobile home screen. */
   async today(user: AuthenticatedPrincipal) {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const start = istToday();
     const end = new Date(start.getTime() + 86_400_000);
 
     const [planned, inProgress, completedToday] = await this.prisma.$transaction([
@@ -846,9 +845,7 @@ export class VisitsService {
     return {
       // At most one visit can be open at a time; the UI uses this to send the
       // user straight to the check-out screen rather than a list.
-      inProgress: inProgress
-        ? this.toListItem(inProgress as unknown as VisitRow, names)
-        : null,
+      inProgress: inProgress ? this.toListItem(inProgress as unknown as VisitRow, names) : null,
       planned: planned.map((visit) => this.toListItem(visit as unknown as VisitRow, names)),
       completedToday,
     };
@@ -1135,5 +1132,4 @@ export class VisitsService {
       claimedAt: row.createdAt.toISOString(),
     };
   }
-
 }

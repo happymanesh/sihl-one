@@ -12,6 +12,7 @@ import {
 
 import { AuditService } from '../../common/audit.service';
 import { CurrentUser, RequirePermissions } from '../../common/decorators';
+import { istDayKey } from '../../common/ist-day';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ZodValidationPipe } from '../../common/zod';
 import { ReportsService } from './reports.service';
@@ -56,7 +57,11 @@ export class ReportsController {
 
   @Get('daily')
   @RequirePermissions('analytics:sales:read')
-  @ApiQuery({ name: 'date', required: false, description: 'YYYY-MM-DD in IST. Defaults to yesterday.' })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    description: 'YYYY-MM-DD in IST. Defaults to yesterday.',
+  })
   @ApiOperation({
     summary: 'What each person did on one day',
     description:
@@ -74,8 +79,7 @@ export class ReportsController {
   @RequirePermissions('analytics:sales:read')
   @ApiOperation({
     summary: 'The records behind one number on the daily report',
-    description:
-      'Scope is re-checked here, not inherited from the report that linked to it.',
+    description: 'Scope is re-checked here, not inherited from the report that linked to it.',
   })
   dailyDetail(
     @CurrentUser() user: AuthenticatedPrincipal,
@@ -168,12 +172,15 @@ export class ReportsController {
       },
     });
 
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = istDayKey(new Date());
     response.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    response.setHeader('Content-Disposition', `attachment; filename="sihl-sales-report-${stamp}.xlsx"`);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="sihl-sales-report-${stamp}.xlsx"`,
+    );
     response.setHeader('X-Content-Type-Options', 'nosniff');
     // Never cached: the contents depend on who asked, and a shared cache serving
     // one person's scoped book to another is a data-protection incident.

@@ -3,6 +3,7 @@
 import type { Route } from 'next';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
+import { istDayKey } from '@/lib/time';
 
 /**
  * The period control, and the download.
@@ -17,8 +18,15 @@ const PRESETS = [
   { label: '90 days', days: 90 },
 ] as const;
 
+/**
+ * The day here, not the UTC day.
+ *
+ * These are read from the browser's clock to seed a range, and `toISOString()`
+ * would give the UTC day — so anyone opening a report between midnight and half
+ * past five would get a range ending yesterday.
+ */
 function isoDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return istDayKey(date);
 }
 
 export function RangePicker({
@@ -66,7 +74,9 @@ export function RangePicker({
         aria-label="From"
         defaultValue={from}
         max={to}
-        onChange={(event) => event.target.value && apply(event.target.value, to ?? isoDay(new Date()))}
+        onChange={(event) =>
+          event.target.value && apply(event.target.value, to ?? isoDay(new Date()))
+        }
         className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-xs"
       />
       <input

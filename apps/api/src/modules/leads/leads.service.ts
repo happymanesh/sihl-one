@@ -54,6 +54,7 @@ import { RequestContextStore } from '../../common/request-context';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { istDayKey } from '../../common/ist-day';
 import type {
   OtpChallenge,
   OtpPurpose,
@@ -1808,7 +1809,7 @@ export class LeadsService {
       'Next follow-up',
     ];
 
-    const asDate = (value: Date | null): string => (value ? value.toISOString().slice(0, 10) : '');
+    const asDate = (value: Date | null): string => (value ? istDayKey(value) : '');
 
     const body = leads.map((lead) => [
       lead.reference,

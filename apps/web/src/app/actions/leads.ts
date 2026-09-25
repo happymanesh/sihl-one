@@ -14,6 +14,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
+import { istInstant } from '@/lib/time';
 
 export interface ActionState {
   status: 'idle' | 'success' | 'error';
@@ -274,7 +275,7 @@ export async function changeLeadStatus(
     status: formData.get('status'),
     lostReason: formData.get('lostReason') || undefined,
     note: formData.get('note') || undefined,
-    nextFollowUpAt: followUp ? new Date(String(followUp)) : undefined,
+    nextFollowUpAt: istInstant(followUp),
   });
 
   if (!parsed.success) {
@@ -386,7 +387,7 @@ export async function logActivity(
     body: formData.get('body') || undefined,
     outcome: formData.get('outcome') || undefined,
     durationMinutes: duration ? Number(duration) : undefined,
-    nextFollowUpAt: followUp ? new Date(String(followUp)) : undefined,
+    nextFollowUpAt: istInstant(followUp),
     meetingMode: formData.get('meetingMode') || undefined,
     meetingLink: formData.get('meetingLink') || undefined,
     productValues: readProductValues(formData),

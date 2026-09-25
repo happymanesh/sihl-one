@@ -20,17 +20,9 @@ import {
 
 import { AuditService } from '../../common/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { istDayKey } from '../../common/ist-day';
 import { Mailer } from '../mail/mailer';
 import { brochuresFor, brochureUrl } from './brochures';
-
-/**
- * The business works in one timezone, so days are cut in that one.
- *
- * Grouping on the server rather than in the browser keeps the boundary in a
- * single place. Cut it in the viewer's zone instead and a 9pm talk lands under
- * a different heading depending on who is looking.
- */
-const IST_OFFSET_MINUTES = 330;
 
 /**
  * One CSV cell.
@@ -654,8 +646,7 @@ export class PresentationsService {
   private groupByDay(slots: PresentationSlotSummary[]): PresentationDay[] {
     const days = new Map<string, PresentationSlotSummary[]>();
     for (const slot of slots) {
-      const shifted = new Date(new Date(slot.startsAt).getTime() + IST_OFFSET_MINUTES * 60_000);
-      const date = shifted.toISOString().slice(0, 10);
+      const date = istDayKey(new Date(slot.startsAt));
       (days.get(date) ?? days.set(date, []).get(date)!).push(slot);
     }
     return [...days.entries()]

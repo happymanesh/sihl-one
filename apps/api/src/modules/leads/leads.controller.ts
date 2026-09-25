@@ -59,6 +59,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
+import { istDayKey } from '../../common/ist-day';
 import { Audited, CurrentUser, Public, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ApiZodBody, ApiZodQuery, IdParamPipe, ZodBody, ZodQuery } from '../../common/zod';
@@ -300,7 +301,7 @@ export class LeadsController {
       changes: { rows, scope: user.dataScope, filters: query as never },
     });
 
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = istDayKey(new Date());
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
     response.setHeader('Content-Disposition', `attachment; filename="sihl-leads-${stamp}.csv"`);
     response.setHeader('X-Content-Type-Options', 'nosniff');

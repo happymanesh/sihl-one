@@ -17,6 +17,7 @@ import {
 import { LEAD_LIST_SELECT, toLeadListItem, type LeadRow } from '../leads/lead.mapper';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { istDayKey } from '../../common/ist-day';
 import type { AuthenticatedPrincipal } from '../../common/types';
 
 /** A row with every count at zero, which is the row that matters most here. */
@@ -87,90 +88,91 @@ export class DailyActivityService {
     const ids = people.map((person) => person.id);
     const window = { gte: from, lte: to };
 
-    const [assigned, created, verified, updated, visits, joined, statuses, open] = await Promise.all([
-      // Who a lead was given to, from the audit payload rather than the lead's
-      // current owner — the point is what changed hands that day.
-      this.prisma.auditLog.findMany({
-        where: { action: 'ASSIGN', resource: 'lead', createdAt: window },
-        select: { changes: true },
-      }),
-      this.prisma.lead.groupBy({
-        by: ['createdById'],
-        where: { createdById: { in: ids }, createdAt: window },
-        _count: true,
-      }),
-      this.prisma.lead.groupBy({
-        by: ['mobileVerifiedById'],
-        where: { mobileVerifiedById: { in: ids }, mobileVerifiedAt: window },
-        _count: true,
-      }),
-      // Edits, from the audit trail. `lead.updatedById` holds only the last
-      // writer, so it cannot answer "which leads did this person touch on
-      // Tuesday" — the row has been overwritten since.
-      this.prisma.auditLog.groupBy({
-        by: ['actorId'],
-        where: {
-          actorId: { in: ids },
-          action: { in: ['UPDATE', 'STATUS_CHANGE'] },
-          resource: 'lead',
-          createdAt: window,
-        },
-        _count: true,
-      }),
-      this.prisma.visit.groupBy({
-        by: ['userId'],
-        where: { userId: { in: ids }, checkInAt: window },
-        _count: true,
-      }),
-      // Support on somebody else's visit, counted only when confirmed present.
-      this.prisma.attendee.groupBy({
-        by: ['userId'],
-        where: {
-          userId: { in: ids },
-          confirmedAt: { not: null },
-          visit: { checkInAt: window },
-        },
-        _count: true,
-      }),
-      // Outcomes come from the status history, which names who changed it and
-      // when — the lead's own convertedAt has no actor.
-      this.prisma.leadStatusHistory.groupBy({
-        by: ['changedById', 'toStatus'],
-        where: {
-          changedById: { in: ids },
-          changedAt: window,
-          toStatus: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
-        },
-        _count: true,
-      }),
-      // The backlog each person was carrying at the end of that day.
-      //
-      // Reconstructed from the status history rather than read from
-      // `lead.closedAt`, which is populated on almost nothing — two rows out of
-      // a hundred and seventy in production. A lead counts as open if it
-      // existed by the end of the day and had not yet reached a closed status
-      // by then.
-      //
-      // Ownership is the *current* owner. Reconstructing who held a lead on a
-      // past date is possible from the assignment audit but expensive, and for
-      // a report that defaults to yesterday it would change almost nothing.
-      // Worth knowing before anyone reads a three-month-old day.
-      this.prisma.lead.groupBy({
-        by: ['ownerId'],
-        where: {
-          ownerId: { in: ids },
-          deletedAt: null,
-          createdAt: { lte: to },
-          statusHistory: {
-            none: {
-              toStatus: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
-              changedAt: { lte: to },
+    const [assigned, created, verified, updated, visits, joined, statuses, open] =
+      await Promise.all([
+        // Who a lead was given to, from the audit payload rather than the lead's
+        // current owner — the point is what changed hands that day.
+        this.prisma.auditLog.findMany({
+          where: { action: 'ASSIGN', resource: 'lead', createdAt: window },
+          select: { changes: true },
+        }),
+        this.prisma.lead.groupBy({
+          by: ['createdById'],
+          where: { createdById: { in: ids }, createdAt: window },
+          _count: true,
+        }),
+        this.prisma.lead.groupBy({
+          by: ['mobileVerifiedById'],
+          where: { mobileVerifiedById: { in: ids }, mobileVerifiedAt: window },
+          _count: true,
+        }),
+        // Edits, from the audit trail. `lead.updatedById` holds only the last
+        // writer, so it cannot answer "which leads did this person touch on
+        // Tuesday" — the row has been overwritten since.
+        this.prisma.auditLog.groupBy({
+          by: ['actorId'],
+          where: {
+            actorId: { in: ids },
+            action: { in: ['UPDATE', 'STATUS_CHANGE'] },
+            resource: 'lead',
+            createdAt: window,
+          },
+          _count: true,
+        }),
+        this.prisma.visit.groupBy({
+          by: ['userId'],
+          where: { userId: { in: ids }, checkInAt: window },
+          _count: true,
+        }),
+        // Support on somebody else's visit, counted only when confirmed present.
+        this.prisma.attendee.groupBy({
+          by: ['userId'],
+          where: {
+            userId: { in: ids },
+            confirmedAt: { not: null },
+            visit: { checkInAt: window },
+          },
+          _count: true,
+        }),
+        // Outcomes come from the status history, which names who changed it and
+        // when — the lead's own convertedAt has no actor.
+        this.prisma.leadStatusHistory.groupBy({
+          by: ['changedById', 'toStatus'],
+          where: {
+            changedById: { in: ids },
+            changedAt: window,
+            toStatus: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
+          },
+          _count: true,
+        }),
+        // The backlog each person was carrying at the end of that day.
+        //
+        // Reconstructed from the status history rather than read from
+        // `lead.closedAt`, which is populated on almost nothing — two rows out of
+        // a hundred and seventy in production. A lead counts as open if it
+        // existed by the end of the day and had not yet reached a closed status
+        // by then.
+        //
+        // Ownership is the *current* owner. Reconstructing who held a lead on a
+        // past date is possible from the assignment audit but expensive, and for
+        // a report that defaults to yesterday it would change almost nothing.
+        // Worth knowing before anyone reads a three-month-old day.
+        this.prisma.lead.groupBy({
+          by: ['ownerId'],
+          where: {
+            ownerId: { in: ids },
+            deletedAt: null,
+            createdAt: { lte: to },
+            statusHistory: {
+              none: {
+                toStatus: { in: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
+                changedAt: { lte: to },
+              },
             },
           },
-        },
-        _count: true,
-      }),
-    ]);
+          _count: true,
+        }),
+      ]);
 
     const assignedTo = new Map<string, number>();
     for (const row of assigned) {
@@ -264,10 +266,7 @@ export class DailyActivityService {
    * Capped at 200 records. A cell showing four hundred is a backlog to work
    * through on the Leads screen, not a list to read on a report.
    */
-  async detail(
-    user: AuthenticatedPrincipal,
-    query: ActivityDetailQuery,
-  ): Promise<ActivityDetail> {
+  async detail(user: AuthenticatedPrincipal, query: ActivityDetailQuery): Promise<ActivityDetail> {
     const people = await this.peopleInScope(user);
     const person = people.find((candidate) => candidate.id === query.userId);
     if (!person) {
@@ -386,8 +385,7 @@ export class DailyActivityService {
 
       case 'converted':
       case 'lost': {
-        const reached =
-          query.metric === 'converted' ? ['CONVERTED'] : ['LOST', 'DISQUALIFIED'];
+        const reached = query.metric === 'converted' ? ['CONVERTED'] : ['LOST', 'DISQUALIFIED'];
         const history = await this.prisma.leadStatusHistory.findMany({
           where: {
             changedById: person.id,
@@ -514,7 +512,10 @@ export class DailyActivityService {
    */
   private async group(
     user: AuthenticatedPrincipal,
-    people: Array<{ id: string; orgUnit: { id: string; code: string; name: string; type: string; path: string } | null }>,
+    people: Array<{
+      id: string;
+      orgUnit: { id: string; code: string; name: string; type: string; path: string } | null;
+    }>,
     rows: DailyActivityRow[],
   ): Promise<DailyActivityGroup[]> {
     const byId = new Map(rows.map((row) => [row.userId, row]));
@@ -559,6 +560,6 @@ export class DailyActivityService {
 
   /** A day still in progress is reported as partial, never as a final figure. */
   private isToday(date: string): boolean {
-    return date === new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+    return date === istDayKey(new Date());
   }
 }

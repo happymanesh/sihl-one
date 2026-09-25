@@ -11,6 +11,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
+import { istInstant } from '@/lib/time';
 
 export interface VisitActionState {
   status: 'idle' | 'success' | 'error';
@@ -58,12 +59,14 @@ export async function planVisit(
     // client-site visit. Sending an empty string instead would fail validation
     // and take the default away from callers that never had the field.
     mode: formData.get('mode') || undefined,
-    plannedAt: plannedAt ? new Date(String(plannedAt)) : undefined,
+    plannedAt: istInstant(plannedAt),
     // Repeated fields from the multi-select. Role is not asked for at plan time:
-  // one decision on a form a rep fills in between meetings is enough, and it
-  // can be corrected on the visit itself.
-  attendees: formData.getAll('attendees').map((id) => ({ userId: String(id), role: 'SUPPORT' as const })),
-});
+    // one decision on a form a rep fills in between meetings is enough, and it
+    // can be corrected on the visit itself.
+    attendees: formData
+      .getAll('attendees')
+      .map((id) => ({ userId: String(id), role: 'SUPPORT' as const })),
+  });
 
   if (!parsed.success) {
     return {
@@ -153,7 +156,7 @@ export async function checkOutVisit(
     locationFailureReason: formData.get('locationFailureReason') || undefined,
     meetingNotes: formData.get('meetingNotes'),
     outcome: formData.get('outcome') || undefined,
-    nextFollowUpAt: followUp ? new Date(String(followUp)) : undefined,
+    nextFollowUpAt: istInstant(followUp),
   });
 
   if (!parsed.success) {
@@ -212,7 +215,7 @@ export async function rescheduleVisit(
 ): Promise<VisitActionState> {
   const visitId = String(formData.get('visitId'));
   const parsed = rescheduleVisitSchema.safeParse({
-    plannedAt: formData.get('plannedAt'),
+    plannedAt: istInstant(formData.get('plannedAt')),
     reason: formData.get('reason') || undefined,
   });
 
