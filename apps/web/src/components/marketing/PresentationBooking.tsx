@@ -82,18 +82,34 @@ export function PresentationBooking({
 
   if (state.status === 'success') {
     return (
-      <div className="mt-4 rounded-lg border border-brand-green-600/40 bg-brand-green-50 px-4 py-4 dark:bg-brand-green-900/20">
-        <p className="font-bold">Your seat is booked</p>
+      /*
+        The palette stops at brand-green-800.
+
+        This box asked for `dark:bg-brand-green-900/20`, which does not exist,
+        so the dark override never applied and the panel stayed at the near-white
+        50 — light text on a light ground, unreadable on the phone it is read on.
+        Every colour here is now a shade that exists, and the text sets its own
+        rather than inheriting whatever the page had.
+      */
+      <div className="mt-4 rounded-lg border border-brand-green-600/50 bg-brand-green-50 px-4 py-4 dark:bg-brand-green-800/30">
+        <p className="font-bold text-brand-green-800 dark:text-brand-green-200">
+          Your seat is booked
+        </p>
         {state.message ? (
-          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{state.message}</p>
+          <p className="mt-0.5 text-sm text-brand-green-700 dark:text-brand-green-300">
+            {state.message}
+          </p>
         ) : null}
 
         <ul className="mt-3 flex flex-col gap-2">
           {(state.booked ?? []).map((talk) => (
-            <li key={`${talk.startsAt}-${talk.topic}`} className="text-sm">
+            <li
+              key={`${talk.startsAt}-${talk.topic}`}
+              className="text-sm text-brand-green-800 dark:text-brand-green-100"
+            >
               <span className="tnum font-bold">{CLOCK.format(new Date(talk.startsAt))}</span>
               <span className="ml-2 font-semibold">{talk.topic}</span>
-              <span className="ml-2 text-[var(--color-text-muted)]">
+              <span className="ml-2 text-brand-green-700 dark:text-brand-green-300">
                 {DAY.format(new Date(talk.startsAt))} · {talk.durationMinutes} min
                 {talk.presenterName ? ` · ${talk.presenterName}` : ''}
               </span>
@@ -101,7 +117,7 @@ export function PresentationBooking({
           ))}
         </ul>
 
-        <p className="mt-3 text-xs text-[var(--color-text-subtle)]">
+        <p className="mt-3 text-xs text-brand-green-700 dark:text-brand-green-300">
           Please arrive a few minutes early and show this at the desk.
         </p>
       </div>
@@ -110,10 +126,17 @@ export function PresentationBooking({
 
   if (!open) {
     return (
+      /*
+        The loudest thing on the screen after the confirmation itself.
+
+        An outline button beside a filled one reads as the lesser option, and
+        this is the only thing still being asked of the visitor — they are
+        standing at the desk with the rep watching, and it has to be obvious.
+      */
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="btn btn-outline mt-4 h-12 w-full"
+        className="btn btn-primary mt-4 h-14 w-full text-base font-bold"
       >
         Book a presentation slot
       </button>
@@ -176,16 +199,19 @@ export function PresentationBooking({
         would be a worse outcome than not having it.
       */}
       {needsEmail ? (
-        <label className="mt-4 flex flex-col gap-1 text-sm">
-          <span className="font-semibold">
-            Email <span className="font-normal text-[var(--color-text-subtle)]">(optional)</span>
+        <label className="mt-4 flex flex-col gap-1">
+          {/* The reason first, small, then the box. A field labelled "Email"
+              asks for something; a line saying what it is for explains why
+              anybody would give it. */}
+          <span className="text-xs text-[var(--color-text-muted)]">
+            To send the details to you — optional
           </span>
           <input
             type="email"
             name="email"
             inputMode="email"
             autoComplete="email"
-            placeholder="So we can send you the details"
+            placeholder="Email"
             className="input h-12"
           />
         </label>

@@ -314,9 +314,29 @@ export class OtpService {
         route: sms.eventRoute,
       });
 
-      if (!result.accepted) {
+      /*
+        Logged either way, on purpose.
+
+        The OTP send records `sent` and `providerResponse` on its own row, so a
+        failure can be read back afterwards. This message has no such row, and
+        the adapter only speaks up when it fails — so a message the gateway
+        accepted and never delivered left no trace at all, and "the SMS did not
+        arrive" could not be told apart from "it was never attempted".
+
+        The gateway's own id is the useful part: it is what onlysms can be
+        asked about when a message is accepted and still does not land.
+      */
+      if (result.accepted) {
+        this.logger.log(
+          `Event SMS accepted for ${maskMobile(mobile)} ` +
+            `[route=${sms.eventRoute} template=${sms.eventTemplateId}] ` +
+            `id=${result.providerMessageId ?? 'none'}`,
+        );
+      } else {
         this.logger.warn(
-          `Event SMS refused for ${maskMobile(mobile)}: ${result.failureReason ?? 'no reason given'}`,
+          `Event SMS refused for ${maskMobile(mobile)} ` +
+            `[route=${sms.eventRoute} template=${sms.eventTemplateId}]: ` +
+            `${result.failureReason ?? 'no reason given'}`,
         );
       }
     } catch (error) {
