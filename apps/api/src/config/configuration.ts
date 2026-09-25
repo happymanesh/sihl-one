@@ -109,8 +109,22 @@ const envSchema = z
     */
     SMS_EVENT_TEMPLATE_ID: z.string().min(1).default('1777179032758734926'),
     SMS_EVENT_ROUTE: z.enum(['text', 'otp']).default('text'),
-    /** Where "event schedule and details" points. A short link, in practice. */
-    SMS_EVENT_LINK: z.string().url().optional(),
+    /*
+      What follows "event schedule and details" in the message.
+
+      Not validated as a URL, deliberately. It usually is one — but on 25-Sep
+      every message carrying a link was accepted by the gateway and dropped by
+      the operator, whatever the domain: the entity has no URL whitelisting.
+      Until that is arranged the only message that arrives is one with no link
+      at all, and requiring a URL here would make the honest fallback
+      unconfigurable without a release.
+
+      It is one variable in an approved DLT template, and the template allows
+      any content there. Trimmed, because a stray space changes the rendered
+      text and the operator compares what it receives against what was
+      registered.
+    */
+    SMS_EVENT_LINK: z.string().trim().min(1).optional(),
     SMS_TEXT_URL: z.string().url().default('https://onlysms.co.in/api/sms.aspx'),
     SMS_OTP_URL: z.string().url().default('https://onlysms.co.in/api/otp.aspx'),
 

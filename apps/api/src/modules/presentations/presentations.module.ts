@@ -1,8 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 
-import { MessagingModule } from '../messaging/messaging.module';
-
 import { PresentationsController } from './presentations.controller';
 import { PresentationsService } from './presentations.service';
 
@@ -15,7 +13,7 @@ import { PresentationsService } from './presentations.service';
  */
 @Global()
 @Module({
-  imports: [JwtModule.register({}), MessagingModule],
+  imports: [JwtModule.register({})],
   controllers: [PresentationsController],
   providers: [PresentationsService],
   exports: [PresentationsService],

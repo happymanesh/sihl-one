@@ -20,7 +20,7 @@ import {
 
 import { AuditService } from '../../common/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MessageSender } from '../messaging/message-sender';
+import { Mailer } from '../mail/mailer';
 import { brochuresFor, brochureUrl } from './brochures';
 
 /**
@@ -81,7 +81,7 @@ export class PresentationsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly jwt: JwtService,
-    private readonly mail: MessageSender,
+    private readonly mail: Mailer,
     config: ConfigService,
   ) {
     this.bookingSecret = `${config.get<string>('JWT_SECRET') ?? ''}:presentation-booking`;
@@ -466,29 +466,27 @@ export class PresentationsService {
     let emailed = false;
     if (email && slots.length > 0) {
       try {
-        const result = await this.mail.send({
-          channel: 'EMAIL',
-          destination: email,
-          subject: `Your seat is booked${eventName ? ` — ${eventName}` : ''}`,
-          body: this.confirmationBody({
-            firstName: lead.firstName,
-            eventName,
-            venue,
-            slots,
-            productInterest: lead.productInterest,
-          }),
-          providerTemplateId: null,
+        const text = this.confirmationBody({
+          firstName: lead.firstName,
+          eventName,
+          venue,
+          slots,
+          productInterest: lead.productInterest,
         });
-        /*
-          Accepted is not sent.
-
-          With no provider wired, the default sender records the message and
-          returns accepted anyway — it prefixes its id with `recorded:` for
-          exactly this reason. Reading only `accepted` would tell a visitor at a
-          stall that a confirmation is on its way when nothing left the
-          building, and they would wait for it.
-        */
-        emailed = result.accepted && !(result.providerMessageId ?? '').startsWith('recorded:');
+        const result = await this.mail.send({
+          to: email,
+          subject: `Your seat is booked${eventName ? ` — ${eventName}` : ''}`,
+          text,
+          html: this.toHtml(text),
+        });
+        // Both mailers report honestly — the noop one returns accepted: false
+        // rather than claiming a message that never left the building.
+        emailed = result.accepted;
+        if (!result.accepted) {
+          this.logger.warn(
+            `Booking confirmation not sent: ${result.failureReason ?? 'no reason given'}`,
+          );
+        }
       } catch (error) {
         this.logger.warn(`Booking confirmation not sent: ${String(error)}`);
       }
@@ -562,6 +560,24 @@ export class PresentationsService {
       '---',
       `Sent because you booked a seat at ${input.eventName}. Reply to this email if you would rather not hear from us.`,
     ].join('\n');
+  }
+
+  /**
+   * The same message as HTML.
+   *
+   * Sent alongside the plain text rather than instead of it: the text part is
+   * what a stripped-down client shows and what a screen reader reads, and the
+   * HTML is what makes the brochure links tappable on the phone this is opened
+   * on. Built from the one body, so the two can never say different things.
+   */
+  private toHtml(text: string): string {
+    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
+    return (
+      '<div style="font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.6">' +
+      linked.replace(/\n/g, '<br>') +
+      '</div>'
+    );
   }
 
   // ---------------------------------------------------------------------------
