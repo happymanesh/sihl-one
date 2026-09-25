@@ -293,8 +293,12 @@ export class OtpService {
    * Every failure is swallowed. The number is already verified and the lead is
    * already on the book; losing either because a gateway was slow would be a
    * poor trade for a courtesy message.
+   *
+   * Public because it is called from two places. Confirming a code is the
+   * usual one; the other is a returning visitor who is sent no code at all,
+   * and who would otherwise never be told where the schedule is.
    */
-  private async sendEventRegistrationSms(leadId: string, mobile: string): Promise<void> {
+  async sendEventRegistrationSms(leadId: string, mobile: string): Promise<void> {
     try {
       const attendance = await this.prisma.eventAttendance.findFirst({
         where: { leadId },

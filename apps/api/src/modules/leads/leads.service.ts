@@ -210,7 +210,10 @@ export class LeadsService {
     };
   }
 
-  async list(user: AuthenticatedPrincipal, query: LeadQuery): Promise<PaginatedResult<LeadListItem>> {
+  async list(
+    user: AuthenticatedPrincipal,
+    query: LeadQuery,
+  ): Promise<PaginatedResult<LeadListItem>> {
     const where = this.buildWhere(user, await this.withSubProducts(query));
 
     // `sortBy` reaches Prisma as an object key, so it is checked against an
@@ -368,11 +371,7 @@ export class LeadsService {
    * and once for F&O, each in whichever column that product has reached. Scoped
    * through the lead, so a rep sees their own book and nobody else's.
    */
-  async productBoardColumn(
-    user: AuthenticatedPrincipal,
-    status: string,
-    query: LeadQuery,
-  ) {
+  async productBoardColumn(user: AuthenticatedPrincipal, status: string, query: LeadQuery) {
     const expanded = await this.withSubProducts(query);
     const leadWhere = this.buildWhere(user, {
       ...expanded,
@@ -529,8 +528,7 @@ export class LeadsService {
       mobileVerifiedBy: lead.mobileVerifiedBy
         ? {
             id: lead.mobileVerifiedBy.id,
-            fullName:
-              `${lead.mobileVerifiedBy.firstName} ${lead.mobileVerifiedBy.lastName}`.trim(),
+            fullName: `${lead.mobileVerifiedBy.firstName} ${lead.mobileVerifiedBy.lastName}`.trim(),
           }
         : null,
       profile: this.toProfileView(lead.profile, lead.familyMembers),
@@ -593,7 +591,10 @@ export class LeadsService {
         occurredAt: activity.occurredAt.toISOString(),
         isSystemGenerated: activity.isSystemGenerated,
         actor: activity.actor
-          ? { id: activity.actor.id, fullName: `${activity.actor.firstName} ${activity.actor.lastName}`.trim() }
+          ? {
+              id: activity.actor.id,
+              fullName: `${activity.actor.firstName} ${activity.actor.lastName}`.trim(),
+            }
           : null,
       })),
     };
@@ -845,6 +846,22 @@ export class LeadsService {
             })
           : null;
 
+      /*
+        The schedule message, for somebody who is sent no code.
+
+        It normally rides on confirming an OTP, because that is the moment a
+        number is proven. A visitor whose number was already proven at an
+        earlier event is deliberately sent no code — and so never reached that
+        moment, and never heard from us at all. Those are the returning clients,
+        the people most worth having at a talk.
+
+        Sent after the transaction above has committed, because the attendance
+        row it writes is what names the event in the message.
+      */
+      if (coded.eventId && existing.mobileVerifiedAt) {
+        await this.otp.sendEventRegistrationSms(existing.id, input.mobile);
+      }
+
       return {
         reference: existing.reference,
         duplicate: true,
@@ -976,7 +993,11 @@ export class LeadsService {
         aggregateType: 'lead',
         aggregateId: created.id,
         eventType: 'lead.captured',
-        payload: { reference, source: input.source, utmCampaign: input.attribution?.utmCampaign ?? null },
+        payload: {
+          reference,
+          source: input.source,
+          utmCampaign: input.attribution?.utmCampaign ?? null,
+        },
       });
 
       // Recorded for a first-time registration too, even though `eventId` on
@@ -1065,9 +1086,7 @@ export class LeadsService {
       lastName: input.lastName || null,
       mobile: input.mobile,
       productInterest: input.productInterest ?? null,
-      assignedToName: assignedTo
-        ? `${assignedTo.firstName} ${assignedTo.lastName}`.trim()
-        : null,
+      assignedToName: assignedTo ? `${assignedTo.firstName} ${assignedTo.lastName}`.trim() : null,
       verification: challenge,
     };
   }
@@ -1262,7 +1281,6 @@ export class LeadsService {
 
     return this.findOne(user, id);
   }
-
 
   /**
    * Resolves `utm_campaign` to a real campaign.
@@ -1629,7 +1647,10 @@ export class LeadsService {
     await this.mustFindInScope(user, id);
     // Soft delete only. A lead is evidence of a marketing spend and of a
     // person's consent; hard-deleting it destroys both records.
-    await this.prisma.lead.update({ where: { id }, data: { deletedAt: new Date(), updatedById: user.id } });
+    await this.prisma.lead.update({
+      where: { id },
+      data: { deletedAt: new Date(), updatedById: user.id },
+    });
     await this.audit.record({ action: 'DELETE', resource: 'lead', resourceId: id });
   }
 
@@ -1787,8 +1808,7 @@ export class LeadsService {
       'Next follow-up',
     ];
 
-    const asDate = (value: Date | null): string =>
-      value ? value.toISOString().slice(0, 10) : '';
+    const asDate = (value: Date | null): string => (value ? value.toISOString().slice(0, 10) : '');
 
     const body = leads.map((lead) => [
       lead.reference,
@@ -1806,9 +1826,7 @@ export class LeadsService {
       lead.owner ? `${lead.owner.firstName} ${lead.owner.lastName}`.trim() : '',
       lead.owner?.employeeCode ?? '',
       lead.event?.name ?? '',
-      lead.capturedBy
-        ? `${lead.capturedBy.firstName} ${lead.capturedBy.lastName}`.trim()
-        : '',
+      lead.capturedBy ? `${lead.capturedBy.firstName} ${lead.capturedBy.lastName}`.trim() : '',
       asDate(lead.createdAt),
       asDate(lead.lastActivityAt),
       asDate(lead.nextFollowUpAt),
@@ -1822,9 +1840,7 @@ export class LeadsService {
       them. Nobody reports it as a bug; they just retype the names.
     */
     const csv =
-      '\uFEFF' +
-      [header, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n') +
-      '\r\n';
+      '\uFEFF' + [header, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 
     return { csv, rows: leads.length };
   }
@@ -1910,9 +1926,7 @@ export class LeadsService {
     // cannot be expressed as an equality.
     if (query.mobileVerified !== undefined) {
       and.push(
-        query.mobileVerified
-          ? { mobileVerifiedAt: { not: null } }
-          : { mobileVerifiedAt: null },
+        query.mobileVerified ? { mobileVerifiedAt: { not: null } } : { mobileVerifiedAt: null },
       );
     }
     if (query.createdFrom || query.createdTo) {
@@ -2114,7 +2128,9 @@ export class LeadsService {
     // would come back as '45000.5' — right as a number, wrong on a page of
     // money.
     const money = (value: unknown): string | null =>
-      value === null || value === undefined ? null : (value as { toFixed(n: number): string }).toFixed(2);
+      value === null || value === undefined
+        ? null
+        : (value as { toFixed(n: number): string }).toFixed(2);
 
     return {
       occupation: profile?.occupation ?? null,
@@ -2326,7 +2342,6 @@ export class LeadsService {
     return { id, ownerId: owner.id };
   }
 
-
   /**
    * Bring a lead's product rows in line with its `productInterest` array, then
    * roll the lead's own status up from them.
@@ -2524,9 +2539,9 @@ export class LeadsService {
     const productReason = rows.find((row) => row.status === 'LOST' && row.lostReason)?.lostReason;
     const lostReason: LeadLostReason | undefined =
       rolled === 'LOST'
-        ? ((LEAD_LOST_REASONS as readonly string[]).includes(productReason ?? '')
-            ? (productReason as LeadLostReason)
-            : 'OTHER')
+        ? (LEAD_LOST_REASONS as readonly string[]).includes(productReason ?? '')
+          ? (productReason as LeadLostReason)
+          : 'OTHER'
         : undefined;
 
     await tx.lead.update({
@@ -2644,11 +2659,7 @@ export class LeadsService {
    * back office, the rep has the client code, and the alternative to accepting
    * it is the conversion never being recorded at all.
    */
-  async convertProduct(
-    user: AuthenticatedPrincipal,
-    id: string,
-    input: ConvertProductInput,
-  ) {
+  async convertProduct(user: AuthenticatedPrincipal, id: string, input: ConvertProductInput) {
     const lead = await this.mustFindInScope(user, id);
 
     const row = await this.prisma.leadProduct.findUnique({
@@ -2804,10 +2815,7 @@ export class LeadsService {
    * a desk about to create a duplicate. Here the person is in front of you, and
    * stopping the rep dead to explain a data rule is the worst available answer.
    */
-  async instaLead(
-    user: AuthenticatedPrincipal,
-    input: InstaLeadInput,
-  ): Promise<InstaLeadResult> {
+  async instaLead(user: AuthenticatedPrincipal, input: InstaLeadInput): Promise<InstaLeadResult> {
     const existing = await this.prisma.lead.findFirst({
       where: {
         mobile: input.mobile,
@@ -2920,7 +2928,12 @@ export class LeadsService {
     // waving the visit through — the safe direction to fail in.
     const mode = await this.prisma.meetingModeMaster.findUnique({
       where: { code: input.mode },
-      select: { requiresPhoto: true, requiresGeo: true, requiresLink: true, allowsScreenshot: true },
+      select: {
+        requiresPhoto: true,
+        requiresGeo: true,
+        requiresLink: true,
+        allowsScreenshot: true,
+      },
     });
     const rules = visitEvidenceRules(mode);
     let awaitingCheckIn = true;
