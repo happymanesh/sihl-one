@@ -22,7 +22,7 @@ import { AuditService } from '../../common/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { istDayKey } from '../../common/ist-day';
 import { Mailer } from '../mail/mailer';
-import { brochuresFor, brochureUrl } from './brochures';
+import { escapeHtml } from '../mail/password-reset.template';
 
 /**
  * One CSV cell.
@@ -61,6 +61,27 @@ const IST_CLOCK = new Intl.DateTimeFormat('en-GB', {
 
 /** A booking token outlives the acknowledgement screen and little else. */
 const BOOKING_TOKEN_TTL_SECONDS = 30 * 60;
+
+/**
+ * The one invitation that replaces eight brochure listings.
+ *
+ * Kept as constants because the text and the HTML both use them and the two
+ * must not drift. Written for a prospect who has just met us at a stall: it says
+ * what is behind the link and what it covers, and promises nothing about
+ * returns — a SEBI-registered broker does not, and a reader who has heard that
+ * promise from everybody else trusts the one who does not make it.
+ */
+const BROCHURE_HEADING = 'Explore our full range of solutions';
+const BROCHURE_CAPTION =
+  'From everyday trading to long-term wealth, global investing and our partner programme — every brochure in one place, written for people who want the detail.';
+
+/** What both renderings of the confirmation are built from. */
+interface ConfirmationInput {
+  firstName: string;
+  eventName: string;
+  venue: string | null;
+  slots: Array<{ startsAt: Date; topic: string; durationMinutes: number }>;
+}
 
 @Injectable()
 export class PresentationsService {
@@ -458,18 +479,17 @@ export class PresentationsService {
     let emailed = false;
     if (email && slots.length > 0) {
       try {
-        const text = this.confirmationBody({
+        const confirmation: ConfirmationInput = {
           firstName: lead.firstName,
           eventName,
           venue,
           slots,
-          productInterest: lead.productInterest,
-        });
+        };
         const result = await this.mail.send({
           to: email,
           subject: `Your seat is booked${eventName ? ` — ${eventName}` : ''}`,
-          text,
-          html: this.toHtml(text),
+          text: this.confirmationText(confirmation),
+          html: this.confirmationHtml(confirmation),
         });
         // Both mailers report honestly — the noop one returns accepted: false
         // rather than claiming a message that never left the building.
@@ -498,36 +518,41 @@ export class PresentationsService {
   }
 
   /**
-   * One talk to a line, because that is how somebody reads a confirmation.
+   * The confirmation, as a table of talks and one link.
    *
-   * "Fri 26 Sep · 14:30 · Topic · Speaker · 30 min" — the day and time first,
-   * since that is what the reader is checking, and everything else after.
+   * Two things changed here on request, and both are about what the reader
+   * actually uses. The presenter's name is gone — it is a name they have never
+   * heard, sitting beside the time they have to remember, and it is the field on
+   * a talk most likely to change after this email is sent. And the brochures are
+   * no longer listed one by one: eight titles with descriptions and eight
+   * separate links buried the booking, so they are one link to the page that
+   * holds all of them, which also means a brochure can be added or replaced
+   * without anybody's inbox going stale.
+   *
+   * Text and HTML are built separately rather than one derived from the other.
+   * A real `table` cannot survive being reconstructed from plain text, and the
+   * columns are the point. They are built from the same input in the same order,
+   * a few lines apart, so they still say the same thing.
    */
-  private confirmationBody(input: {
-    firstName: string;
-    eventName: string;
-    venue: string | null;
-    slots: Array<{
-      startsAt: Date;
-      topic: string;
-      presenterName: string | null;
-      durationMinutes: number;
-    }>;
-    productInterest: string[];
-  }): string {
-    const lines = input.slots.map((slot) => {
-      const parts = [IST_DAY.format(slot.startsAt), IST_CLOCK.format(slot.startsAt), slot.topic];
-      if (slot.presenterName) parts.push(slot.presenterName);
-      parts.push(`${slot.durationMinutes} min`);
-      return parts.join(' · ');
-    });
+  private confirmationText(input: ConfirmationInput): string {
+    /*
+      Columns in plain text, padded to the widest value.
 
-    const picks = brochuresFor(input.productInterest).map(
-      (brochure) =>
-        `• ${brochure.title} — ${brochure.description}\n  ${brochureUrl(
-          this.brochureBaseUrl,
-          brochure.file,
-        )}`,
+      A monospaced client lines these up exactly; a proportional one lines them
+      up roughly, which still reads as a table and is better than a sentence.
+      The HTML part is what most people will see.
+    */
+    const when = input.slots.map(
+      (slot) => `${IST_DAY.format(slot.startsAt)} ${IST_CLOCK.format(slot.startsAt)}`,
+    );
+    const whenWidth = Math.max(4, ...when.map((value) => value.length));
+    const topicWidth = Math.max(5, ...input.slots.map((slot) => slot.topic.length));
+
+    const rows = input.slots.map(
+      (slot, index) =>
+        `${when[index].padEnd(whenWidth)}  ${slot.topic.padEnd(topicWidth)}  ${
+          slot.durationMinutes
+        } min`,
     );
 
     return [
@@ -535,14 +560,16 @@ export class PresentationsService {
       '',
       'Your seat is confirmed.',
       '',
-      ...lines,
+      `${'When'.padEnd(whenWidth)}  ${'Topic'.padEnd(topicWidth)}  Duration`,
+      `${'-'.repeat(whenWidth)}  ${'-'.repeat(topicWidth)}  --------`,
+      ...rows,
       '',
       ...(input.venue ? [`Venue: ${input.venue}`, ''] : []),
       'Please arrive a few minutes early and show this email at the desk.',
       '',
-      'A closer look at our solutions',
-      '',
-      ...picks,
+      BROCHURE_HEADING,
+      BROCHURE_CAPTION,
+      this.brochureBaseUrl,
       '',
       `If anything changes, or you would like to speak to someone before the session, call us on ${this.support.phone} or write to ${this.support.email}.`,
       '',
@@ -555,21 +582,109 @@ export class PresentationsService {
   }
 
   /**
-   * The same message as HTML.
+   * The same confirmation as HTML.
    *
-   * Sent alongside the plain text rather than instead of it: the text part is
-   * what a stripped-down client shows and what a screen reader reads, and the
-   * HTML is what makes the brochure links tappable on the phone this is opened
-   * on. Built from the one body, so the two can never say different things.
+   * Table-based layout with inline styles and no stylesheet, because that is the
+   * only thing every mail client renders the same way. The palette and spacing
+   * follow the password-reset template so the two do not look like they came
+   * from different companies.
    */
-  private toHtml(text: string): string {
-    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
-    return (
-      '<div style="font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.6">' +
-      linked.replace(/\n/g, '<br>') +
-      '</div>'
-    );
+  private confirmationHtml(input: ConfirmationInput): string {
+    const rows = input.slots
+      .map(
+        (slot) => `
+            <tr>
+              <td style="padding:10px 12px;border-top:1px solid #e3e6ea;white-space:nowrap;font-weight:600;">
+                ${escapeHtml(IST_DAY.format(slot.startsAt))}<br>
+                <span style="font-size:17px;">${escapeHtml(IST_CLOCK.format(slot.startsAt))}</span>
+              </td>
+              <td style="padding:10px 12px;border-top:1px solid #e3e6ea;">${escapeHtml(
+                slot.topic,
+              )}</td>
+              <td style="padding:10px 12px;border-top:1px solid #e3e6ea;white-space:nowrap;color:#52606d;" align="right">${
+                slot.durationMinutes
+              } min</td>
+            </tr>`,
+      )
+      .join('');
+
+    // The heading row is the highlighted one that was asked for: the house navy
+    // with white text, so the three columns are unmistakably a table and not
+    // three stacked sentences.
+    const head =
+      '<th align="left" style="padding:9px 12px;background:#0f2e5c;color:#ffffff;' +
+      'font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">';
+
+    const brochureUrlHtml = escapeHtml(this.brochureBaseUrl);
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;border:1px solid #e3e6ea;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2933;">
+        <tr><td style="padding:22px 24px 0;">
+          <p style="margin:0;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0f2e5c;">Shah Investors Home Ltd</p>
+          <h1 style="margin:10px 0 0;font-size:20px;line-height:1.3;font-weight:700;">Your seat is confirmed</h1>
+          <p style="margin:12px 0 0;font-size:15px;line-height:1.6;">Dear ${escapeHtml(
+            input.firstName,
+          )},</p>
+        </td></tr>
+
+        <tr><td style="padding:16px 24px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e3e6ea;border-radius:6px;font-size:15px;">
+            <tr>
+              ${head}When</th>
+              ${head}Topic</th>
+              <th align="right" style="padding:9px 12px;background:#0f2e5c;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Duration</th>
+            </tr>${rows}
+          </table>
+        </td></tr>
+${
+  input.venue
+    ? `
+        <tr><td style="padding:14px 24px 0;font-size:15px;line-height:1.6;">
+          <span style="color:#52606d;">Venue</span><br>
+          <strong>${escapeHtml(input.venue)}</strong>
+        </td></tr>`
+    : ''
+}
+        <tr><td style="padding:14px 24px 0;font-size:15px;line-height:1.6;">
+          <p style="margin:0;">Please arrive a few minutes early and show this email at the desk.</p>
+        </td></tr>
+
+        <tr><td style="padding:20px 24px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f9fc;border:1px solid #cfd8e3;border-radius:6px;">
+            <tr><td style="padding:16px 18px;font-size:15px;line-height:1.6;">
+              <p style="margin:0;font-weight:700;">${escapeHtml(BROCHURE_HEADING)}</p>
+              <p style="margin:6px 0 14px;color:#52606d;">${escapeHtml(BROCHURE_CAPTION)}</p>
+              <a href="${brochureUrlHtml}" style="display:inline-block;background:#0f2e5c;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:10px 22px;border-radius:6px;">View all brochures</a>
+            </td></tr>
+          </table>
+        </td></tr>
+
+        <tr><td style="padding:18px 24px 0;font-size:15px;line-height:1.6;">
+          <p style="margin:0;">If anything changes, or you would like to speak to someone before the session, call us on <strong>${escapeHtml(
+            this.support.phone,
+          )}</strong> or write to <a href="mailto:${escapeHtml(
+            this.support.email,
+          )}" style="color:#0f2e5c;">${escapeHtml(this.support.email)}</a>.</p>
+          <p style="margin:14px 0 0;">Regards,<br>Shah Investors Home Ltd</p>
+        </td></tr>
+
+        <tr><td style="padding:18px 24px 22px;">
+          <p style="margin:0;padding-top:14px;border-top:1px solid #e3e6ea;font-size:12px;line-height:1.6;color:#7b8794;">
+            Sent because you booked a seat at ${escapeHtml(
+              input.eventName,
+            )}. Reply to this email if you would rather not hear from us.<br>
+            Investments in securities markets are subject to market risks. Read all the related documents carefully before investing.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
   }
 
   // ---------------------------------------------------------------------------

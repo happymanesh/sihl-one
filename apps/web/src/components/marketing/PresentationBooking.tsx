@@ -17,12 +17,27 @@ function BookButton({ count }: { count: number }) {
   );
 }
 
-/** 26 Sep, and 14:30, in the timezone the event is run in. */
-const DAY = new Intl.DateTimeFormat('en-GB', {
+/**
+ * 26 Sep, and 14:30, in the timezone the event is run in.
+ *
+ * Two day formatters, because there are two kinds of value here and reading one
+ * with the other's rules is exactly the bug the timezone work went after.
+ * `DAY_KEY` formats a plain `YYYY-MM-DD` the API has already grouped by, so it
+ * must be read as UTC or the label slides a day. `DAY` formats a real instant,
+ * so it must be read in IST — a talk at half past midnight would otherwise be
+ * announced on the previous day.
+ */
+const DAY_KEY = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
   day: 'numeric',
   month: 'short',
   timeZone: 'UTC',
+});
+const DAY = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  timeZone: 'Asia/Kolkata',
 });
 const CLOCK = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit',
@@ -101,21 +116,65 @@ export function PresentationBooking({
           </p>
         ) : null}
 
-        <ul className="mt-3 flex flex-col gap-2">
-          {(state.booked ?? []).map((talk) => (
-            <li
-              key={`${talk.startsAt}-${talk.topic}`}
-              className="text-sm text-brand-green-800 dark:text-brand-green-100"
-            >
-              <span className="tnum font-bold">{CLOCK.format(new Date(talk.startsAt))}</span>
-              <span className="ml-2 font-semibold">{talk.topic}</span>
-              <span className="ml-2 text-brand-green-700 dark:text-brand-green-300">
-                {DAY.format(new Date(talk.startsAt))} · {talk.durationMinutes} min
-                {talk.presenterName ? ` · ${talk.presenterName}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
+        {/*
+          A table, not a list of run-together spans.
+
+          This is read once, quickly, often while walking away from the desk, and
+          it is the only record the visitor has of when to come back. Three
+          columns that line up answer "when am I due" at a glance; a sentence
+          does not. The presenter is deliberately absent — a name the visitor has
+          never heard is noise beside the time they have to remember, and it is
+          the one field on a talk that changes late.
+        */}
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="bg-brand-green-100 dark:bg-brand-green-800/60">
+                <th
+                  scope="col"
+                  className="px-2 py-1.5 text-xs font-bold uppercase tracking-wide text-brand-green-800 dark:text-brand-green-100"
+                >
+                  When
+                </th>
+                <th
+                  scope="col"
+                  className="px-2 py-1.5 text-xs font-bold uppercase tracking-wide text-brand-green-800 dark:text-brand-green-100"
+                >
+                  Topic
+                </th>
+                <th
+                  scope="col"
+                  className="px-2 py-1.5 text-right text-xs font-bold uppercase tracking-wide text-brand-green-800 dark:text-brand-green-100"
+                >
+                  Duration
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {(state.booked ?? []).map((talk) => (
+                <tr
+                  key={`${talk.startsAt}-${talk.topic}`}
+                  className="border-b border-brand-green-600/30 last:border-0"
+                >
+                  <td className="whitespace-nowrap px-2 py-2 align-top text-brand-green-800 dark:text-brand-green-100">
+                    <span className="block text-xs text-brand-green-700 dark:text-brand-green-300">
+                      {DAY.format(new Date(talk.startsAt))}
+                    </span>
+                    <span className="tnum block font-bold">
+                      {CLOCK.format(new Date(talk.startsAt))}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 align-top font-semibold text-brand-green-800 dark:text-brand-green-100">
+                    {talk.topic}
+                  </td>
+                  <td className="tnum whitespace-nowrap px-2 py-2 align-top text-right text-brand-green-700 dark:text-brand-green-300">
+                    {talk.durationMinutes} min
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <p className="mt-3 text-xs text-brand-green-700 dark:text-brand-green-300">
           Please arrive a few minutes early and show this at the desk.
@@ -157,39 +216,96 @@ export function PresentationBooking({
         Pick the talks you would like to attend.
       </p>
 
-      <div className="mt-3 flex flex-col gap-4">
-        {days.map((day) => (
-          <div key={day.date} className="flex flex-col gap-2">
-            <p className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-              {DAY.format(new Date(`${day.date}T00:00:00Z`))}
-            </p>
-            {day.slots.map((slot) => (
-              <label
-                key={slot.id}
-                className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] px-3 py-2.5"
+      {/*
+        A table rather than a stack of cards.
+
+        Someone choosing between six talks is comparing times, and times only
+        compare when they are in a column. The tick sits in its own first column
+        so every box lines up down the page — in the card layout each one sat
+        wherever its topic's line-wrapping put it.
+
+        A `label` cannot wrap a `tr`, so each row's time and topic are labels
+        pointing at the row's checkbox by id. The whole row stays tappable, which
+        matters on a phone held one-handed at a stall.
+
+        The presenter is gone by request: three columns fit a narrow screen
+        without wrapping, a fourth did not, and the name was the one the visitor
+        had least use for.
+      */}
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-[var(--color-border)]">
+              <th scope="col" className="w-9 px-2 py-1.5">
+                <span className="sr-only">Choose</span>
+              </th>
+              <th
+                scope="col"
+                className="px-2 py-1.5 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
               >
-                <input
-                  type="checkbox"
-                  name="slotIds"
-                  value={slot.id}
-                  checked={selected.includes(slot.id)}
-                  onChange={() => toggle(slot.id)}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-teal-600"
-                />
-                <span className="min-w-0">
-                  <span className="block font-semibold">{slot.topic}</span>
-                  <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
-                    <span className="tnum font-semibold">
+                Time
+              </th>
+              <th
+                scope="col"
+                className="px-2 py-1.5 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
+              >
+                Topic
+              </th>
+              <th
+                scope="col"
+                className="px-2 py-1.5 text-right text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
+              >
+                Duration
+              </th>
+            </tr>
+          </thead>
+          {days.map((day) => (
+            <tbody key={day.date}>
+              {/* The date, once, above its talks — so the time column carries
+                  only times and still reads as a full datetime. */}
+              <tr>
+                <th
+                  scope="colgroup"
+                  colSpan={4}
+                  className="bg-[var(--color-surface-muted)] px-2 py-1.5 text-left text-xs font-bold uppercase tracking-wide"
+                >
+                  {DAY_KEY.format(new Date(`${day.date}T00:00:00Z`))}
+                </th>
+              </tr>
+              {day.slots.map((slot) => (
+                <tr key={slot.id} className="border-b border-[var(--color-border)] last:border-0">
+                  <td className="px-2 py-2.5 align-middle">
+                    <input
+                      id={`slot-${slot.id}`}
+                      type="checkbox"
+                      name="slotIds"
+                      value={slot.id}
+                      checked={selected.includes(slot.id)}
+                      onChange={() => toggle(slot.id)}
+                      className="block h-5 w-5 accent-teal-600"
+                    />
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2.5 align-middle">
+                    <label
+                      htmlFor={`slot-${slot.id}`}
+                      className="tnum block cursor-pointer font-semibold"
+                    >
                       {CLOCK.format(new Date(slot.startsAt))}
-                    </span>{' '}
-                    · {slot.durationMinutes} min
-                    {slot.presenterName ? ` · ${slot.presenterName}` : ''}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-        ))}
+                    </label>
+                  </td>
+                  <td className="px-2 py-2.5 align-middle">
+                    <label htmlFor={`slot-${slot.id}`} className="block cursor-pointer">
+                      {slot.topic}
+                    </label>
+                  </td>
+                  <td className="tnum whitespace-nowrap px-2 py-2.5 align-middle text-right text-[var(--color-text-muted)]">
+                    {slot.durationMinutes} min
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          ))}
+        </table>
       </div>
 
       {/*
