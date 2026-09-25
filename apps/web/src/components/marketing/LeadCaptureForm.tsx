@@ -312,6 +312,12 @@ export function LeadCaptureForm({
             }
           />
         </div>
+        {/*
+          The products had no error line, so when the picker's own answer was
+          refused the visitor saw the form fail with nothing marked and no
+          reason given. Whatever the rule is, the field that broke it says so.
+        */}
+        <FieldError errors={state.errors?.productInterest} />
       </fieldset>
 
       <div>

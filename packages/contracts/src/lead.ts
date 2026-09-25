@@ -14,6 +14,7 @@ import {
   emailSchema,
   idSchema,
   indianMobileSchema,
+  MAX_PRODUCT_INTEREST,
   panSchema,
   paginationQuerySchema,
   pincodeSchema,
@@ -31,7 +32,7 @@ export const leadCaptureSchema = z.object({
   mobile: indianMobileSchema,
   email: emailSchema.optional().or(z.literal('')),
   city: z.string().trim().max(80).optional(),
-  productInterest: z.array(codeSchema).max(6).default([]),
+  productInterest: z.array(codeSchema).max(MAX_PRODUCT_INTEREST).default([]),
   message: z.string().trim().max(1000).optional(),
   source: codeSchema.default('WEBSITE'),
   attribution: attributionSchema.optional(),
@@ -61,7 +62,7 @@ export const createLeadSchema = z.object({
   state: z.string().trim().max(80).optional(),
   pincode: pincodeSchema.optional(),
   source: codeSchema,
-  productInterest: z.array(codeSchema).max(12).default([]),
+  productInterest: z.array(codeSchema).max(MAX_PRODUCT_INTEREST).default([]),
   priority: z.enum(PRIORITIES).default('MEDIUM'),
   estimatedValue: z.number().nonnegative().max(1_000_000_000).optional(),
   ownerId: idSchema.optional(),
@@ -257,11 +258,15 @@ export const leadQuerySchema = paginationQuerySchema.extend({
   status: z
     .union([z.enum(LEAD_STATUSES), z.array(z.enum(LEAD_STATUSES))])
     .optional()
-    .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
+    .transform((value) =>
+      value === undefined ? undefined : Array.isArray(value) ? value : [value],
+    ),
   source: z
     .union([codeSchema, z.array(codeSchema)])
     .optional()
-    .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
+    .transform((value) =>
+      value === undefined ? undefined : Array.isArray(value) ? value : [value],
+    ),
   /**
    * Product codes. Matching is OR — a lead interested in *any* of the selected
    * products qualifies, which is what people expect from a multi-select filter.
@@ -270,7 +275,9 @@ export const leadQuerySchema = paginationQuerySchema.extend({
   productInterest: z
     .union([codeSchema, z.array(codeSchema)])
     .optional()
-    .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
+    .transform((value) =>
+      value === undefined ? undefined : Array.isArray(value) ? value : [value],
+    ),
   priority: z.enum(PRIORITIES).optional(),
   ownerId: idSchema.optional(),
   partnerId: idSchema.optional(),

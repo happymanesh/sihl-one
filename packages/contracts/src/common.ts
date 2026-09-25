@@ -104,3 +104,22 @@ export const codeSchema = z
   .min(2)
   .max(40)
   .regex(/^[A-Z][A-Z0-9_]*$/, 'Codes are uppercase letters, numbers and underscores');
+
+/**
+ * How many products one record may be interested in.
+ *
+ * This bound exists to stop an unauthenticated endpoint being handed a
+ * thousand-element array, and for nothing else. It is emphatically *not* a
+ * statement about how many products somebody is allowed to want.
+ *
+ * It was three separate literals before — 6 on the public capture, 12 on the
+ * internal lead and customer forms — while the product master, which is a
+ * table anyone with rights can add rows to, had grown to eighteen active
+ * products. A visitor at a stall who ticked everything on the registration
+ * screen was refused at the seventh, with the reason shown nowhere.
+ *
+ * So: one number, well clear of the master, in one place. If the master ever
+ * approaches this, the answer is to raise this — never to let a person's
+ * honest answer be the thing that fails.
+ */
+export const MAX_PRODUCT_INTEREST = 48;

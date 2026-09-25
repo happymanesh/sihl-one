@@ -1,14 +1,11 @@
 import { z } from 'zod';
-import {
-  CUSTOMER_STATUSES,
-  KYC_STATUSES,
-  ONBOARDING_STAGES,
-} from './enums';
+import { CUSTOMER_STATUSES, KYC_STATUSES, ONBOARDING_STAGES } from './enums';
 import {
   codeSchema,
   emailSchema,
   idSchema,
   indianMobileSchema,
+  MAX_PRODUCT_INTEREST,
   paginationQuerySchema,
   panSchema,
   pincodeSchema,
@@ -28,7 +25,7 @@ export const createCustomerSchema = z.object({
   pincode: pincodeSchema.optional(),
   relationshipManagerId: idSchema.optional(),
   partnerId: idSchema.optional(),
-  productInterest: z.array(codeSchema).max(12).default([]),
+  productInterest: z.array(codeSchema).max(MAX_PRODUCT_INTEREST).default([]),
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
@@ -64,7 +61,9 @@ export const customerQuerySchema = paginationQuerySchema.extend({
   productInterest: z
     .union([codeSchema, z.array(codeSchema)])
     .optional()
-    .transform((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value])),
+    .transform((value) =>
+      value === undefined ? undefined : Array.isArray(value) ? value : [value],
+    ),
   productDimension: z.enum(PRODUCT_DIMENSIONS).default('opportunity'),
 });
 export type CustomerQuery = z.infer<typeof customerQuerySchema>;
@@ -120,7 +119,12 @@ export interface Customer360 {
     openTasks: number;
     lastVisitAt: string | null;
   };
-  insights: Array<{ code: string; title: string; detail: string; severity: 'INFO' | 'WARN' | 'RISK' }>;
+  insights: Array<{
+    code: string;
+    title: string;
+    detail: string;
+    severity: 'INFO' | 'WARN' | 'RISK';
+  }>;
 }
 
 /** Percentage progress through onboarding, derived from the stage ordinal. */
