@@ -49,7 +49,7 @@ export class OnlySmsSender extends SmsSender {
       then dropped by the operator, which is exactly how the first live code
       went missing: the provider said 100, and no phone ever rang.
     */
-    const url = new URL(sms.otpUrl);
+    const url = new URL(request.route === 'text' ? sms.textUrl : sms.otpUrl);
     url.searchParams.set('UserID', sms.userId);
     url.searchParams.set('UserPass', sms.password);
     url.searchParams.set('MobileNo', request.mobile);

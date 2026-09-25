@@ -61,6 +61,7 @@ import type {
   ResendOtpInput,
   VerifyOtpInput,
 } from '@sihl-one/contracts';
+import { PresentationsService } from '../presentations/presentations.service';
 import { ExistingClientService } from './existing-client.service';
 import { OtpService } from './otp.service';
 import { CaptureCodeService } from '../events/capture-code.service';
@@ -178,6 +179,7 @@ export class LeadsService {
     private readonly masters: MastersService,
     private readonly visits: VisitsService,
     private readonly existingClients: ExistingClientService,
+    private readonly presentations: PresentationsService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -847,6 +849,15 @@ export class LeadsService {
         reference: existing.reference,
         duplicate: true,
         existingClient: client.known,
+        /*
+          A returning visitor whose number was proven at an earlier event is
+          sent no code today, so there is no verification step to mint a pass
+          on the way through. Minted here instead — without it the one group
+          most worth a seat at a talk could not book one.
+        */
+        bookingToken: existing.mobileVerifiedAt
+          ? await this.presentations.bookingTokenFor(existing.id)
+          : null,
         verification: repeatChallenge,
         firstName: input.firstName,
         lastName: input.lastName || null,
@@ -1047,6 +1058,9 @@ export class LeadsService {
       // Distinct from `duplicate`, which means "we have an open enquiry from
       // this number". Somebody can be one, the other, or both.
       existingClient: client.known,
+      // A brand new lead has not proved anything yet, so no pass until the
+      // code comes back.
+      bookingToken: null,
       firstName: input.firstName,
       lastName: input.lastName || null,
       mobile: input.mobile,

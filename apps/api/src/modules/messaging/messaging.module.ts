@@ -12,6 +12,6 @@ import { MessagingService } from './messaging.service';
 @Module({
   controllers: [MessagingController],
   providers: [MessagingService, { provide: MessageSender, useClass: RecordingMessageSender }],
-  exports: [MessagingService],
+  exports: [MessagingService, MessageSender],
 })
 export class MessagingModule {}

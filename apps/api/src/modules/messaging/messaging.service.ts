@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   canSend,
   maskMobile,
@@ -139,11 +144,7 @@ export class MessagingService {
       input.customerId,
     );
 
-    const decision = canSend(
-      template.purpose as MessagePurpose,
-      recipient.state,
-      istHour(),
-    );
+    const decision = canSend(template.purpose as MessagePurpose, recipient.state, istHour());
 
     const rendered = renderTemplate(template.body, {
       ...input.variables,
@@ -211,7 +212,12 @@ export class MessagingService {
   }
 
   /** A standing refusal, honoured ahead of every purpose. */
-  async optOut(entityType: 'LEAD' | 'CUSTOMER', entityId: string, channel: MessageChannel, reason?: string) {
+  async optOut(
+    entityType: 'LEAD' | 'CUSTOMER',
+    entityId: string,
+    channel: MessageChannel,
+    reason?: string,
+  ) {
     return this.prisma.messageOptOut.upsert({
       where: { entityType_entityId_channel: { entityType, entityId, channel } },
       update: {},

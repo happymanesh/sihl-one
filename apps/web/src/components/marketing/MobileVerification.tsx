@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { OTP_LENGTH } from '@sihl-one/contracts';
 
+import { PresentationBooking } from '@/components/marketing/PresentationBooking';
 import {
   resendCaptureCode,
   verifyCaptureMobile,
@@ -46,10 +47,15 @@ export function MobileVerification({
   verificationId,
   maskedMobile,
   expiresInSeconds,
+  eventCode,
+  emailProvided,
 }: {
   verificationId: string;
   maskedMobile: string;
   expiresInSeconds: number;
+  /** Which schedule to offer, once the number is proven. */
+  eventCode?: string;
+  emailProvided?: boolean;
 }) {
   const [state, action] = useActionState(verifyCaptureMobile, INITIAL);
   const [resendState, resendAction] = useActionState(resendCaptureCode, INITIAL);
@@ -101,10 +107,24 @@ export function MobileVerification({
 
   if (state.status === 'verified') {
     return (
-      <div className="mt-4 rounded-lg border border-teal-500/40 bg-teal-50 px-4 py-3 text-center dark:bg-teal-900/30">
-        <p className="font-bold">Mobile number confirmed</p>
-        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">Thank you.</p>
-      </div>
+      <>
+        <div className="mt-4 rounded-lg border border-teal-500/40 bg-teal-50 px-4 py-3 text-center dark:bg-teal-900/30">
+          <p className="font-bold">Mobile number confirmed</p>
+          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">Thank you.</p>
+        </div>
+
+        {/*
+          Directly under the confirmation, so it is on screen without scrolling
+          — the visitor is standing at a desk and will not go looking for it.
+        */}
+        {eventCode && state.bookingToken ? (
+          <PresentationBooking
+            eventCode={eventCode}
+            bookingToken={state.bookingToken}
+            needsEmail={!emailProvided}
+          />
+        ) : null}
+      </>
     );
   }
 

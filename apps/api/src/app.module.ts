@@ -33,6 +33,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { DuplicatesModule } from './modules/duplicates/duplicates.module';
 import { EventsModule } from './modules/events/events.module';
+import { PresentationsModule } from './modules/presentations/presentations.module';
 import { MastersModule } from './modules/masters/masters.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { OrgUnitsModule } from './modules/org-units/org-units.module';
@@ -64,6 +65,7 @@ import { MailModule } from './modules/mail/mail.module';
     CampaignsModule,
     DuplicatesModule,
     EventsModule,
+    PresentationsModule,
     MastersModule,
     MessagingModule,
     OrgUnitsModule,

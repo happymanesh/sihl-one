@@ -252,6 +252,7 @@ export class EventsService {
       leads: total,
       captureUrl: captureUrl(PUBLIC_WEB_URL(), 'EVENT', event.code),
       allowedTransitions: [...EVENT_STATUS_TRANSITIONS[event.status as EventStatus]],
+      allowsPresentationBooking: event.allowsPresentationBooking,
       pipeline: byStatus
         .map((row) => ({ status: row.status, count: row._count._all }))
         .sort((a, b) => b.count - a.count),

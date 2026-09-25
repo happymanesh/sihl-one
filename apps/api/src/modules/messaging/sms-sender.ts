@@ -7,6 +7,15 @@ export interface SmsRequest {
   body: string;
   /** DLT content template id. The operator rejects a mismatch. */
   templateId: string;
+  /**
+   * Which of the provider's endpoints to use.
+   *
+   * Not cosmetic. An OTP-category template sent down the transactional route
+   * is accepted by the gateway and then dropped by the operator — the gateway
+   * answers 100 either way, so the only evidence is that no phone rings. The
+   * category the template was registered under decides this, not the content.
+   */
+  route?: 'otp' | 'text';
 }
 
 export interface SmsResult {

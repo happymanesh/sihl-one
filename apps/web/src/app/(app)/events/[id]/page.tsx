@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import type { EventDetail, EventRepBreakdown } from '@sihl-one/contracts';
+import type { EventDetail, EventRepBreakdown, PresentationDay } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
 import { CopyField } from '@/components/ui/CopyField';
 import { EventActions } from '@/components/events/EventActions';
+import { PresentationSlotsEditor } from '@/components/events/PresentationSlotsEditor';
 import { QrSwitcher } from '@/components/events/QrSwitcher';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { EventRepTable } from '@/components/events/EventRepTable';
@@ -39,6 +40,17 @@ export default async function EventDetailPage({ params }: Props) {
   const byRep = await apiFetch<EventRepBreakdown[]>(`/events/${id}/by-rep`).catch(
     () => [] as EventRepBreakdown[],
   );
+
+  /*
+    The schedule, for whoever runs the event.
+
+    Fetched here rather than inside the editor so the page renders with it in
+    place — a section that populates a moment later reads as a glitch on a
+    screen somebody is watching during an event.
+  */
+  const schedule = await apiFetch<PresentationDay[]>(
+    `/presentations/events/${event.id}/slots`,
+  ).catch(() => [] as PresentationDay[]);
 
   return (
     <div className="space-y-5">
@@ -257,6 +269,15 @@ export default async function EventDetailPage({ params }: Props) {
         </div>
         <EventRepTable eventId={event.id} rows={byRep} />
       </section>
+
+      <PresentationSlotsEditor
+        eventId={event.id}
+        enabled={event.allowsPresentationBooking}
+        days={schedule}
+        eventStartsAt={event.startsAt}
+        eventEndsAt={event.endsAt ?? null}
+        canManage={can(user, 'campaign:update')}
+      />
     </div>
   );
 }

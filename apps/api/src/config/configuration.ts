@@ -50,6 +50,18 @@ const envSchema = z
      */
     PUBLIC_WEB_URL: z.string().url().default('http://localhost:3000'),
 
+    /*
+      Where the brochure library lives.
+
+      Configurable so the library can move — to the corporate site, to object
+      storage — without a release. Defaults to the web app's own public folder,
+      which works out of the box and costs a release to change a PDF.
+    */
+    BROCHURE_BASE_URL: z.string().url().optional(),
+    /** Printed in visitor-facing email, so it belongs in configuration. */
+    SUPPORT_PHONE: z.string().min(1).default('079-6508-1699'),
+    SUPPORT_EMAIL: z.string().email().default('helpdesk@sihl.in'),
+
     /**
      * Outbound email for system messages — today only the password-reset
      * notice. Defaults to `noop`, which logs and sends nothing, so a
@@ -84,6 +96,21 @@ const envSchema = z
     SMS_PE_ID: z.string().min(1).optional(),
     /** Content template id. Must match the text being sent, exactly. */
     SMS_OTP_TEMPLATE_ID: z.string().min(1).optional(),
+
+    /*
+      The event-registration message, sent once a number is confirmed.
+
+      The template id and the route are separate settings on purpose. The route
+      depends on the category the template was registered under, not on its
+      words, and getting it wrong means the gateway accepts every message and
+      the operator delivers none — with a 100 in the response either way. Being
+      able to flip it with a variable and a restart is the difference between a
+      five-minute fix at a stall and a day of blind diagnosis.
+    */
+    SMS_EVENT_TEMPLATE_ID: z.string().min(1).default('1777179032758734926'),
+    SMS_EVENT_ROUTE: z.enum(['text', 'otp']).default('text'),
+    /** Where "event schedule and details" points. A short link, in practice. */
+    SMS_EVENT_LINK: z.string().url().optional(),
     SMS_TEXT_URL: z.string().url().default('https://onlysms.co.in/api/sms.aspx'),
     SMS_OTP_URL: z.string().url().default('https://onlysms.co.in/api/otp.aspx'),
 
@@ -253,7 +280,6 @@ const envSchema = z
       });
     }
 
-
     // Production-only checks. These are the mistakes that actually happen: a
     // .env copied from a dev machine straight onto a server.
     if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
@@ -347,6 +373,9 @@ export interface AppConfig {
     idleTimeoutMinutes: number;
   };
   rateLimit: { ttlSeconds: number; limit: number };
+  support: { phone: string; email: string };
+  /** Where the brochure library is served from, without a trailing slash. */
+  brochureBaseUrl: string;
   mail: {
     driver: Env['MAIL_DRIVER'];
     apiKey: string | undefined;
@@ -361,6 +390,9 @@ export interface AppConfig {
     senderId: string;
     peId: string;
     otpTemplateId: string;
+    eventTemplateId: string;
+    eventRoute: 'text' | 'otp';
+    eventLink: string;
     textUrl: string;
     otpUrl: string;
   };
@@ -418,6 +450,8 @@ export function buildAppConfig(env: Env): AppConfig {
       idleTimeoutMinutes: env.AUTH_IDLE_TIMEOUT_MINUTES,
     },
     rateLimit: { ttlSeconds: env.RATE_LIMIT_TTL, limit: env.RATE_LIMIT_LIMIT },
+    support: { phone: env.SUPPORT_PHONE, email: env.SUPPORT_EMAIL },
+    brochureBaseUrl: env.BROCHURE_BASE_URL ?? `${env.PUBLIC_WEB_URL}/brochures`,
     mail: {
       driver: env.MAIL_DRIVER,
       apiKey: env.SENDGRID_API_KEY,
@@ -438,6 +472,9 @@ export function buildAppConfig(env: Env): AppConfig {
       senderId: env.SMS_SENDER_ID ?? '',
       peId: env.SMS_PE_ID ?? '',
       otpTemplateId: env.SMS_OTP_TEMPLATE_ID ?? '',
+      eventTemplateId: env.SMS_EVENT_TEMPLATE_ID,
+      eventRoute: env.SMS_EVENT_ROUTE,
+      eventLink: env.SMS_EVENT_LINK ?? `${env.PUBLIC_WEB_URL}/brochures`,
       textUrl: env.SMS_TEXT_URL,
       otpUrl: env.SMS_OTP_URL,
     },

@@ -64,6 +64,25 @@ export function renderOtpMessage(code: string): string {
   );
 }
 
+/**
+ * The message a visitor gets once their number is confirmed at an event.
+ *
+ * Must match the registered DLT template character for character, including
+ * the spacing and the trailing sign-off. The operator rejects a mismatch with
+ * -104, and the gateway still answers 100 — so a stray space here is a day of
+ * nobody receiving anything and nothing in any log to say why.
+ *
+ * Registered template:
+ *   Thank you for registering with SIHL at {#var1#}. Event schedule and
+ *   details: {#var2#} - Shah Investors Home Ltd
+ */
+export function renderEventRegistrationMessage(eventName: string, link: string): string {
+  return (
+    `Thank you for registering with SIHL at ${eventName}. ` +
+    `Event schedule and details: ${link} - Shah Investors Home Ltd`
+  );
+}
+
 /** Digits only, and exactly as many as we send. */
 export const otpCodeSchema = z
   .string()
@@ -109,6 +128,15 @@ export interface OtpVerifyResult {
   /** Present on failure, in words the person at the stall can act on. */
   reason: string | null;
   attemptsRemaining: number;
+  /**
+   * A short-lived pass to book a seat at a talk.
+   *
+   * Present only once the number is proven, and only when the event is
+   * offering seats — the acknowledgement screen shows its booking button on
+   * the strength of this and nothing else, so a missing token is the whole
+   * answer to "may this person book".
+   */
+  bookingToken?: string | null;
 }
 
 /** Shape check only; the API decides whether the number may be sent to. */

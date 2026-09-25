@@ -6,6 +6,7 @@ import { useFormStatus } from 'react-dom';
 import type { CaptureProduct } from '@sihl-one/contracts';
 
 import { submitLeadCapture, type CaptureState } from '@/app/actions/lead-capture';
+import { PresentationBooking } from '@/components/marketing/PresentationBooking';
 import { MobileVerification } from '@/components/marketing/MobileVerification';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 
@@ -132,8 +133,7 @@ export function LeadCaptureForm({
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">{state.message}</p>
         {state.reference ? (
           <p className="mt-3 text-sm">
-            Your reference is{' '}
-            <span className="font-mono font-bold tnum">{state.reference}</span>
+            Your reference is <span className="font-mono font-bold tnum">{state.reference}</span>
           </p>
         ) : null}
 
@@ -146,6 +146,21 @@ export function LeadCaptureForm({
             verificationId={state.verification.verificationId}
             maskedMobile={state.verification.maskedMobile}
             expiresInSeconds={state.verification.expiresInSeconds}
+            eventCode={state.eventCode}
+            emailProvided={state.emailProvided}
+          />
+        ) : null}
+
+        {/*
+          The other way to arrive here already proven: a returning visitor whose
+          number was confirmed at an earlier event, who is sent no code today
+          and so has no verification step to hang this off.
+        */}
+        {!state.verification && state.eventCode && state.bookingToken ? (
+          <PresentationBooking
+            eventCode={state.eventCode}
+            bookingToken={state.bookingToken}
+            needsEmail={!state.emailProvided}
           />
         ) : null}
 

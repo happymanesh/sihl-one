@@ -155,6 +155,13 @@ export interface EventListItem {
 export interface EventDetail extends EventListItem {
   captureUrl: string;
   allowedTransitions: EventStatus[];
+  /**
+   * Whether visitors are offered seats at the talks.
+   *
+   * Separate from whether any talks exist: a schedule can be drawn up before
+   * it opens, and closed again without deleting the seats already taken.
+   */
+  allowsPresentationBooking: boolean;
   /** Counts by lead status, for the "what happened after" question. */
   pipeline: Array<{ status: string; count: number }>;
   /** How many captured leads nobody has contacted yet. */

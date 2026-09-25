@@ -53,6 +53,19 @@ export interface CaptureState {
     expiresInSeconds: number;
     maskedMobile: string;
   };
+
+  /**
+   * The pass to book a seat, when this visitor already has one.
+   *
+   * Present only for somebody whose number was proven at an earlier event, who
+   * is therefore sent no code today. Everybody else earns theirs by entering
+   * the code, and it arrives with the verification result instead.
+   */
+  bookingToken?: string | null;
+  /** The event code, so the booking section knows which schedule to ask for. */
+  eventCode?: string;
+  /** Whether an email was given at registration, so we only ask when we must. */
+  emailProvided?: boolean;
   errors?: Record<string, string[]>;
 }
 
@@ -147,6 +160,7 @@ export async function submitLeadCapture(
       reference: string;
       duplicate: boolean;
       existingClient?: boolean;
+      bookingToken?: string | null;
       firstName?: string;
       lastName?: string | null;
       mobile?: string;
@@ -193,6 +207,9 @@ export async function submitLeadCapture(
       status: 'success',
       reference: data.reference,
       alreadyKnown,
+      bookingToken: data.bookingToken ?? null,
+      eventCode: parsed.data.eventCode,
+      emailProvided: Boolean(parsed.data.email),
       verification:
         data.verification?.sent && data.verification.verificationId
           ? {
@@ -234,6 +251,13 @@ export interface VerifyState {
   status: 'idle' | 'verified' | 'error';
   message?: string;
   attemptsRemaining?: number;
+  /**
+   * The pass to book a seat, minted at the moment the number was proven.
+   *
+   * Its absence is the whole answer to "may this person book" — the screen
+   * does not decide, it only shows what it was given.
+   */
+  bookingToken?: string | null;
 }
 
 /**
@@ -284,10 +308,11 @@ export async function verifyCaptureMobile(
       verified: boolean;
       reason: string | null;
       attemptsRemaining: number;
+      bookingToken?: string | null;
     };
 
     return result.verified
-      ? { status: 'verified' }
+      ? { status: 'verified', bookingToken: result.bookingToken ?? null }
       : {
           status: 'error',
           message: result.reason ?? 'That code is not right.',

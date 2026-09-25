@@ -239,6 +239,30 @@ html.dark {
     color: var(--color-text);
     transition: border-color 120ms ease, box-shadow 120ms ease;
   }
+  /*
+    Sixteen pixels on a phone, and the reason is not typography.
+
+    iOS Safari zooms the whole page whenever a focused field is set below 16px.
+    Once zoomed, the layout is wider than the screen, so it pans too — which is
+    what a visitor at a stall experiences as the page jumping about and
+    drifting while they fill the form in.
+
+    The fix is the font size. `user-scalable=no` would be the other way to stop
+    it, and it is the wrong one: iOS has ignored it since iOS 10, and blocking
+    zoom takes the page away from anyone who needs to magnify it. The viewport
+    above deliberately allows zooming up to 5x for exactly that reason.
+
+    Scoped to small screens so the denser desktop UI is untouched.
+  */
+  @media (max-width: 767px) {
+    .input,
+    input,
+    select,
+    textarea {
+      font-size: 1rem;
+    }
+  }
+
   .input::placeholder {
     color: var(--color-text-subtle);
   }

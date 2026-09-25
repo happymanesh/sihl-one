@@ -684,6 +684,9 @@ model Lead {
   /// Every event this lead has turned up at.
   eventAttendances EventAttendance[]
 
+  /// Seats this person booked at talks.
+  presentationBookings PresentationBooking[]
+
   /// On the TRAI Do Not Disturb registry. Populated by a registry check; false
   /// means "not known to be registered", not "confirmed contactable".
   dndRegistered Boolean @default(false)
@@ -1254,10 +1257,80 @@ model Event {
   /// by making the first one wrong.
   attendees EventAttendance[]
 
+  /// Whether visitors may book seats at all.
+  ///
+  /// Separate from having slots: a schedule can exist before it opens, and can
+  /// be closed in a hurry without deleting the talks or the seats already
+  /// taken. Off by default, so existing events are unaffected.
+  allowsPresentationBooking Boolean @default(false)
+
+  /// Talks visitors can book a seat at while they are on the floor.
+  slots PresentationSlot[]
+
   @@index([status])
   @@index([code])
   @@index([startsAt])
   @@map("event")
+}
+
+/// A talk at an event that visitors can book a seat at.
+///
+/// Date and time are one `startsAt` rather than the two fields the form shows.
+/// A slot is an instant, and splitting it into a date and a clock time invites
+/// the two to disagree — a talk at midnight on the wrong day, or a slot that
+/// sorts before one that precedes it.
+model PresentationSlot {
+  id String @id @default(cuid())
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  startsAt        DateTime
+  durationMinutes Int
+  topic           String   @db.VarChar(160)
+  presenterName   String?  @db.VarChar(120)
+
+  /// Seats, when somebody decides to cap one. Nothing enforces it yet — the
+  /// column exists so that adding the rule later is a code change and not a
+  /// migration against a table with bookings already in it.
+  capacity Int?
+
+  /// Switched off rather than deleted when a talk is cancelled. The bookings
+  /// survive, so whoever has to ring those visitors still has their list — a
+  /// deleted slot would take the evidence of who was coming with it.
+  isActive Boolean @default(true)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bookings PresentationBooking[]
+
+  @@index([eventId, startsAt])
+  @@map("presentation_slot")
+}
+
+/// A visitor's seat at a talk.
+///
+/// Tied to the lead rather than to a phone number, because the lead is what the
+/// registration already created and what the rep will follow up. Only a lead
+/// with a verified mobile can hold one.
+model PresentationBooking {
+  id String @id @default(cuid())
+
+  slotId String
+  slot   PresentationSlot @relation(fields: [slotId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+
+  /// One seat per person per talk. Booking the same slot twice is a
+  /// double-tap, not a second visitor.
+  @@unique([slotId, leadId])
+  @@index([leadId])
+  @@map("presentation_booking")
 }
 
 /// A lead we met at an event, whether or not the event created them.

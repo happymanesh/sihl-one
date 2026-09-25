@@ -7,6 +7,7 @@ import {
   OTP_MAX_SENDS_PER_HOUR,
   OTP_TTL_MINUTES,
   maskMobile,
+  renderEventRegistrationMessage,
   renderOtpMessage,
   type OtpChallenge,
   type OtpPurpose,
@@ -15,6 +16,7 @@ import {
 
 import { APP_CONFIG, type AppConfig } from '../../config/configuration';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PresentationsService } from '../presentations/presentations.service';
 import { SmsSender } from '../messaging/sms-sender';
 
 /**
@@ -37,6 +39,7 @@ export class OtpService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly prisma: PrismaService,
     private readonly sms: SmsSender,
+    private readonly presentations: PresentationsService,
   ) {}
 
   /**
@@ -143,10 +146,10 @@ export class OtpService {
       where: { id: record.id },
       data: {
         sent: result.accepted,
-        providerResponse: (result.accepted ? result.providerMessageId : result.failureReason)?.slice(
-          0,
-          200,
-        ),
+        providerResponse: (result.accepted
+          ? result.providerMessageId
+          : result.failureReason
+        )?.slice(0, 200),
       },
     });
 
@@ -229,7 +232,10 @@ export class OtpService {
       const remaining = Math.max(0, OTP_MAX_ATTEMPTS - updated.attempts);
       return {
         verified: false,
-        reason: remaining > 0 ? 'That code is not right. Try again.' : 'Too many wrong attempts. Ask for a new code.',
+        reason:
+          remaining > 0
+            ? 'That code is not right. Try again.'
+            : 'Too many wrong attempts. Ask for a new code.',
         attemptsRemaining: remaining,
       };
     }
@@ -257,7 +263,65 @@ export class OtpService {
       }
     });
 
-    return { verified: true, reason: null, attemptsRemaining: OTP_MAX_ATTEMPTS };
+    // The one message a visitor gets after confirming: where to find the
+    // schedule and our literature. Never allowed to fail the verification.
+    if (record.leadId) await this.sendEventRegistrationSms(record.leadId, record.mobile);
+
+    /*
+      The pass to book a seat, minted here because this is the moment the
+      number became proven. The acknowledgement screen shows its booking button
+      on the strength of this and nothing else.
+    */
+    const bookingToken = record.leadId
+      ? await this.presentations.bookingTokenFor(record.leadId)
+      : null;
+
+    return { verified: true, reason: null, attemptsRemaining: OTP_MAX_ATTEMPTS, bookingToken };
+  }
+
+  /**
+   * "Thank you for registering… event schedule and details: <link>".
+   *
+   * Sent once, the moment a number is confirmed, because that is when the
+   * visitor is holding the phone and has just proved it reaches them.
+   *
+   * Which event is resolved from the attendance row this registration wrote,
+   * not from `lead.eventId`. For a returning visitor those disagree — the lead
+   * still points at the event that first produced them — and naming the wrong
+   * event in a message to a client is worse than sending nothing.
+   *
+   * Every failure is swallowed. The number is already verified and the lead is
+   * already on the book; losing either because a gateway was slow would be a
+   * poor trade for a courtesy message.
+   */
+  private async sendEventRegistrationSms(leadId: string, mobile: string): Promise<void> {
+    try {
+      const attendance = await this.prisma.eventAttendance.findFirst({
+        where: { leadId },
+        orderBy: { createdAt: 'desc' },
+        select: { event: { select: { name: true } } },
+      });
+      const eventName = attendance?.event?.name;
+      // No event means this was not an event registration — a website enquiry
+      // has nothing to be told about a schedule.
+      if (!eventName) return;
+
+      const sms = this.config.sms;
+      const result = await this.sms.send({
+        mobile,
+        body: renderEventRegistrationMessage(eventName, sms.eventLink),
+        templateId: sms.eventTemplateId,
+        route: sms.eventRoute,
+      });
+
+      if (!result.accepted) {
+        this.logger.warn(
+          `Event SMS refused for ${maskMobile(mobile)}: ${result.failureReason ?? 'no reason given'}`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(`Event SMS not sent: ${String(error)}`);
+    }
   }
 
   /** Whether a provider is wired up, so callers can avoid promising an SMS. */
