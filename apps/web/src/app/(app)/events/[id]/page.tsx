@@ -70,10 +70,32 @@ export default async function EventDetailPage({ params }: Props) {
             <Badge tone={STATUS_TONES[event.status] ?? 'neutral'}>{humanise(event.status)}</Badge>
           </div>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            <span className="font-mono">{event.reference}</span> · {formatDateTime(event.startsAt)}
-            {event.venue ? ` · ${event.venue}` : ''}
+            <span className="font-mono">{event.reference}</span>
             {event.owner ? ` · ${event.owner.fullName}` : ''}
           </p>
+
+          {/*
+            The facts somebody standing at the stall needs, labelled rather than
+            run together with dots. Five values in one dotted line reads as a
+            sentence nobody parses; a wrapped list of labelled pairs can be
+            scanned for the one that is wanted.
+          */}
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            <Fact label="From" value={formatDateTime(event.startsAt)} />
+            <Fact
+              label="To"
+              /* An event with no end is treated as running for a day — the same
+                 rule the capture window uses — so saying "not set" is more
+                 honest than leaving it blank. */
+              value={event.endsAt ? formatDateTime(event.endsAt) : 'Not set'}
+            />
+            <Fact label="Venue" value={event.venue ?? '—'} />
+            <Fact label="City" value={event.city ?? '—'} />
+            <Fact
+              label="Expected footfall"
+              value={event.expectedFootfall != null ? formatNumber(event.expectedFootfall) : '—'}
+            />
+          </dl>
         </div>
 
         {/*
@@ -278,6 +300,18 @@ export default async function EventDetailPage({ params }: Props) {
         eventEndsAt={event.endsAt ?? null}
         canManage={can(user, 'campaign:update')}
       />
+    </div>
+  );
+}
+
+/** One labelled fact in the event header. */
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <dt className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+        {label}
+      </dt>
+      <dd className="mt-0.5 font-semibold">{value}</dd>
     </div>
   );
 }

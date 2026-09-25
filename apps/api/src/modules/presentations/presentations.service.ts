@@ -45,6 +45,14 @@ function csvCell(value: string): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+/** YYYY-MM-DD in the business timezone, for comparing which day something falls on. */
+const IST_DAY_KEY = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  timeZone: 'Asia/Kolkata',
+});
+
 /** "Fri 26 Sep" and "14:30", in the timezone the events are run in. */
 const IST_DAY = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
@@ -578,7 +586,25 @@ export class PresentationsService {
    */
   private assertWithinEvent(event: { startsAt: Date; endsAt: Date | null }, startsAt: Date): void {
     const end = event.endsAt ?? new Date(event.startsAt.getTime() + 86_400_000);
-    if (startsAt < event.startsAt || startsAt > end) {
+
+    /*
+      Compared as calendar days in the business timezone, not as instants.
+
+      Two reasons. The human one: "the talk has to be on a day the event runs"
+      is what somebody at a desk means, and a talk at 09:55 on the opening
+      morning is not outside an event that opens at 10:00 — it is a typo they
+      will fix, not a rejection they need.
+
+      The mechanical one: events and slots do not agree about what a stored
+      time means. An event's start was captured from a form that carried no
+      timezone, so it holds the wall-clock figure somebody typed; a slot now
+      carries a real instant. Comparing those directly rejects perfectly good
+      morning slots by five and a half hours. Comparing the day each falls on
+      is true under either reading.
+    */
+    const day = (value: Date): string => IST_DAY_KEY.format(value);
+    const slotDay = day(startsAt);
+    if (slotDay < day(event.startsAt) || slotDay > day(end)) {
       throw new BadRequestException({
         title: 'That time is outside the event',
         detail: 'A talk has to start between the event’s own start and end.',
