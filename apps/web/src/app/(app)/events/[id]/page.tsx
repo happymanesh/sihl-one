@@ -103,8 +103,13 @@ export default async function EventDetailPage({ params }: Props) {
           not a privilege. While an event is running these figures move every
           few minutes and the page is server-rendered, so without this the only
           way to see a new scan is a full reload.
+
+          The wide gap is deliberate. Refresh is pressed constantly during an
+          event and "Close event" ends it for good, and at two units apart a
+          thumb aiming for one was landing on the other. The confirm behind
+          Close is the real guard; this is so it rarely has to be.
         */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-8">
           <RefreshButton />
           {can(user, 'campaign:update') ? (
             <EventActions
