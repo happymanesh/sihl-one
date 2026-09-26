@@ -101,26 +101,52 @@ export class EventsService {
         include: {
           owner: { select: { id: true, firstName: true, lastName: true } },
           campaign: { select: { id: true, name: true } },
-          _count: { select: { leads: { where: { deletedAt: null } } } },
         },
       }),
       this.prisma.event.count({ where }),
     ]);
 
-    const converted = await this.prisma.lead.groupBy({
-      by: ['eventId'],
-      where: {
-        eventId: { in: rows.map((row) => row.id) },
-        deletedAt: null,
-        status: 'CONVERTED',
-      },
-      _count: { _all: true },
-      orderBy: { eventId: 'asc' },
-    });
-    const convertedByEvent = new Map(converted.map((row) => [row.eventId, row._count._all]));
+    /*
+      A rep sees their own numbers here too.
+
+      The detail page has scoped these since it was written — open an event and
+      a rep is shown what their own QR brought in. This list did not, so the
+      same event reported the whole stall's total on one screen and the rep's
+      share on the next, and the rep reasonably read the larger figure as theirs.
+
+      Keyed on `capturedById`, exactly as the detail page is, so a lead later
+      handed to a colleague still counts for whoever's QR actually brought it in.
+      Credit for the scan does not move with the work.
+
+      This replaces a `_count` on the event, which could only ever count every
+      lead on it. A count that cannot express the viewer is the wrong tool on a
+      screen where the viewer decides what the number means.
+    */
+    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
+    const ids = rows.map((row) => row.id);
+
+    const [capturedRows, convertedRows] = await Promise.all([
+      this.prisma.lead.groupBy({
+        by: ['eventId'],
+        where: { eventId: { in: ids }, deletedAt: null, ...mine },
+        _count: { _all: true },
+        orderBy: { eventId: 'asc' },
+      }),
+      this.prisma.lead.groupBy({
+        by: ['eventId'],
+        where: { eventId: { in: ids }, deletedAt: null, status: 'CONVERTED', ...mine },
+        _count: { _all: true },
+        orderBy: { eventId: 'asc' },
+      }),
+    ]);
+
+    const capturedByEvent = new Map(capturedRows.map((row) => [row.eventId, row._count._all]));
+    const convertedByEvent = new Map(convertedRows.map((row) => [row.eventId, row._count._all]));
 
     return paginate(
-      rows.map((row) => this.toListItem(row, convertedByEvent.get(row.id) ?? 0)),
+      rows.map((row) =>
+        this.toListItem(row, convertedByEvent.get(row.id) ?? 0, capturedByEvent.get(row.id) ?? 0),
+      ),
       total,
       query.page,
       query.pageSize,
@@ -143,7 +169,6 @@ export class EventsService {
       include: {
         owner: { select: { id: true, firstName: true, lastName: true } },
         campaign: { select: { id: true, name: true } },
-        _count: { select: { leads: { where: { deletedAt: null } } } },
       },
     });
     if (!event) throw new NotFoundException({ title: 'Event not found' });
@@ -248,8 +273,7 @@ export class EventsService {
       .reduce((sum, row) => sum + row._count._all, 0);
 
     return {
-      ...this.toListItem(event, converted),
-      leads: total,
+      ...this.toListItem(event, converted, total),
       captureUrl: captureUrl(PUBLIC_WEB_URL(), 'EVENT', event.code),
       allowedTransitions: [...EVENT_STATUS_TRANSITIONS[event.status as EventStatus]],
       allowsPresentationBooking: event.allowsPresentationBooking,
@@ -266,9 +290,7 @@ export class EventsService {
         an admin account, say — gets null and the plain event QR above, because
         a link tagged with an empty code is worse than no link at all.
       */
-      myCaptureUrl: employeeCode
-        ? repCaptureUrl(PUBLIC_WEB_URL(), event.code, employeeCode)
-        : null,
+      myCaptureUrl: employeeCode ? repCaptureUrl(PUBLIC_WEB_URL(), event.code, employeeCode) : null,
       myEmployeeCode: employeeCode,
       uncontacted,
       attended,
@@ -536,9 +558,15 @@ export class EventsService {
       createdAt: Date;
       owner: { id: string; firstName: string; lastName: string } | null;
       campaign: { id: string; name: string } | null;
-      _count: { leads: number };
     },
     converted: number,
+    /**
+     * How many leads this viewer may count on the event.
+     *
+     * Passed in rather than read off a `_count` include, because what belongs
+     * in this field depends on who is asking and a relation count cannot say.
+     */
+    leads: number,
   ): EventListItem {
     return {
       id: row.id,
@@ -555,7 +583,7 @@ export class EventsService {
         ? { id: row.owner.id, fullName: `${row.owner.firstName} ${row.owner.lastName}`.trim() }
         : null,
       campaign: row.campaign,
-      leads: row._count.leads,
+      leads,
       converted,
       createdAt: row.createdAt.toISOString(),
     };
