@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useState, type ChangeEvent } from 'react';
 import { useFormStatus } from 'react-dom';
 
 import type { CaptureProduct } from '@sihl-one/contracts';
@@ -11,6 +11,28 @@ import { MobileVerification } from '@/components/marketing/MobileVerification';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 
 const INITIAL: CaptureState = { status: 'idle' };
+
+/**
+ * The typed fields, held in React rather than in the DOM.
+ *
+ * They were uncontrolled, and React resets an uncontrolled field once the
+ * action it was submitted to comes back. So a visitor who mistyped their
+ * number lost their name, their email, their city and their message along with
+ * it — and at a stall, with a queue behind them, they do not type it all again.
+ * They walk away, and the lead is gone for the sake of one wrong digit.
+ *
+ * Holding the values here means the round trip cannot touch them. Whatever the
+ * server says, what the visitor typed is still on the screen, with only the
+ * field that was actually wrong marked.
+ */
+const EMPTY_FIELDS = {
+  firstName: '',
+  lastName: '',
+  mobile: '',
+  email: '',
+  city: '',
+  message: '',
+};
 
 function SubmitButton({ label }: { label?: string }) {
   const { pending } = useFormStatus();
@@ -53,6 +75,22 @@ export function LeadCaptureForm({
 } = {}) {
   const [state, formAction] = useActionState(submitLeadCapture, INITIAL);
   const [picked, setPicked] = useState<string[]>([]);
+  const [fields, setFields] = useState(EMPTY_FIELDS);
+  /*
+    Consent is held here for a reason beyond convenience.
+
+    The box starts ticked and the form carries `noValidate`, so `required` does
+    not stop a submit — a visitor who deliberately unticks it is refused by the
+    API. Left uncontrolled, the reset afterwards put the tick back, and the next
+    submit would have sent consent the visitor had explicitly withdrawn. Under
+    the DPDP Act that is not a cosmetic bug.
+  */
+  const [consent, setConsent] = useState(true);
+
+  const set =
+    (name: keyof typeof EMPTY_FIELDS) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setFields((current) => ({ ...current, [name]: event.target.value }));
   const [attribution, setAttribution] = useState({
     utmSource: '',
     utmMedium: '',
@@ -235,6 +273,8 @@ export function LeadCaptureForm({
             className="input"
             required
             autoComplete="given-name"
+            value={fields.firstName}
+            onChange={set('firstName')}
             aria-invalid={Boolean(state.errors?.firstName)}
           />
           <FieldError errors={state.errors?.firstName} />
@@ -243,7 +283,16 @@ export function LeadCaptureForm({
           <label className="label" htmlFor="lastName">
             Last name
           </label>
-          <input id="lastName" name="lastName" className="input" autoComplete="family-name" />
+          <input
+            id="lastName"
+            name="lastName"
+            className="input"
+            autoComplete="family-name"
+            value={fields.lastName}
+            onChange={set('lastName')}
+            aria-invalid={Boolean(state.errors?.lastName)}
+          />
+          <FieldError errors={state.errors?.lastName} />
         </div>
       </div>
 
@@ -262,6 +311,8 @@ export function LeadCaptureForm({
           autoComplete="tel-national"
           placeholder="10-digit mobile"
           maxLength={13}
+          value={fields.mobile}
+          onChange={set('mobile')}
           aria-invalid={Boolean(state.errors?.mobile)}
         />
         <FieldError errors={state.errors?.mobile} />
@@ -278,6 +329,8 @@ export function LeadCaptureForm({
             type="email"
             className="input"
             autoComplete="email"
+            value={fields.email}
+            onChange={set('email')}
             aria-invalid={Boolean(state.errors?.email)}
           />
           <FieldError errors={state.errors?.email} />
@@ -286,11 +339,32 @@ export function LeadCaptureForm({
           <label className="label" htmlFor="city">
             City
           </label>
-          <input id="city" name="city" className="input" autoComplete="address-level2" />
+          <input
+            id="city"
+            name="city"
+            className="input"
+            autoComplete="address-level2"
+            value={fields.city}
+            onChange={set('city')}
+            aria-invalid={Boolean(state.errors?.city)}
+          />
+          <FieldError errors={state.errors?.city} />
         </div>
       </div>
 
-      <fieldset>
+      {/*
+        The picker is not an `.input`, so it misses the red border the text
+        fields get for free. It draws its own when its answer was the one
+        refused — otherwise the only thing marking it is a line of small text
+        under a block of pills, which is not what a person scans for.
+      */}
+      <fieldset
+        className={
+          state.errors?.productInterest
+            ? 'rounded-lg border border-danger-500 px-3 py-2.5'
+            : undefined
+        }
+      >
         <legend className="label">What are you interested in?</legend>
         {/*
           The same picker the internal forms use, so a sub-product sits under
@@ -324,7 +398,16 @@ export function LeadCaptureForm({
         <label className="label" htmlFor="message">
           Anything we should know?
         </label>
-        <textarea id="message" name="message" rows={2} className="input resize-none" />
+        <textarea
+          id="message"
+          name="message"
+          rows={2}
+          className="input resize-none"
+          value={fields.message}
+          onChange={set('message')}
+          aria-invalid={Boolean(state.errors?.message)}
+        />
+        <FieldError errors={state.errors?.message} />
       </div>
 
       {/*
@@ -332,7 +415,11 @@ export function LeadCaptureForm({
         out. A pre-ticked box is not consent under the DPDP Act, and the API
         stores this exact wording alongside the timestamp as evidence.
       */}
-      <label className="flex cursor-pointer items-start gap-2.5 text-xs text-[var(--color-text-muted)]">
+      <label
+        className={`flex cursor-pointer items-start gap-2.5 text-xs text-[var(--color-text-muted)] ${
+          state.errors?.consentToContact ? 'rounded-lg border border-danger-500 px-3 py-2.5' : ''
+        }`}
+      >
         {/*
           Ticked by default at the product owner's instruction, to cut the number
           of forms abandoned at a stall. Still `required`, so a visitor who
@@ -342,7 +429,8 @@ export function LeadCaptureForm({
         <input
           type="checkbox"
           name="consentToContact"
-          defaultChecked
+          checked={consent}
+          onChange={(event) => setConsent(event.target.checked)}
           required
           className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
           aria-invalid={Boolean(state.errors?.consentToContact)}
