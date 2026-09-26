@@ -10,8 +10,15 @@ import { emailSchema, idSchema, indianMobileSchema } from './common';
  * SP 800-63B guidance, and it is what actually resists credential stuffing.
  * The character-class rules are kept as a floor because SEBI/CERT-In audit
  * checklists in India still look for them explicitly.
+ *
+ * Lowered from twelve to eight on request. Eight is the floor NIST sets and the
+ * floor the audit checklists ask for, so this stays inside both — but it is a
+ * floor, not a target, and the four character classes below now carry more of
+ * the weight than they did. The mitigations that matter more than length are
+ * already in place: attempts are counted and the account locks, and every
+ * session is bound to a device.
  */
-export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MIN_LENGTH = 8;
 
 export const passwordSchema = z
   .string()

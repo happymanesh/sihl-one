@@ -27,7 +27,20 @@ const envSchema = z
 
     PASSWORD_PEPPER: z.string().min(8),
 
-    AUTH_MAX_FAILED_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+    /**
+     * Wrong passwords before the account locks.
+     *
+     * Raised from five to ten on request. Five was locking people out of their
+     * own account during an ordinary bad morning — a rep who has just been
+     * given a new password, typing it on a phone, spends attempts on typos
+     * rather than on guessing, and every lockout becomes a call to the desk.
+     *
+     * Ten still stops credential stuffing dead: an attacker working a list gets
+     * ten tries per account before it shuts for `AUTH_LOCKOUT_MINUTES`, which is
+     * nowhere near enough for even a small dictionary. The two numbers are read
+     * from the environment, so either can be tuned without a release.
+     */
+    AUTH_MAX_FAILED_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(10),
     AUTH_LOCKOUT_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
     /**
      * Sign the user out after this long without activity. Distinct from
