@@ -95,17 +95,26 @@ export function LoginForm({ next }: { next?: string }) {
       </div>
 
       {/*
-        Unticked by default, and that is the point of having it.
+        Ticked by default, which keeps today's behaviour and adds a way out of it.
 
-        Every session used to persist for a month whether or not anybody asked,
-        including on the shared machine at a branch counter. Left alone this is
-        now a session that ends with the browser; ticking it is a deliberate
-        choice to keep it for thirty days.
+        The cautious instinct is to leave it clear, but the sum does not support
+        it. The box only decides what happens once the browser is closed — while
+        it is open the session persists either way — and the API signs an idle
+        session out after fifteen minutes regardless of any cookie. So the
+        exposure it removes is one person closing the browser and another
+        opening it on the same machine inside that quarter hour.
+
+        Set against that: every session has persisted for thirty days since the
+        product shipped, and clearing this by default would make everyone sign in
+        far more often for a risk the idle timeout already bounds. Ticked, nobody
+        is worse off than yesterday and the person at a shared counter can now
+        untick it — which is the line beside the label.
       */}
       <label className="flex cursor-pointer items-center gap-2.5 text-sm">
         <input
           type="checkbox"
           name="rememberMe"
+          defaultChecked
           className="h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
         />
         <span>

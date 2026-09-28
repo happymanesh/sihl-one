@@ -37,19 +37,18 @@ const REMEMBERED_DAYS = 30;
  *
  * `remember` decides whether the cookies outlive the browser. Without it they
  * are session cookies — no `maxAge`, so they are dropped when the window
- * closes. With it they persist for a month.
+ * closes. With it they persist for a month, which is what every session did
+ * unconditionally before the box existed.
  *
- * Not remembering is the default, and that is a tightening rather than a new
- * choice: every session used to persist for thirty days whether the person
- * wanted it or not, including on the shared machine at a branch counter where
- * the next person to open the browser inherited it. Somebody who wants the
- * convenience now asks for it.
+ * The default is to remember, and the form is where that is argued. The short
+ * version: this only governs what survives closing the browser, and the API
+ * signs an idle session out after fifteen minutes whatever the cookie says.
  *
  * The server's own limits are untouched and still win. The access token expires
  * on its own schedule, the refresh token has a fixed life at the API, and the
- * idle timeout signs an unattended session out regardless of what the cookie
- * says. A remembered session is one that survives closing the laptop, not one
- * that never ends.
+ * idle timeout applies to remembered and unremembered sessions alike. A
+ * remembered session is one that survives closing the laptop, not one that
+ * never ends.
  */
 export async function setSessionCookies(
   tokens: {
