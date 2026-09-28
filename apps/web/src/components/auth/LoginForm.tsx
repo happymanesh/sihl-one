@@ -94,10 +94,35 @@ export function LoginForm({ next }: { next?: string }) {
         </div>
       </div>
 
+      {/*
+        Unticked by default, and that is the point of having it.
+
+        Every session used to persist for a month whether or not anybody asked,
+        including on the shared machine at a branch counter. Left alone this is
+        now a session that ends with the browser; ticking it is a deliberate
+        choice to keep it for thirty days.
+      */}
+      <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+        <input
+          type="checkbox"
+          name="rememberMe"
+          className="h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
+        />
+        <span>
+          Keep me signed in
+          <span className="ml-1 text-xs text-[var(--color-text-subtle)]">
+            — not on a shared computer
+          </span>
+        </span>
+      </label>
+
       <SubmitButton />
 
       <p className="text-center text-xs text-[var(--color-text-subtle)]">
-        Five failed attempts will lock the account for 15 minutes.
+        {/* Mirrors AUTH_MAX_FAILED_ATTEMPTS and AUTH_LOCKOUT_MINUTES on the API.
+            Both are environment variables, so changing one there means changing
+            this line too — it is the only place the numbers are said out loud. */}
+        Ten failed attempts will lock the account for 15 minutes.
       </p>
     </form>
   );
@@ -118,6 +143,9 @@ function MfaStep({ state, next }: { state: LoginState; next?: string }) {
     <form action={answerAction} className="space-y-4" noValidate>
       <input type="hidden" name="challengeToken" value={state.challengeToken ?? ''} />
       <input type="hidden" name="next" value={next ?? state.next ?? ''} />
+      {/* The tick was made on the previous screen and the session it applies to
+          is this one. Carried rather than asked again. */}
+      <input type="hidden" name="rememberMe" value={state.rememberMe ? 'true' : ''} />
 
       <div>
         <h2 className="font-bold">Two-step verification</h2>

@@ -29,21 +29,46 @@ const baseOptions = {
   secure: isProduction,
 };
 
-export async function setSessionCookies(tokens: {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-}): Promise<void> {
+/** How long a remembered session survives without signing in again. */
+const REMEMBERED_DAYS = 30;
+
+/**
+ * Writes the session.
+ *
+ * `remember` decides whether the cookies outlive the browser. Without it they
+ * are session cookies — no `maxAge`, so they are dropped when the window
+ * closes. With it they persist for a month.
+ *
+ * Not remembering is the default, and that is a tightening rather than a new
+ * choice: every session used to persist for thirty days whether the person
+ * wanted it or not, including on the shared machine at a branch counter where
+ * the next person to open the browser inherited it. Somebody who wants the
+ * convenience now asks for it.
+ *
+ * The server's own limits are untouched and still win. The access token expires
+ * on its own schedule, the refresh token has a fixed life at the API, and the
+ * idle timeout signs an unattended session out regardless of what the cookie
+ * says. A remembered session is one that survives closing the laptop, not one
+ * that never ends.
+ */
+export async function setSessionCookies(
+  tokens: {
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+  },
+  remember = false,
+): Promise<void> {
   const store = await cookies();
 
   store.set(ACCESS_COOKIE, tokens.accessToken, {
     ...baseOptions,
-    maxAge: tokens.expiresIn,
+    ...(remember ? { maxAge: tokens.expiresIn } : {}),
   });
 
   store.set(REFRESH_COOKIE, tokens.refreshToken, {
     ...baseOptions,
-    maxAge: 60 * 60 * 24 * 30,
+    ...(remember ? { maxAge: 60 * 60 * 24 * REMEMBERED_DAYS } : {}),
   });
 }
 
