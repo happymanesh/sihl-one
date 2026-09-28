@@ -1,6 +1,7 @@
 import type { Route } from 'next';
 import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
+import { SessionExpiryWarning } from '@/components/shell/SessionExpiryWarning';
 import { logout } from '@/app/actions/auth';
 import { apiFetch } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
@@ -30,6 +31,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AppShell user={user} onLogout={logout} unreadNotifications={unread}>
       {children}
+      {/*
+        In the shell rather than on each page, so it survives navigation — a
+        watcher that remounted on every route change would restart its idle
+        clock each time and never fire.
+      */}
+      <SessionExpiryWarning />
     </AppShell>
   );
 }

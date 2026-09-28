@@ -7,6 +7,7 @@ import { MfaService } from './mfa.service';
 import { PasswordService } from './password.service';
 import { PrincipalService } from './principal.service';
 import { ServiceAccountService } from './service-account.service';
+import { SessionCleanupService } from './session-cleanup.service';
 import { TokenService } from './token.service';
 
 /**
@@ -24,6 +25,7 @@ import { TokenService } from './token.service';
     TokenService,
     PrincipalService,
     ServiceAccountService,
+    SessionCleanupService,
   ],
   exports: [
     AuthService,

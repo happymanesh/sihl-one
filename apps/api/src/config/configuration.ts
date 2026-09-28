@@ -50,6 +50,21 @@ const envSchema = z
      */
     AUTH_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().min(5).max(1440).default(15),
 
+    /**
+     * How often expired and revoked sessions are swept, and how long they are
+     * kept before that.
+     *
+     * Nothing deleted them before, so rows accumulated from the day the product
+     * shipped. It was harmless at this size and would not have stayed that way,
+     * and a longer idle timeout means rows turn over more slowly.
+     *
+     * Thirty days because a revoked session is evidence for as long as anyone
+     * might ask who signed in from where — the retained window covers a normal
+     * incident review, and the audit log keeps the answer permanently anyway.
+     */
+    SESSION_CLEANUP_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
+    SESSION_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
     RATE_LIMIT_TTL: z.coerce.number().int().min(1).default(60),
     RATE_LIMIT_LIMIT: z.coerce.number().int().min(1).default(120),
 
@@ -397,6 +412,8 @@ export interface AppConfig {
     pepper: string;
     maxFailedAttempts: number;
     lockoutMinutes: number;
+    sessionCleanupIntervalMs: number;
+    sessionRetentionDays: number;
     idleTimeoutMinutes: number;
   };
   rateLimit: { ttlSeconds: number; limit: number };
@@ -475,6 +492,8 @@ export function buildAppConfig(env: Env): AppConfig {
       maxFailedAttempts: env.AUTH_MAX_FAILED_ATTEMPTS,
       lockoutMinutes: env.AUTH_LOCKOUT_MINUTES,
       idleTimeoutMinutes: env.AUTH_IDLE_TIMEOUT_MINUTES,
+      sessionCleanupIntervalMs: env.SESSION_CLEANUP_INTERVAL_MINUTES * 60_000,
+      sessionRetentionDays: env.SESSION_RETENTION_DAYS,
     },
     rateLimit: { ttlSeconds: env.RATE_LIMIT_TTL, limit: env.RATE_LIMIT_LIMIT },
     support: { phone: env.SUPPORT_PHONE, email: env.SUPPORT_EMAIL },
