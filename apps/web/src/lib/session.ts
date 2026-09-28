@@ -18,6 +18,21 @@ import { cookies } from 'next/headers';
 export const ACCESS_COOKIE = 'sihl_access';
 export const REFRESH_COOKIE = 'sihl_refresh';
 
+/**
+ * A marker that this session was one the person asked to keep.
+ *
+ * It exists because a browser never tells the server how long a cookie it is
+ * sending was set to live. Without somewhere to write the choice down, the
+ * silent refresh that happens on the next visit has no idea whether it is
+ * renewing a session cookie or a persistent one — so it guesses, and the guess
+ * that was there rewrote every unremembered session as a thirty-day one on the
+ * first refresh. The opt-out survived exactly until the first page load.
+ *
+ * Carries no session value of its own. Holding it without the refresh token
+ * grants nothing.
+ */
+export const REMEMBER_COOKIE = 'sihl_remember';
+
 const isProduction = process.env.NODE_ENV === 'production';
 
 const baseOptions = {
@@ -69,17 +84,36 @@ export async function setSessionCookies(
     ...baseOptions,
     ...(remember ? { maxAge: 60 * 60 * 24 * REMEMBERED_DAYS } : {}),
   });
+
+  if (remember) {
+    store.set(REMEMBER_COOKIE, '1', {
+      ...baseOptions,
+      maxAge: 60 * 60 * 24 * REMEMBERED_DAYS,
+    });
+  } else {
+    // Deleted rather than left alone: the same browser may have been
+    // remembered yesterday, and a stale marker would make today's refresh
+    // persist a session the person has just declined to persist.
+    store.delete(REMEMBER_COOKIE);
+  }
 }
 
 export async function clearSessionCookies(): Promise<void> {
   const store = await cookies();
   store.delete(ACCESS_COOKIE);
   store.delete(REFRESH_COOKIE);
+  store.delete(REMEMBER_COOKIE);
 }
 
 export async function getAccessToken(): Promise<string | null> {
   const store = await cookies();
   return store.get(ACCESS_COOKIE)?.value ?? null;
+}
+
+/** Whether this session was one the person asked to keep. */
+export async function wasRemembered(): Promise<boolean> {
+  const store = await cookies();
+  return store.get(REMEMBER_COOKIE)?.value === '1';
 }
 
 export async function getRefreshToken(): Promise<string | null> {

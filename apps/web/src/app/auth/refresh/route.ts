@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { AuthTokens } from '@sihl-one/contracts';
 
-import { ACCESS_COOKIE, REFRESH_COOKIE, getRefreshToken } from '@/lib/session';
+import {
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  REMEMBER_COOKIE,
+  getRefreshToken,
+  wasRemembered,
+} from '@/lib/session';
 
 const API_BASE =
   process.env.API_INTERNAL_BASE_URL ??
@@ -63,26 +69,43 @@ export async function GET(request: Request): Promise<NextResponse> {
     secure: isProduction,
   };
 
+  /*
+    Renew the session the way it was created, not the way this route prefers.
+
+    A browser sends a cookie's value and nothing else — never how long it was
+    set to live — so without the marker this route cannot tell a session cookie
+    from a thirty-day one. It used to write `maxAge` on both unconditionally,
+    which turned the very first silent refresh of an unremembered session into a
+    persistent one. The person unticked the box and was remembered anyway, from
+    the next page load onwards.
+  */
+  const remembered = await wasRemembered();
+
   response.cookies.set(ACCESS_COOKIE, tokens.accessToken, {
     ...options,
-    maxAge: tokens.expiresIn,
+    ...(remembered ? { maxAge: tokens.expiresIn } : {}),
   });
   response.cookies.set(REFRESH_COOKIE, tokens.refreshToken, {
     ...options,
-    maxAge: 60 * 60 * 24 * 30,
+    ...(remembered ? { maxAge: 60 * 60 * 24 * 30 } : {}),
   });
+  // Re-stamped so the choice outlives a rotation rather than ageing out mid-week
+  // and quietly demoting a remembered session.
+  if (remembered) {
+    response.cookies.set(REMEMBER_COOKIE, '1', { ...options, maxAge: 60 * 60 * 24 * 30 });
+  }
 
   return response;
 }
 
-/** Clears both cookies and sends the user to sign in again. */
+/** Clears the session cookies and sends the user to sign in again. */
 function signOut(base: URL, next: string): NextResponse {
-  const target = new URL(
-    `/login?reason=expired&next=${encodeURIComponent(next)}`,
-    base,
-  );
+  const target = new URL(`/login?reason=expired&next=${encodeURIComponent(next)}`, base);
   const response = NextResponse.redirect(target);
   response.cookies.delete(ACCESS_COOKIE);
   response.cookies.delete(REFRESH_COOKIE);
+  // The marker goes too. Left behind it would outlive the session it described
+  // and answer for the next one, which may be somebody else's.
+  response.cookies.delete(REMEMBER_COOKIE);
   return response;
 }
