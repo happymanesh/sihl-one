@@ -3,6 +3,7 @@ import type { Route } from 'next';
 import type { LeadListItem } from '@sihl-one/contracts';
 
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ExportMenu } from '@/components/leads/ExportMenu';
 import { Icon } from '@/components/shell/Icon';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { LeadSelectionProvider } from '@/components/leads/LeadSelection';
@@ -250,12 +251,7 @@ export default async function LeadsPage({
             a screenful and walking out with the book are different acts, and
             the API audits the second.
           */}
-            {can(user, 'lead:export') ? (
-              <a href={`/api/leads/export${query}`} className="btn btn-outline" download>
-                <Icon name="file" size={16} />
-                Export CSV
-              </a>
-            ) : null}
+            {can(user, 'lead:export') ? <ExportMenu query={query} /> : null}
             {can(user, 'lead:create') ? (
               <Link href="/leads/new" className="btn btn-primary">
                 <Icon name="plus" size={16} />

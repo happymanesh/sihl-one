@@ -40,6 +40,7 @@ import {
   verifyOtpSchema,
   type ResendOtpInput,
   type VerifyOtpInput,
+  leadExportQuerySchema,
   leadQuerySchema,
   updateLeadSchema,
   type AssignLeadInput,
@@ -54,6 +55,7 @@ import {
   type CreateLeadInput,
   type InstaLeadInput,
   type LeadCaptureInput,
+  type LeadExportQuery,
   type LeadQuery,
   type UpdateLeadInput,
 } from '@sihl-one/contracts';
@@ -290,20 +292,29 @@ export class LeadsController {
   async exportCsv(
     @CurrentUser() user: AuthenticatedPrincipal,
     @ZodQuery(leadQuerySchema) query: LeadQuery,
+    @ZodQuery(leadExportQuerySchema) exportOptions: LeadExportQuery,
     @Res() response: Response,
   ): Promise<void> {
-    const { csv, rows } = await this.leads.exportCsv(user, query);
+    const { layout } = exportOptions;
+    const { csv, rows } = await this.leads.exportCsv(user, query, layout);
 
     await this.audit.record({
       action: 'EXPORT',
       resource: 'lead',
-      reason: `Lead list exported as CSV - ${rows} rows`,
-      changes: { rows, scope: user.dataScope, filters: query as never },
+      // The shape is part of what was taken. One row per lead and one row per
+      // product are different files from the same filter, and a compliance
+      // reader asking what left the building should not have to guess which.
+      reason: `Lead list exported as CSV (${layout}) - ${rows} rows`,
+      changes: { rows, layout, scope: user.dataScope, filters: query as never },
     });
 
     const stamp = istDayKey(new Date());
+    const suffix = layout === 'product' ? '-by-product' : '';
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    response.setHeader('Content-Disposition', `attachment; filename="sihl-leads-${stamp}.csv"`);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="sihl-leads${suffix}-${stamp}.csv"`,
+    );
     response.setHeader('X-Content-Type-Options', 'nosniff');
     // Never cached: the contents depend on who asked, and a shared cache
     // serving one person's scoped book to another is a data-protection

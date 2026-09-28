@@ -32,6 +32,7 @@ const PATHS: Record<string, string> = {
   chart: 'M4 20h16v2H2V2h2v18Zm3-3h3V9H7v8Zm5 0h3V5h-3v12Zm5 0h3v-5h-3v5Z',
   refresh:
     'M12 4a8 8 0 1 0 7.6 5.5h-2.15A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35A7.96 7.96 0 0 0 12 4Z',
+  'chevron-down': 'M7.4 9 12 13.6 16.6 9 18 10.4l-6 6-6-6L7.4 9Z',
 };
 
 export function Icon({

@@ -45,6 +45,10 @@ const FORWARDED = [
   'mobileVerified',
   'sortBy',
   'sortDir',
+  // Not a filter — it chooses the shape of the file, one row per lead or one
+  // row per lead per product. Forwarded by the same allow-list because the
+  // allow-list is how anything reaches the endpoint at all.
+  'layout',
 ] as const;
 
 export async function GET(request: Request): Promise<Response> {
@@ -76,11 +80,12 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const stamp = istDayKey();
+  const nameSuffix = incoming.get('layout') === 'product' ? '-by-product' : '';
   return new NextResponse(upstream.body, {
     status: 200,
     headers: {
       'Content-Type': upstream.headers.get('content-type') ?? 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="sihl-leads-${stamp}.csv"`,
+      'Content-Disposition': `attachment; filename="sihl-leads${nameSuffix}-${stamp}.csv"`,
       'X-Content-Type-Options': 'nosniff',
       // Never cached: the contents depend on who asked, and a shared cache
       // handing one person's scoped book to another is a reportable incident.

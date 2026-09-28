@@ -253,6 +253,25 @@ export const convertLeadSchema = z.object({
 });
 export type ConvertLeadInput = z.infer<typeof convertLeadSchema>;
 
+/**
+ * The two shapes the lead export comes in.
+ *
+ * `lead` is one row per lead, with every product it wants in one cell — the
+ * list as it looks on screen.
+ *
+ * `product` is one row per lead per product, so a lead interested in Equity and
+ * MTF appears twice. It exists because a semicolon-joined cell cannot be
+ * counted, pivoted or filtered in a spreadsheet without somebody splitting it by
+ * hand first — which is being done every month, by hand, with mistakes.
+ */
+export const LEAD_EXPORT_LAYOUTS = ['lead', 'product'] as const;
+export type LeadExportLayout = (typeof LEAD_EXPORT_LAYOUTS)[number];
+
+export const leadExportQuerySchema = z.object({
+  layout: z.enum(LEAD_EXPORT_LAYOUTS).default('lead'),
+});
+export type LeadExportQuery = z.infer<typeof leadExportQuerySchema>;
+
 export const leadQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().max(120).optional(),
   status: z

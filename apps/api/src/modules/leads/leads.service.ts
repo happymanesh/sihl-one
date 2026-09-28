@@ -44,6 +44,7 @@ import {
   type LeadProfileView,
   type UpdateLeadInput,
   type VerifyLeadMobileInput,
+  type LeadExportLayout,
 } from '@sihl-one/contracts';
 
 import { AuditService, diffRecords } from '../../common/audit.service';
@@ -1752,9 +1753,28 @@ export class LeadsService {
    * leads and nobody else's. The permission on the route decides *whether* a
    * person may export; this decides *what*, and the two must not be confused.
    */
+  /**
+   * The filtered list as CSV, in one of two shapes.
+   *
+   * `lead` is one row per lead, products in a single cell — the list as it
+   * appears on screen, and what somebody wants when they are looking at people.
+   *
+   * `product` is one row per lead *per product*, so a lead interested in Equity
+   * and MTF appears twice with one product named in each. That is what a
+   * spreadsheet needs before it can answer "how many Equity leads did the
+   * exhibition produce" — a semicolon-joined cell cannot be counted, pivoted or
+   * filtered without somebody splitting it by hand first, and they do, every
+   * month, and they make mistakes doing it.
+   *
+   * A lead interested in nothing still gets its row in `product`, with the
+   * product column empty. Dropping it would make the two exports disagree on
+   * how many leads exist, and the person reconciling them would be right to
+   * think something was broken.
+   */
   async exportCsv(
     user: AuthenticatedPrincipal,
     query: LeadQuery,
+    layout: LeadExportLayout = 'lead',
   ): Promise<{ csv: string; rows: number }> {
     const where = this.buildWhere(user, await this.withSubProducts(query));
 
@@ -1766,6 +1786,7 @@ export class LeadsService {
       // for everybody else. The row count is returned so the caller can say so.
       take: LEAD_EXPORT_MAX_ROWS,
       select: {
+        id: true,
         reference: true,
         firstName: true,
         lastName: true,
@@ -1787,6 +1808,47 @@ export class LeadsService {
       },
     });
 
+    /*
+      Remarks.
+
+      A lead has no remarks column — what people mean by it is the notes written
+      against it: what the visitor typed into "anything we should know", what
+      the rep added after the call, what came across in an imported file. Those
+      are `NOTE` activities, so they are gathered here in one query rather than
+      one per lead.
+
+      Newest first, because the current state of a conversation is what somebody
+      reading a spreadsheet wants, and capped so a lead with two years of call
+      notes cannot produce a cell that breaks the file open in Excel.
+    */
+    const notes = await this.prisma.activity.findMany({
+      where: {
+        entityType: 'LEAD',
+        entityId: { in: leads.map((lead) => lead.id) },
+        type: 'NOTE',
+        body: { not: null },
+      },
+      orderBy: { occurredAt: 'desc' },
+      select: { entityId: true, body: true },
+      // Bounded for the same reason the lead query is: an export of the whole
+      // book must not pull every note ever written along with it.
+      take: LEAD_EXPORT_MAX_ROWS * 4,
+    });
+
+    const REMARKS_MAX = 1000;
+    const remarksByLead = new Map<string, string>();
+    for (const note of notes) {
+      const existing = remarksByLead.get(note.entityId);
+      if (existing && existing.length >= REMARKS_MAX) continue;
+      const line = (note.body ?? '').replace(/\s+/g, ' ').trim();
+      if (!line) continue;
+      const merged = existing ? `${existing} | ${line}` : line;
+      remarksByLead.set(
+        note.entityId,
+        merged.length > REMARKS_MAX ? `${merged.slice(0, REMARKS_MAX - 1)}…` : merged,
+      );
+    }
+
     const header = [
       'Reference',
       'First name',
@@ -1798,7 +1860,10 @@ export class LeadsService {
       'Status',
       'Source',
       'Priority',
-      'Products',
+      // Singular in the per-product export, because each row now names one.
+      // A column headed "Products" holding exactly one value is how somebody
+      // ends up assuming the others were lost.
+      layout === 'product' ? 'Product' : 'Products',
       'Estimated value',
       'Owner',
       'Owner code',
@@ -1807,11 +1872,12 @@ export class LeadsService {
       'Created',
       'Last activity',
       'Next follow-up',
+      'Remarks',
     ];
 
     const asDate = (value: Date | null): string => (value ? istDayKey(value) : '');
 
-    const body = leads.map((lead) => [
+    const row = (lead: (typeof leads)[number], product: string): string[] => [
       lead.reference,
       lead.firstName,
       lead.lastName ?? '',
@@ -1822,7 +1888,7 @@ export class LeadsService {
       lead.status,
       lead.source,
       lead.priority,
-      (lead.productInterest ?? []).join('; '),
+      product,
       lead.estimatedValue ? lead.estimatedValue.toString() : '',
       lead.owner ? `${lead.owner.firstName} ${lead.owner.lastName}`.trim() : '',
       lead.owner?.employeeCode ?? '',
@@ -1831,7 +1897,22 @@ export class LeadsService {
       asDate(lead.createdAt),
       asDate(lead.lastActivityAt),
       asDate(lead.nextFollowUpAt),
-    ]);
+      // Last, because it is the only free-text column and the one most likely
+      // to be long. A wide cell in the middle pushes every dated column off the
+      // first screen of the spreadsheet.
+      remarksByLead.get(lead.id) ?? '',
+    ];
+
+    const body =
+      layout === 'product'
+        ? leads.flatMap((lead) => {
+            const products = lead.productInterest ?? [];
+            // The empty case is a row, not a gap. See the note on the method.
+            return products.length === 0
+              ? [row(lead, '')]
+              : products.map((product) => row(lead, product));
+          })
+        : leads.map((lead) => row(lead, (lead.productInterest ?? []).join('; ')));
 
     /*
       A byte-order mark, so Excel reads this as UTF-8.
@@ -1841,9 +1922,14 @@ export class LeadsService {
       them. Nobody reports it as a bug; they just retype the names.
     */
     const csv =
-      '\uFEFF' + [header, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+      '\uFEFF' +
+      [header, ...body].map((cells) => cells.map(csvCell).join(',')).join('\r\n') +
+      '\r\n';
 
-    return { csv, rows: leads.length };
+    // The row count is what the file contains, not how many leads it covers \u2014
+    // it is reported to the person downloading and written into the audit entry,
+    // and both of those are questions about the file.
+    return { csv, rows: body.length };
   }
 
   private buildWhere(user: AuthenticatedPrincipal, query: LeadQuery): Record<string, unknown> {
