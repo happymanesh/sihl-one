@@ -18,21 +18,6 @@ import { cookies } from 'next/headers';
 export const ACCESS_COOKIE = 'sihl_access';
 export const REFRESH_COOKIE = 'sihl_refresh';
 
-/**
- * A marker that this session was one the person asked to keep.
- *
- * It exists because a browser never tells the server how long a cookie it is
- * sending was set to live. Without somewhere to write the choice down, the
- * silent refresh that happens on the next visit has no idea whether it is
- * renewing a session cookie or a persistent one — so it guesses, and the guess
- * that was there rewrote every unremembered session as a thirty-day one on the
- * first refresh. The opt-out survived exactly until the first page load.
- *
- * Carries no session value of its own. Holding it without the refresh token
- * grants nothing.
- */
-export const REMEMBER_COOKIE = 'sihl_remember';
-
 const isProduction = process.env.NODE_ENV === 'production';
 
 const baseOptions = {
@@ -44,76 +29,33 @@ const baseOptions = {
   secure: isProduction,
 };
 
-/** How long a remembered session survives without signing in again. */
-const REMEMBERED_DAYS = 30;
-
-/**
- * Writes the session.
- *
- * `remember` decides whether the cookies outlive the browser. Without it they
- * are session cookies — no `maxAge`, so they are dropped when the window
- * closes. With it they persist for a month, which is what every session did
- * unconditionally before the box existed.
- *
- * The default is to remember, and the form is where that is argued. The short
- * version: this only governs what survives closing the browser, and the API
- * signs an idle session out after fifteen minutes whatever the cookie says.
- *
- * The server's own limits are untouched and still win. The access token expires
- * on its own schedule, the refresh token has a fixed life at the API, and the
- * idle timeout applies to remembered and unremembered sessions alike. A
- * remembered session is one that survives closing the laptop, not one that
- * never ends.
- */
-export async function setSessionCookies(
-  tokens: {
-    accessToken: string;
-    refreshToken: string;
-    expiresIn: number;
-  },
-  remember = false,
-): Promise<void> {
+export async function setSessionCookies(tokens: {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+}): Promise<void> {
   const store = await cookies();
 
   store.set(ACCESS_COOKIE, tokens.accessToken, {
     ...baseOptions,
-    ...(remember ? { maxAge: tokens.expiresIn } : {}),
+    maxAge: tokens.expiresIn,
   });
 
   store.set(REFRESH_COOKIE, tokens.refreshToken, {
     ...baseOptions,
-    ...(remember ? { maxAge: 60 * 60 * 24 * REMEMBERED_DAYS } : {}),
+    maxAge: 60 * 60 * 24 * 30,
   });
-
-  if (remember) {
-    store.set(REMEMBER_COOKIE, '1', {
-      ...baseOptions,
-      maxAge: 60 * 60 * 24 * REMEMBERED_DAYS,
-    });
-  } else {
-    // Deleted rather than left alone: the same browser may have been
-    // remembered yesterday, and a stale marker would make today's refresh
-    // persist a session the person has just declined to persist.
-    store.delete(REMEMBER_COOKIE);
-  }
 }
 
 export async function clearSessionCookies(): Promise<void> {
   const store = await cookies();
   store.delete(ACCESS_COOKIE);
   store.delete(REFRESH_COOKIE);
-  store.delete(REMEMBER_COOKIE);
 }
 
 export async function getAccessToken(): Promise<string | null> {
   const store = await cookies();
   return store.get(ACCESS_COOKIE)?.value ?? null;
-}
-
-/** Whether this session was one the person asked to keep. */
-export async function wasRemembered(): Promise<boolean> {
-  const store = await cookies();
-  return store.get(REMEMBER_COOKIE)?.value === '1';
 }
 
 export async function getRefreshToken(): Promise<string | null> {

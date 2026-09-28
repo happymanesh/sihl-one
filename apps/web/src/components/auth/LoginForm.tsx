@@ -94,37 +94,6 @@ export function LoginForm({ next }: { next?: string }) {
         </div>
       </div>
 
-      {/*
-        Ticked by default, which keeps today's behaviour and adds a way out of it.
-
-        The cautious instinct is to leave it clear, but the sum does not support
-        it. The box only decides what happens once the browser is closed — while
-        it is open the session persists either way — and the API signs an idle
-        session out after fifteen minutes regardless of any cookie. So the
-        exposure it removes is one person closing the browser and another
-        opening it on the same machine inside that quarter hour.
-
-        Set against that: every session has persisted for thirty days since the
-        product shipped, and clearing this by default would make everyone sign in
-        far more often for a risk the idle timeout already bounds. Ticked, nobody
-        is worse off than yesterday and the person at a shared counter can now
-        untick it — which is the line beside the label.
-      */}
-      <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-        <input
-          type="checkbox"
-          name="rememberMe"
-          defaultChecked
-          className="h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
-        />
-        <span>
-          Keep me signed in
-          <span className="ml-1 text-xs text-[var(--color-text-subtle)]">
-            — not on a shared computer
-          </span>
-        </span>
-      </label>
-
       <SubmitButton />
 
       <p className="text-center text-xs text-[var(--color-text-subtle)]">
@@ -152,9 +121,6 @@ function MfaStep({ state, next }: { state: LoginState; next?: string }) {
     <form action={answerAction} className="space-y-4" noValidate>
       <input type="hidden" name="challengeToken" value={state.challengeToken ?? ''} />
       <input type="hidden" name="next" value={next ?? state.next ?? ''} />
-      {/* The tick was made on the previous screen and the session it applies to
-          is this one. Carried rather than asked again. */}
-      <input type="hidden" name="rememberMe" value={state.rememberMe ? 'true' : ''} />
 
       <div>
         <h2 className="font-bold">Two-step verification</h2>

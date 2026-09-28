@@ -21,8 +21,6 @@ export interface LoginState {
   challengeToken?: string;
   /** Carried through the challenge step so the redirect still honours it. */
   next?: string;
-  /** Carried through the challenge step so the tick survives the second factor. */
-  rememberMe?: boolean;
 }
 
 export async function login(_previous: LoginState, formData: FormData): Promise<LoginState> {
@@ -70,17 +68,17 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
       status: 'mfa',
       challengeToken: response.challengeToken,
       next: readNext(formData) ?? undefined,
-      rememberMe: readRemember(formData),
     };
   }
 
-  await setSessionCookies(response.tokens, readRemember(formData));
+  await setSessionCookies(response.tokens);
 
-  const home = response.user.roles.includes('PARTNER')
-    ? '/partner'
-    : response.user.roles.includes('CUSTOMER')
-      ? '/portal'
-      : '/dashboard';
+  const home =
+    response.user.roles.includes('PARTNER')
+      ? '/partner'
+      : response.user.roles.includes('CUSTOMER')
+        ? '/portal'
+        : '/dashboard';
 
   const destination = (readNext(formData) ?? home) as Route;
 
@@ -90,24 +88,14 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
 }
 
 /**
- * Whether this sign-in asked to be remembered.
- *
- * Read from the form on both steps, because a session that needed a second
- * factor is still the session the person ticked the box for. Carried through
- * the challenge in a hidden field alongside `next`.
- */
-function readRemember(formData: FormData): boolean {
-  const value = formData.get('rememberMe');
-  return value === 'on' || value === 'true';
-}
-
-/**
  * Only same-site paths are accepted: an unvalidated `next` is an open redirect,
  * and this one fires immediately after a successful sign-in.
  */
 function readNext(formData: FormData): string | null {
   const requested = formData.get('next');
-  return typeof requested === 'string' && requested.startsWith('/') && !requested.startsWith('//')
+  return typeof requested === 'string' &&
+    requested.startsWith('/') &&
+    !requested.startsWith('//')
     ? requested
     : null;
 }
@@ -122,7 +110,6 @@ function readNext(formData: FormData): string | null {
 export async function answerMfa(_previous: LoginState, formData: FormData): Promise<LoginState> {
   const challengeToken = String(formData.get('challengeToken') ?? '');
   const next = readNext(formData);
-  const rememberMe = readRemember(formData);
 
   const parsed = mfaAnswerSchema.safeParse({
     challengeToken,
@@ -134,7 +121,6 @@ export async function answerMfa(_previous: LoginState, formData: FormData): Prom
       status: 'mfa',
       challengeToken,
       next: next ?? undefined,
-      rememberMe,
       message: 'Enter the six-digit code from your authenticator app, or a recovery code.',
     };
   }
@@ -157,14 +143,13 @@ export async function answerMfa(_previous: LoginState, formData: FormData): Prom
             status: 'mfa',
             challengeToken,
             next: next ?? undefined,
-            rememberMe,
             message: error.problem.detail ?? error.problem.title,
           };
     }
     return { status: 'error', message: 'We could not reach the SIHL ONE service.' };
   }
 
-  await setSessionCookies(response.tokens, rememberMe);
+  await setSessionCookies(response.tokens);
 
   const home = response.user.roles.includes('PARTNER')
     ? '/partner'
