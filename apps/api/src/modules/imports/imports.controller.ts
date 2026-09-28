@@ -19,7 +19,7 @@ import {
   type ImportMapping,
 } from '@sihl-one/contracts';
 
-import { CurrentUser, RequirePermissions } from '../../common/decorators';
+import { CurrentUser, RequireAnyPermission } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ApiZodBody, IdParamPipe, ZodBody, ZodValidationPipe } from '../../common/zod';
 import { ImportsService } from './imports.service';
@@ -41,21 +41,21 @@ export class ImportsController {
   constructor(private readonly imports: ImportsService) {}
 
   @Get()
-  @RequirePermissions('lead:import')
+  @RequireAnyPermission('lead:import', 'event:import')
   @ApiOperation({ summary: 'Recent import batches' })
   list(@CurrentUser() user: AuthenticatedPrincipal) {
     return this.imports.listBatches(user);
   }
 
   @Get(':id')
-  @RequirePermissions('lead:import')
+  @RequireAnyPermission('lead:import', 'event:import')
   @ApiOperation({ summary: 'One import batch with its rows and provenance declaration' })
   getBatch(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
     return this.imports.getBatch(user, id);
   }
 
   @Post('parse')
-  @RequirePermissions('lead:import')
+  @RequireAnyPermission('lead:import', 'event:import')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_IMPORT_BYTES, files: 1 } }))
   @ApiConsumes('multipart/form-data')
@@ -114,7 +114,7 @@ export class ImportsController {
   }
 
   @Post(':id/validate')
-  @RequirePermissions('lead:import')
+  @RequireAnyPermission('lead:import', 'event:import')
   @ApiOperation({
     summary: 'Step 2 — apply the mapping and preview every row',
     description:
@@ -131,7 +131,7 @@ export class ImportsController {
   }
 
   @Post(':id/commit')
-  @RequirePermissions('lead:import')
+  @RequireAnyPermission('lead:import', 'event:import')
   @ApiOperation({
     summary: 'Step 3 — create the leads',
     description:

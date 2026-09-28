@@ -112,8 +112,22 @@ export const IMPORTABLE_FIELDS = [
   'productInterest',
   'estimatedValue',
   'notes',
+  /*
+    The two columns a paper registration needs, and nothing else does.
+
+    When the network drops at a stall the rep writes names in a notebook and
+    types them up afterwards, so the file has to carry two things the QR would
+    otherwise have supplied: when the person actually came to the desk, and
+    whose desk it was. Both are ignored outside an event import — a general
+    lead file has no event for them to mean anything against.
+  */
+  'capturedAt',
+  'employeeCode',
 ] as const;
 export type ImportableField = (typeof IMPORTABLE_FIELDS)[number];
+
+/** Columns that only carry meaning when the batch is attributed to an event. */
+export const EVENT_ONLY_FIELDS: readonly ImportableField[] = ['capturedAt', 'employeeCode'];
 
 /**
  * Header aliases for auto-mapping.
@@ -124,17 +138,84 @@ export type ImportableField = (typeof IMPORTABLE_FIELDS)[number];
  * on `mobile` writes a phone number into `pan`.
  */
 const FIELD_ALIASES: Record<ImportableField, string[]> = {
-  firstName: ['first name', 'firstname', 'fname', 'given name', 'name', 'full name', 'client name', 'lead name', 'customer name'],
+  firstName: [
+    'first name',
+    'firstname',
+    'fname',
+    'given name',
+    'name',
+    'full name',
+    'client name',
+    'lead name',
+    'customer name',
+  ],
   lastName: ['last name', 'lastname', 'lname', 'surname', 'family name'],
-  mobile: ['mobile', 'mobile no', 'mobile number', 'phone', 'phone no', 'phone number', 'contact', 'contact no', 'contact number', 'cell', 'whatsapp'],
+  mobile: [
+    'mobile',
+    'mobile no',
+    'mobile number',
+    'phone',
+    'phone no',
+    'phone number',
+    'contact',
+    'contact no',
+    'contact number',
+    'cell',
+    'whatsapp',
+  ],
   email: ['email', 'email id', 'e-mail', 'email address', 'mail'],
   pan: ['pan', 'pan no', 'pan number', 'pan card'],
   city: ['city', 'town', 'location', 'place'],
   state: ['state', 'province', 'region'],
   pincode: ['pincode', 'pin code', 'pin', 'postal code', 'zip', 'zipcode'],
-  productInterest: ['product', 'products', 'interest', 'product interest', 'interested in', 'segment'],
-  estimatedValue: ['value', 'estimated value', 'potential', 'aum', 'investment', 'amount', 'ticket size'],
+  productInterest: [
+    'product',
+    'products',
+    'interest',
+    'product interest',
+    'interested in',
+    'segment',
+  ],
+  estimatedValue: [
+    'value',
+    'estimated value',
+    'potential',
+    'aum',
+    'investment',
+    'amount',
+    'ticket size',
+  ],
   notes: ['notes', 'note', 'remarks', 'comment', 'comments', 'description'],
+  capturedAt: [
+    'date time',
+    'datetime',
+    'date and time',
+    'date',
+    'time',
+    'captured at',
+    'captured',
+    'registered at',
+    'registered on',
+    'registration time',
+    'timestamp',
+    'visited at',
+    'when',
+  ],
+  // No bare "code": a file about products or branches has a "code" column too,
+  // and mapping that onto a person's employee code assigns the whole file to
+  // nobody in particular.
+  employeeCode: [
+    'employee code',
+    'employee id',
+    'emp code',
+    'emp id',
+    'employee',
+    'rep code',
+    'staff code',
+    'executive code',
+    'captured by',
+    'taken by',
+  ],
 };
 
 /**
@@ -178,16 +259,36 @@ export function suggestMapping(headers: readonly string[]): Array<ImportableFiel
  * guessed at, and the row still imports.
  */
 const PRODUCT_ALIASES: Record<string, string> = {
-  equity: 'EQUITY', equities: 'EQUITY', cash: 'EQUITY', stocks: 'EQUITY', shares: 'EQUITY',
-  fno: 'DERIVATIVES', 'f&o': 'DERIVATIVES', derivative: 'DERIVATIVES', derivatives: 'DERIVATIVES',
-  futures: 'DERIVATIVES', options: 'DERIVATIVES',
-  commodity: 'COMMODITY', commodities: 'COMMODITY', mcx: 'COMMODITY',
-  currency: 'CURRENCY', forex: 'CURRENCY',
-  mf: 'MUTUAL_FUNDS', 'mutual fund': 'MUTUAL_FUNDS', 'mutual funds': 'MUTUAL_FUNDS', sip: 'MUTUAL_FUNDS',
-  ipo: 'IPO', ipos: 'IPO',
-  pms: 'PMS', aif: 'AIF',
-  insurance: 'INSURANCE', bond: 'BONDS', bonds: 'BONDS',
-  nri: 'NRI', algo: 'ALGO', algos: 'ALGO',
+  equity: 'EQUITY',
+  equities: 'EQUITY',
+  cash: 'EQUITY',
+  stocks: 'EQUITY',
+  shares: 'EQUITY',
+  fno: 'DERIVATIVES',
+  'f&o': 'DERIVATIVES',
+  derivative: 'DERIVATIVES',
+  derivatives: 'DERIVATIVES',
+  futures: 'DERIVATIVES',
+  options: 'DERIVATIVES',
+  commodity: 'COMMODITY',
+  commodities: 'COMMODITY',
+  mcx: 'COMMODITY',
+  currency: 'CURRENCY',
+  forex: 'CURRENCY',
+  mf: 'MUTUAL_FUNDS',
+  'mutual fund': 'MUTUAL_FUNDS',
+  'mutual funds': 'MUTUAL_FUNDS',
+  sip: 'MUTUAL_FUNDS',
+  ipo: 'IPO',
+  ipos: 'IPO',
+  pms: 'PMS',
+  aif: 'AIF',
+  insurance: 'INSURANCE',
+  bond: 'BONDS',
+  bonds: 'BONDS',
+  nri: 'NRI',
+  algo: 'ALGO',
+  algos: 'ALGO',
 };
 
 export function parseProductInterest(value: string | undefined): Array<string> {
@@ -209,7 +310,10 @@ export function parseProductInterest(value: string | undefined): Array<string> {
 /** Money as typed by humans: "₹12,50,000", "12.5 lakh", "1500000". */
 export function parseImportedAmount(value: string | undefined): number | null {
   if (!value) return null;
-  const cleaned = value.trim().toLowerCase().replace(/[₹,\s]/g, '');
+  const cleaned = value
+    .trim()
+    .toLowerCase()
+    .replace(/[₹,\s]/g, '');
   if (!cleaned) return null;
 
   const lakh = /^([\d.]+)(lakh|lac|l)$/.exec(cleaned);
@@ -220,6 +324,111 @@ export function parseImportedAmount(value: string | undefined): number | null {
 
   const plain = Number(cleaned);
   return Number.isFinite(plain) && plain >= 0 ? Math.round(plain) : null;
+}
+
+/**
+ * A date and time as an Indian person types it into a spreadsheet.
+ *
+ * Read in IST, always and explicitly. The servers run UTC, so `new Date("26/09/2026
+ * 14:30")` either fails outright or resolves half past two in the *morning* —
+ * and a capture time five and a half hours adrift is one that falls outside its
+ * own event and gets the row rejected.
+ *
+ * Day-first, because that is what a form filled in at an Indian desk means.
+ * `03/04/2026` is the third of April here and nothing else; guessing American
+ * order silently moves a third of every file to the wrong day.
+ *
+ * `hadTime` is reported rather than papered over. A cell holding only a date
+ * says which day somebody came, not which minute, and the caller can hold it to
+ * the looser standard it actually meets.
+ */
+export function parseImportedDateTime(
+  value: string | undefined,
+): { at: Date; hadTime: boolean } | null {
+  const raw = (value ?? '').trim();
+  if (!raw) return null;
+
+  const IST = '+05:30';
+  const pad = (n: string) => n.padStart(2, '0');
+
+  // ISO first: 2026-09-26, 2026-09-26 14:30, 2026-09-26T14:30:00
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(raw);
+  if (iso) {
+    const [, y, m, d, hh, mm, ss] = iso;
+    const hadTime = hh !== undefined;
+    const at = new Date(
+      `${y}-${pad(m!)}-${pad(d!)}T${pad(hh ?? '12')}:${mm ?? '00'}:${ss ?? '00'}${IST}`,
+    );
+    return Number.isNaN(at.getTime()) ? null : { at, hadTime };
+  }
+
+  // Day-first: 26/09/2026, 26-9-26 14:30, 26.09.2026 2:30 pm
+  const dmy =
+    // Four-digit year first in the alternation: `\d{2}` would otherwise match
+    // the "20" of 2026 and leave "26 14:30" to be read as the time.
+    /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4}|\d{2})(?:[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?m\.?)?)?/i.exec(
+      raw,
+    );
+  if (!dmy) return null;
+
+  const [, d, m, yRaw, hRaw, mm, ss, meridiem] = dmy;
+  // A two-digit year in a file typed this year is this century.
+  const year = yRaw!.length === 2 ? `20${yRaw}` : yRaw!;
+  const month = Number(m);
+  const day = Number(d);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const hadTime = hRaw !== undefined;
+  let hour = Number(hRaw ?? '12');
+  if (meridiem) {
+    const pm = /^p/i.test(meridiem);
+    if (hour === 12) hour = pm ? 12 : 0;
+    else if (pm) hour += 12;
+  }
+  if (hour > 23) return null;
+
+  const at = new Date(
+    `${year}-${pad(m!)}-${pad(d!)}T${pad(String(hour))}:${mm ?? '00'}:${ss ?? '00'}${IST}`,
+  );
+  return Number.isNaN(at.getTime()) ? null : { at, hadTime };
+}
+
+/**
+ * How long after an event its registrations may still be typed up.
+ *
+ * Five days is long enough for a weekend event to be written up on the Monday,
+ * and short enough that the file is still somebody's own notebook rather than a
+ * list that has been sitting in a drawer acquiring rows from elsewhere. After
+ * it closes the general import still exists, with the declaration that goes
+ * with it — the window narrows who may do this unattended, not whether the
+ * data can ever arrive.
+ */
+export const EVENT_IMPORT_WINDOW_DAYS = 5;
+
+/** The moment an event stops accepting typed-up registrations. */
+export function eventImportClosesAt(event: { startsAt: Date; endsAt: Date | null }): Date {
+  const from = event.endsAt ?? event.startsAt;
+  return new Date(from.getTime() + EVENT_IMPORT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/** Whether that window is still open. */
+export function eventImportOpen(
+  event: { startsAt: Date; endsAt: Date | null },
+  now: Date = new Date(),
+): boolean {
+  return now <= eventImportClosesAt(event);
+}
+
+/** An event offered in the upload screen's picker. */
+export interface EventImportTarget {
+  id: string;
+  name: string;
+  code: string;
+  venue: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  /** Shown beside each option, because "why is mine not listed" is the question. */
+  uploadsCloseAt: string;
 }
 
 /**
@@ -276,11 +485,7 @@ export type ImportSourceOrigin = (typeof IMPORT_SOURCE_ORIGINS)[number];
 
 export const importDeclarationSchema = z.object({
   origin: z.enum(IMPORT_SOURCE_ORIGINS),
-  suppliedBy: z
-    .string()
-    .trim()
-    .min(2, 'Say who supplied this data')
-    .max(160),
+  suppliedBy: z.string().trim().min(2, 'Say who supplied this data').max(160),
   description: z
     .string()
     .trim()
@@ -303,12 +508,31 @@ export const importMappingSchema = z.object({
   source: codeSchema.default('IMPORT'),
   /** Optional campaign to attribute the whole batch to (event imports). */
   campaignId: idSchema.optional(),
+  /**
+   * The event every row in this file was captured at.
+   *
+   * Its presence changes what the batch *is*. With it, each row becomes a
+   * registration at that event — attributed to it, counted in its totals,
+   * credited to the rep named in the row — and the `capturedAt` and
+   * `employeeCode` columns start to mean something. Without it they are
+   * ignored, because there is nothing for them to be relative to.
+   *
+   * It is also what someone holding only `event:import` is confined to: no
+   * event, no import.
+   */
+  eventId: idSchema.optional(),
   /** Assign every imported lead to one owner, or leave to the rules engine. */
   ownerId: idSchema.optional(),
 });
 export type ImportMapping = z.infer<typeof importMappingSchema>;
 
-export const IMPORT_ROW_STATUSES = ['VALID', 'INVALID', 'DUPLICATE', 'IMPORTED', 'SKIPPED'] as const;
+export const IMPORT_ROW_STATUSES = [
+  'VALID',
+  'INVALID',
+  'DUPLICATE',
+  'IMPORTED',
+  'SKIPPED',
+] as const;
 export type ImportRowStatus = (typeof IMPORT_ROW_STATUSES)[number];
 
 export const commitImportSchema = z.object({

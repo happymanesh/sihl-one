@@ -1,20 +1,25 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
+  eventImportClosesAt,
+  eventImportOpen,
   findMatches,
   indianMobileSchema,
   panSchema,
   parseDelimited,
   parseImportedAmount,
+  parseImportedDateTime,
   parseProductInterest,
   scoreLead,
   splitFullName,
   suggestDecision,
   suggestMapping,
+  EVENT_IMPORT_WINDOW_DAYS,
   type CommitImportInput,
   type ImportDeclaration,
   type ImportMapping,
@@ -23,6 +28,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
+import { istDayKey } from '../../common/ist-day';
 import { OutboxService } from '../../common/outbox.service';
 import { ReferenceService } from '../../common/reference.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
@@ -31,6 +37,31 @@ import { AssignmentService } from '../assignment/assignment.service';
 
 /** Guard against someone uploading a million-row file and taking the API down. */
 const MAX_IMPORT_ROWS = 5000;
+
+/** "Fri 26 Sep, 14:30" in the timezone the events are run in, for error text. */
+const IST_STAMP = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Asia/Kolkata',
+});
+
+/**
+ * Everything an event-attributed import needs to judge a row.
+ *
+ * Resolved once per validate or commit rather than per row: the event, the
+ * window it closes in, and the employee codes that may appear in the file. A
+ * lookup per row would turn a 500-row file into 500 round-trips for data that
+ * cannot change while the loop runs.
+ */
+interface EventImportContext {
+  event: { id: string; name: string; code: string; startsAt: Date; endsAt: Date | null };
+  /** Employee code (upper-cased) to the user it names. */
+  staffByCode: Map<string, { id: string; orgUnitId: string | null; fullName: string }>;
+}
 
 @Injectable()
 export class ImportsService {
@@ -150,6 +181,10 @@ export class ImportsService {
       });
     }
 
+    // Resolved before anything is judged: it decides whether this caller may
+    // import at all, and every row is measured against the event it returns.
+    const context = await this.resolveEventContext(user, mapping);
+
     const rows = await this.prisma.leadImportRow.findMany({
       where: { batchId },
       orderBy: { rowNumber: 'asc' },
@@ -171,7 +206,7 @@ export class ImportsService {
 
     for (const row of rows) {
       const cells = row.raw as string[];
-      const { mapped, errors } = this.mapAndValidate(cells, mapping);
+      const { mapped, errors } = this.mapAndValidate(cells, mapping, context);
 
       let status: 'VALID' | 'INVALID' | 'DUPLICATE' = 'VALID';
       let duplicateOf: ImportRowPreview['duplicateOf'] = null;
@@ -203,18 +238,42 @@ export class ImportsService {
         } else {
           if (mobile) seenInFile.set(mobile, row.rowNumber);
 
-          const matches = findMatches(
-            {
-              firstName: mapped.firstName ?? '',
-              lastName: mapped.lastName,
-              mobile: mapped.mobile,
-              email: mapped.email,
-              pan: mapped.pan,
-              city: mapped.city,
-            },
-            candidates,
-            1,
-          );
+          /*
+            An event import matches on the mobile number and nothing else.
+
+            The fuzzy matcher earns its keep on a bought list of five hundred
+            strangers, where a name and a city are most of what you have. At a
+            stall it works against you: two visitors who share a surname are an
+            ordinary morning, not a duplicate, and a rep typing up a notebook
+            has no way to tell the screen it is wrong except by ticking through
+            every row.
+
+            The number is the thing that actually decides it. Someone who
+            registered on the QR and was also written in the notebook has the
+            same ten digits in both, and that is the duplicate worth catching.
+          */
+          const matches = context
+            ? candidates
+                .filter((candidate) => mobile && candidate.mobile === mobile)
+                .slice(0, 1)
+                .map((candidate) => ({
+                  candidate,
+                  confidence: 'DEFINITE' as const,
+                  score: 100,
+                  signals: [{ label: 'Same mobile number' }],
+                }))
+            : findMatches(
+                {
+                  firstName: mapped.firstName ?? '',
+                  lastName: mapped.lastName,
+                  mobile: mapped.mobile,
+                  email: mapped.email,
+                  pan: mapped.pan,
+                  city: mapped.city,
+                },
+                candidates,
+                1,
+              );
 
           const best = matches[0];
           if (best && (best.confidence === 'DEFINITE' || best.confidence === 'PROBABLE')) {
@@ -262,9 +321,7 @@ export class ImportsService {
             ? 'SKIP'
             : status === 'DUPLICATE'
               ? suggestDecision(
-                  duplicateOf
-                    ? ({ confidence: duplicateOf.confidence } as never)
-                    : undefined,
+                  duplicateOf ? ({ confidence: duplicateOf.confidence } as never) : undefined,
                 )
               : 'CREATE',
       });
@@ -314,6 +371,17 @@ export class ImportsService {
     }
 
     const mapping = batch.mapping as unknown as ImportMapping;
+
+    /*
+      Resolved again here, not carried from validate.
+
+      Between the two steps the window can close, the event can be deleted and
+      the caller's grant can be withdrawn. A check whose answer was cached at
+      validate time would let a batch reviewed at two minutes to midnight commit
+      at ten past.
+    */
+    const context = await this.resolveEventContext(user, mapping);
+
     const overrides = new Map(input.decisions.map((entry) => [entry.rowNumber, entry.decision]));
 
     const rows = await this.prisma.leadImportRow.findMany({
@@ -338,8 +406,17 @@ export class ImportsService {
       }
 
       try {
-        const leadId = await this.createLeadFromRow(user, batch.id, row, mapping, {
-          markMobileVerified: input.markMobileVerified,
+        const leadId = await this.createLeadFromRow(user, batch.id, row, mapping, context, {
+          /*
+            Never verified on an event upload, whatever the box said.
+
+            These are names off a notepad. Nobody proved the number — that is
+            precisely why they are being typed up instead of having arrived
+            through the QR and an OTP. Ticking them verified would put an
+            unearned mark against every row and make the unverified rate, which
+            is the only measure of whether reps are reaching people, meaningless.
+          */
+          markMobileVerified: context ? false : input.markMobileVerified,
           assignToUserId: input.assignToUserId,
         });
         imported += 1;
@@ -476,9 +553,101 @@ export class ImportsService {
 
   // -------------------------------------------------------------------------
 
+  /**
+   * Decides what this caller's grant is worth, and loads what an event import
+   * needs to judge its rows.
+   *
+   * This is where `event:import` is confined. The guard admits the holder to the
+   * pipeline; here they are held to the one thing that grant is for — an event
+   * they can already see, still inside its window. Without an event they are
+   * refused outright, which is what stops the narrow grant becoming a way to
+   * bring any file at all into SIHL.
+   *
+   * The event's visibility is checked by the same rule the events list uses: the
+   * branch chain the principal carries, plus events with no branch at all. A
+   * rep cannot type up registrations for another region's exhibition.
+   */
+  private async resolveEventContext(
+    user: AuthenticatedPrincipal,
+    mapping: ImportMapping,
+  ): Promise<EventImportContext | null> {
+    const mayImportAnything = user.permissions.includes('lead:import');
+
+    if (!mapping.eventId) {
+      if (mayImportAnything) return null;
+      throw new ForbiddenException({
+        title: 'Choose an event',
+        detail:
+          'Your access covers registrations taken at an event. Pick the event this file belongs to.',
+      });
+    }
+
+    const reach = mayImportAnything
+      ? {}
+      : {
+          OR: [
+            { orgUnitId: { in: (user.orgUnitPath ?? '').split('/').filter(Boolean) } },
+            { orgUnitId: null },
+          ],
+        };
+
+    const event = await this.prisma.event.findFirst({
+      where: { id: mapping.eventId, deletedAt: null, ...reach },
+      select: { id: true, name: true, code: true, startsAt: true, endsAt: true },
+    });
+    // Not found rather than forbidden, deliberately: the same answer an id that
+    // does not exist gets, so this cannot be used to discover which events other
+    // branches are running.
+    if (!event) throw new NotFoundException({ title: 'Event not found' });
+
+    if (!eventImportOpen(event)) {
+      throw new BadRequestException({
+        title: 'That event is closed for uploads',
+        detail:
+          `Registrations can be typed up for ${EVENT_IMPORT_WINDOW_DAYS} days after an event. ` +
+          `${event.name} closed on ${IST_STAMP.format(eventImportClosesAt(event))}.`,
+      });
+    }
+
+    /*
+      Every employee code, not only the importer's.
+
+      One rep usually types up the whole stall's notebook, so the file names
+      colleagues. Loading the lot lets a row be credited to whoever actually
+      took it rather than to whoever did the typing.
+    */
+    const staff = await this.prisma.user.findMany({
+      // Suspended, locked and disabled codes are left out on purpose: a lead
+      // credited to someone who no longer works here is a lead nobody calls.
+      // INVITED counts — a new rep's code is printed on their badge and used at
+      // the stall before they have ever signed in.
+      where: {
+        employeeCode: { not: null },
+        deletedAt: null,
+        status: { in: ['ACTIVE', 'INVITED'] },
+      },
+      select: { id: true, employeeCode: true, firstName: true, lastName: true, orgUnitId: true },
+    });
+
+    const staffByCode = new Map(
+      staff.map((member) => [
+        (member.employeeCode ?? '').trim().toUpperCase(),
+        {
+          id: member.id,
+          orgUnitId: member.orgUnitId,
+          fullName: `${member.firstName} ${member.lastName}`.trim(),
+        },
+      ]),
+    );
+
+    return { event, staffByCode };
+  }
+
   private mapAndValidate(
     cells: string[],
     mapping: ImportMapping,
+    /** Present only for an event import; the two extra columns mean nothing without it. */
+    context: EventImportContext | null,
   ): { mapped: Record<string, string | null>; errors: string[] } {
     const mapped: Record<string, string | null> = {};
     const errors: string[] = [];
@@ -523,6 +692,68 @@ export class ImportsService {
     }
 
     if (mapped.pincode && !/^[1-9]\d{5}$/.test(mapped.pincode)) delete mapped.pincode;
+
+    if (!context) {
+      // Outside an event these two have nothing to be relative to. Dropped
+      // rather than rejected: a file that happens to carry a date column should
+      // still import as an ordinary lead list.
+      delete mapped.capturedAt;
+      delete mapped.employeeCode;
+      return { mapped, errors };
+    }
+
+    /*
+      When they came to the desk.
+
+      Held to the event's own dates, because that is the whole claim the column
+      makes. A row stamped a week before the exhibition is not a registration
+      taken at it, and letting it through would put a lead on the event that
+      never attended — which is the one number the stall is judged on.
+
+      A cell carrying only a date is held to the day rather than the minute. It
+      says which day somebody came and does not pretend to say more, so
+      demanding it fall between the opening and closing times would reject
+      honest rows for a precision they never claimed.
+    */
+    if (mapped.capturedAt) {
+      const parsed = parseImportedDateTime(mapped.capturedAt);
+      if (!parsed) {
+        errors.push(`Date "${mapped.capturedAt}" could not be read — use DD/MM/YYYY HH:MM`);
+      } else {
+        const { event } = context;
+        const opens = event.startsAt;
+        const closes = event.endsAt ?? event.startsAt;
+        const within = parsed.hadTime
+          ? parsed.at >= opens && parsed.at <= closes
+          : istDayKey(parsed.at) >= istDayKey(opens) && istDayKey(parsed.at) <= istDayKey(closes);
+
+        if (!within) {
+          errors.push(
+            `${IST_STAMP.format(parsed.at)} is outside ${event.name} ` +
+              `(${IST_STAMP.format(opens)} to ${IST_STAMP.format(closes)})`,
+          );
+        } else {
+          mapped.capturedAt = parsed.at.toISOString();
+        }
+      }
+    }
+
+    /*
+      Whose desk it was.
+
+      A code nobody answers to is an error rather than a shrug. Silently
+      dropping it would leave the row unassigned and looking deliberate, and
+      nobody would ever find out the file had a typo in it — whereas an
+      unassigned lead somebody meant to own is a lead that never gets called.
+    */
+    if (mapped.employeeCode) {
+      const code = mapped.employeeCode.trim().toUpperCase();
+      if (!context.staffByCode.has(code)) {
+        errors.push(`Employee code "${mapped.employeeCode}" does not match anyone`);
+      } else {
+        mapped.employeeCode = code;
+      }
+    }
 
     return { mapped, errors };
   }
@@ -610,32 +841,56 @@ export class ImportsService {
     batchId: string,
     row: { rowNumber: number; mapped: unknown },
     mapping: ImportMapping,
+    context: EventImportContext | null,
     options: { markMobileVerified: boolean; assignToUserId?: string },
   ): Promise<string> {
     const mapped = row.mapped as Record<string, string | undefined>;
     const productInterest = parseProductInterest(mapped.productInterest);
     const estimatedValue = parseImportedAmount(mapped.estimatedValue);
 
-    // Routing goes through the same engine the website and events use.
-    const routed = options.assignToUserId
-      ? { ownerId: options.assignToUserId, ruleId: null }
-      : mapping.ownerId
-      ? { ownerId: mapping.ownerId, ruleId: null }
-      : await this.assignment.resolveOwner({
-          source: mapping.source,
-          productInterest,
-          city: mapped.city ?? null,
-          state: mapped.state ?? null,
-          campaignId: mapping.campaignId ?? null,
-        });
+    /*
+      Who took this registration, from the code in the row.
+
+      Both owner and capturer, and for the same reason the QR sets both: the rep
+      standing at the desk is the one who should call them back, and the credit
+      for the capture belongs to them even if the lead is handed on tomorrow.
+    */
+    const capturedBy = mapped.employeeCode
+      ? (context?.staffByCode.get(mapped.employeeCode) ?? null)
+      : null;
+
+    /*
+      A blank code stays unowned, and does not fall through to the rules engine.
+
+      A row with nobody's code against it is a visitor nobody claimed, and the
+      right answer is the same one the common QR gives: leave it unassigned for
+      a manager to distribute. Routing it would hand the whole unclaimed half of
+      a notebook to whoever the rules happen to pick, which reads as an
+      allocation somebody made on purpose.
+    */
+    const routed = context
+      ? { ownerId: capturedBy?.id ?? null, ruleId: null }
+      : options.assignToUserId
+        ? { ownerId: options.assignToUserId, ruleId: null }
+        : mapping.ownerId
+          ? { ownerId: mapping.ownerId, ruleId: null }
+          : await this.assignment.resolveOwner({
+              source: mapping.source,
+              productInterest,
+              city: mapped.city ?? null,
+              state: mapped.state ?? null,
+              campaignId: mapping.campaignId ?? null,
+            });
 
     // The importer is the fallback owner: an imported lead nobody owns is a
-    // lead nobody calls.
-    const ownerId = routed.ownerId ?? user.id;
-    const owner = await this.prisma.user.findUnique({
-      where: { id: ownerId },
-      select: { orgUnitId: true },
-    });
+    // lead nobody calls. Not so on an event upload, where unowned is an answer.
+    const ownerId = context ? routed.ownerId : (routed.ownerId ?? user.id);
+    const owner = ownerId
+      ? await this.prisma.user.findUnique({
+          where: { id: ownerId },
+          select: { orgUnitId: true },
+        })
+      : null;
 
     const reference = await this.references.next('LD');
 
@@ -650,11 +905,18 @@ export class ImportsService {
         city: mapped.city ?? null,
         state: mapped.state ?? null,
         pincode: mapped.pincode ?? null,
-        source: mapping.source,
+        // An event upload is a registration at that event, whatever the batch's
+        // own source says, so it reads the same as a scan in every report.
+        source: context ? 'BRANCH_EVENT' : mapping.source,
         productInterest,
         estimatedValue,
         ownerId,
+        // Unowned rows still belong to a branch — the importer's. Without it an
+        // unassigned capture is invisible to the manager who should distribute
+        // it, because team scope is resolved through the org unit.
         orgUnitId: owner?.orgUnitId ?? user.orgUnitId,
+        eventId: context?.event.id ?? null,
+        capturedById: capturedBy?.id ?? null,
         campaignId: mapping.campaignId ?? null,
         importBatchId: batchId,
         // Only when the importer said so, and defaulting to unverified.
@@ -700,6 +962,33 @@ export class ImportsService {
     await this.prisma.leadStatusHistory.create({
       data: { leadId: lead.id, toStatus: 'NEW', changedById: user.id },
     });
+
+    /*
+      The attendance, so the stall's own numbers include them.
+
+      Without this the lead carries the event but the event does not count the
+      lead: the registered total, the day-wise breakdown and every drill-down on
+      the event page read attendances, not leads. A rep who typed up forty names
+      would see the leads arrive and the event still claiming the twelve that
+      scanned.
+
+      Stamped with when they actually came, not when the file was uploaded. That
+      is the entire point of asking for the column, and it is what puts them in
+      the right bucket on a two-day event.
+    */
+    if (context) {
+      const capturedAt = mapped.capturedAt ? new Date(mapped.capturedAt) : null;
+      await this.prisma.eventAttendance.create({
+        data: {
+          eventId: context.event.id,
+          leadId: lead.id,
+          // Never returning: this row is being created alongside its lead, so
+          // there was no earlier enquiry for them to be coming back to.
+          returning: false,
+          ...(capturedAt ? { createdAt: capturedAt } : {}),
+        },
+      });
+    }
 
     if (mapped.notes) {
       await this.prisma.activity.create({

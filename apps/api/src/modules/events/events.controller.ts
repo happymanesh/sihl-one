@@ -15,7 +15,14 @@ import { z } from 'zod';
 
 import { CurrentUser, Public, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
-import { ApiZodBody, ApiZodQuery, IdParamPipe, ZodBody, ZodQuery, ZodValidationPipe } from '../../common/zod';
+import {
+  ApiZodBody,
+  ApiZodQuery,
+  IdParamPipe,
+  ZodBody,
+  ZodQuery,
+  ZodValidationPipe,
+} from '../../common/zod';
 import { CaptureCodeService } from './capture-code.service';
 import { EventsService } from './events.service';
 
@@ -70,6 +77,17 @@ export class EventsController {
     return this.events.list(user, query);
   }
 
+  /*
+    Declared before `:id`, or Nest would route "importable" into it as an id.
+  */
+  @Get('importable')
+  @ApiBearerAuth()
+  @RequirePermissions('event:view')
+  @ApiOperation({ summary: 'Events still inside the window for uploading paper registrations' })
+  importable(@CurrentUser() user: AuthenticatedPrincipal) {
+    return this.events.importable(user);
+  }
+
   @Get(':id')
   @ApiBearerAuth()
   @RequirePermissions('event:view')
@@ -83,7 +101,9 @@ export class EventsController {
   @ApiBearerAuth()
   @RequirePermissions('event:view')
   @ApiParam({ name: 'id', description: 'Event id' })
-  @ApiOperation({ summary: 'Leads this event produced, broken down by the rep whose QR captured them' })
+  @ApiOperation({
+    summary: 'Leads this event produced, broken down by the rep whose QR captured them',
+  })
   byRep(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
     return this.events.byRep(user, id);
   }

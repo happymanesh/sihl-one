@@ -45,6 +45,26 @@ export const PERMISSIONS_KEY = 'sihl:permissions';
 export const RequirePermissions = (...permissions: Permission[]): MethodDecorator =>
   SetMetadata(PERMISSIONS_KEY, permissions);
 
+/**
+ * Any one of these permissions admits the caller.
+ *
+ * The rule above holds and this is the exception it allows for. The import
+ * pipeline is entered by two grants — `lead:import`, which may bring any file,
+ * and `event:import`, which may only type up one event's registrations — and
+ * they are not two endpoints because they are not two pipelines. The same
+ * parse, the same duplicate check, the same commit; what differs is how far the
+ * caller may go once inside.
+ *
+ * Splitting the route would mean duplicating five endpoints to express a
+ * difference that can only be checked after the event is known, which is inside
+ * the service. So the guard decides who may enter, and the service decides what
+ * their grant is worth. Reach for this only when that is genuinely the shape of
+ * the thing.
+ */
+export const ANY_PERMISSIONS_KEY = 'sihl:anyPermissions';
+export const RequireAnyPermission = (...permissions: Permission[]): MethodDecorator =>
+  SetMetadata(ANY_PERMISSIONS_KEY, permissions);
+
 /** Audit metadata. Presence of this decorator is what makes a route audited. */
 export interface AuditMetadata {
   action: 'CREATE' | 'READ' | 'UPDATE' | 'DELETE' | 'ASSIGN' | 'EXPORT' | 'STATUS_CHANGE';

@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { hasAllPermissions, type Permission } from '@sihl-one/contracts';
 
 import { AuditService } from '../audit.service';
-import { IS_PUBLIC_KEY, PERMISSIONS_KEY } from '../decorators';
+import { ANY_PERMISSIONS_KEY, IS_PUBLIC_KEY, PERMISSIONS_KEY } from '../decorators';
 import type { AuthenticatedPrincipal } from '../types';
 
 /**
@@ -31,15 +31,31 @@ export class PermissionsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required || required.length === 0) return true;
+    const anyOf = this.reflector.getAllAndOverride<Permission[]>(ANY_PERMISSIONS_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    const hasRequired = Boolean(required?.length);
+    const hasAnyOf = Boolean(anyOf?.length);
+    if (!hasRequired && !hasAnyOf) return true;
 
     const request = context.switchToHttp().getRequest<{ user?: AuthenticatedPrincipal }>();
     const user = request.user;
     if (!user) return false;
 
-    if (hasAllPermissions(user.permissions, required)) return true;
+    // Both forms may sit on one route, and they compose the obvious way: every
+    // `required` permission, and at least one of `anyOf`.
+    const requiredOk = !hasRequired || hasAllPermissions(user.permissions, required!);
+    const anyOk = !hasAnyOf || anyOf!.some((permission) => user.permissions.includes(permission));
+    if (requiredOk && anyOk) return true;
 
-    const missing = required.filter((permission) => !user.permissions.includes(permission));
+    const missing = [
+      ...(required ?? []).filter((permission) => !user.permissions.includes(permission)),
+      // Named as a choice, because listing them as missing would tell a reader
+      // they need all of them when any one would have done.
+      ...(anyOk ? [] : [`one of ${(anyOf ?? []).join(' or ')}` as Permission]),
+    ];
     await this.audit.record({
       action: 'PERMISSION_DENIED',
       // The permission, not the controller class. "Denied access to a

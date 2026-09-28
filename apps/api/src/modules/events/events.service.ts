@@ -7,11 +7,15 @@ import {
 import {
   captureUrl,
   canTransitionEvent,
+  eventImportClosesAt,
+  eventImportOpen,
   repCaptureUrl,
+  EVENT_IMPORT_WINDOW_DAYS,
   EVENT_STATUS_TRANSITIONS,
   type ChangeEventStatusInput,
   type CreateEventInput,
   type EventDetail,
+  type EventImportTarget,
   type EventListItem,
   type EventQuery,
   type EventRepBreakdown,
@@ -29,6 +33,9 @@ const PUBLIC_WEB_URL = (): string => process.env.PUBLIC_WEB_URL ?? 'http://local
 
 /** Statuses that mean nobody has worked the lead yet. */
 const UNCONTACTED = ['NEW'] as const;
+
+/** The upload window, as milliseconds, for the pre-filter in `importable`. */
+const WINDOW_MS = EVENT_IMPORT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class EventsService {
@@ -151,6 +158,52 @@ export class EventsService {
       query.page,
       query.pageSize,
     );
+  }
+
+  /**
+   * Events whose registrations may still be typed up.
+   *
+   * Started, and not yet past the upload window. Anything still to come is
+   * excluded — there is nothing to have written in a notebook yet, and offering
+   * next month's exhibition is how a file lands on the wrong event.
+   *
+   * The window is computed here rather than filtered in SQL because it hangs off
+   * `endsAt ?? startsAt`, which Postgres cannot express as a simple range
+   * without a coalesce the query builder would fight. The set is small — the
+   * events one branch ran in the last week — so the difference is noise.
+   */
+  async importable(user: AuthenticatedPrincipal): Promise<EventImportTarget[]> {
+    const now = new Date();
+    const reach = this.seesEverything(user) ? {} : this.repEventFilter(user);
+
+    const events = await this.prisma.event.findMany({
+      where: {
+        deletedAt: null,
+        startsAt: { lte: now },
+        // Cheap pre-filter so this never walks the whole table; the exact
+        // window is applied below.
+        OR: [
+          { endsAt: { gte: new Date(now.getTime() - WINDOW_MS) } },
+          { endsAt: null, startsAt: { gte: new Date(now.getTime() - WINDOW_MS) } },
+        ],
+        ...reach,
+      },
+      select: { id: true, name: true, code: true, startsAt: true, endsAt: true, venue: true },
+      orderBy: { startsAt: 'desc' },
+      take: 50,
+    });
+
+    return events
+      .filter((event) => eventImportOpen(event, now))
+      .map((event) => ({
+        id: event.id,
+        name: event.name,
+        code: event.code,
+        venue: event.venue,
+        startsAt: event.startsAt.toISOString(),
+        endsAt: event.endsAt?.toISOString() ?? null,
+        uploadsCloseAt: eventImportClosesAt(event).toISOString(),
+      }));
   }
 
   async findOne(user: AuthenticatedPrincipal, id: string): Promise<EventDetail> {

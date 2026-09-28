@@ -3,15 +3,17 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  EVENT_ONLY_FIELDS,
   IMPORTABLE_FIELDS,
   IMPORT_SOURCE_ORIGINS,
+  type EventImportTarget,
   type ImportRowPreview,
   type ImportableField,
 } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
 import { ImportGuidance } from './ImportGuidance';
-import { humanise } from '@/lib/format';
+import { formatDate, humanise } from '@/lib/format';
 
 type Step = 'declare' | 'map' | 'review' | 'done';
 
@@ -48,8 +50,14 @@ const STEPS: Array<{ id: Step; label: string }> = [
  */
 export function ImportWizard({
   assignableUsers = [],
+  events = [],
+  mustChooseEvent = false,
 }: {
   assignableUsers?: Array<{ id: string; fullName: string }>;
+  /** Events still inside the window for typing up paper registrations. */
+  events?: EventImportTarget[];
+  /** True for someone whose only grant is `event:import`. */
+  mustChooseEvent?: boolean;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('declare');
@@ -60,6 +68,15 @@ export function ImportWizard({
   // and the routing rules decide who gets them.
   const [markMobileVerified, setMarkMobileVerified] = useState(false);
   const [assignToUserId, setAssignToUserId] = useState('');
+  /*
+    The event this file was captured at, chosen before anything is uploaded.
+
+    It changes what the file *is* rather than decorating it: every row becomes a
+    registration at that event, counted in its totals, and the date and employee
+    code columns start to mean something. So it is asked first, not buried in
+    the mapping step where it would read as one more optional attribute.
+  */
+  const [eventId, setEventId] = useState('');
 
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<Array<ImportableField | null>>([]);
@@ -123,7 +140,12 @@ export function ImportWizard({
       const response = await fetch(`/api/import?step=validate&batchId=${parsed.batchId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ columns: mapping, hasHeaderRow: true, source: 'IMPORT' }),
+        body: JSON.stringify({
+          columns: mapping,
+          hasHeaderRow: true,
+          source: eventId ? 'BRANCH_EVENT' : 'IMPORT',
+          eventId: eventId || undefined,
+        }),
       });
       const data = (await response.json()) as ValidateResult & { title?: string; detail?: string };
 
@@ -195,9 +217,8 @@ export function ImportWizard({
   ].filter((field): field is string => field !== null);
 
   const willCreate =
-    validated?.rows.filter(
-      (row) => row.status === 'VALID' && !skipOverrides.has(row.rowNumber),
-    ).length ?? 0;
+    validated?.rows.filter((row) => row.status === 'VALID' && !skipOverrides.has(row.rowNumber))
+      .length ?? 0;
 
   return (
     <div className="space-y-5">
@@ -236,6 +257,51 @@ export function ImportWizard({
 
       {step === 'declare' ? (
         <form action={submitDeclaration} className="card space-y-4 p-5">
+          {/*
+            Asked before the file, because it changes what the file means.
+
+            Offered only while there is something to attach to. An empty picker
+            with an explanation is more useful than a disabled dropdown: "why is
+            my event not here" is the question, and the window is the answer.
+          */}
+          <div>
+            <h2 className="font-bold">
+              Was this taken at an event?
+              {mustChooseEvent ? <span className="text-danger-500"> *</span> : null}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              Registrations written down at a stall belong to the event they were taken at. Every
+              row is counted in that event&rsquo;s totals, and the sheet can carry the time each
+              person came and the employee code of whoever took it.
+            </p>
+
+            {events.length === 0 ? (
+              <p className="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-sm text-[var(--color-text-muted)]">
+                No event is open for uploads. Registrations can be typed up for five days after an
+                event finishes.
+              </p>
+            ) : (
+              <select
+                id="eventId"
+                className="input mt-2"
+                value={eventId}
+                onChange={(change) => setEventId(change.target.value)}
+                required={mustChooseEvent}
+              >
+                <option value="">
+                  {mustChooseEvent ? 'Choose the event' : 'No — this is an ordinary list'}
+                </option>
+                {events.map((event) => (
+                  <option key={event.id} value={event.id}>
+                    {event.name}
+                    {event.venue ? ` — ${event.venue}` : ''} (uploads close{' '}
+                    {formatDate(event.uploadsCloseAt)})
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           <div>
             <h2 className="font-bold">Where did this data come from?</h2>
             {/*
@@ -245,9 +311,9 @@ export function ImportWizard({
               honest than burying it in a tooltip.
             */}
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              SIHL becomes responsible for this personal data once it is imported, so we record
-              its origin before anything is created. Imported leads can be called, but receive
-              no marketing messages until consent is captured on the first call.
+              SIHL becomes responsible for this personal data once it is imported, so we record its
+              origin before anything is created. Imported leads can be called, but receive no
+              marketing messages until consent is captured on the first call.
             </p>
           </div>
 
@@ -321,8 +387,8 @@ export function ImportWizard({
               className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
             />
             <span>
-              I confirm I am entitled to share this data with SIHL, and that it was not taken
-              from a previous employer in breach of any agreement.
+              I confirm I am entitled to share this data with SIHL, and that it was not taken from a
+              previous employer in breach of any agreement.
             </span>
           </label>
 
@@ -337,8 +403,8 @@ export function ImportWizard({
           <div>
             <h2 className="font-bold">Check the columns</h2>
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              {parsed.fileName} · {parsed.totalRows} rows. We have guessed these from your
-              headers — correct anything that is wrong. Nothing is created yet.
+              {parsed.fileName} · {parsed.totalRows} rows. We have guessed these from your headers —
+              correct anything that is wrong. Nothing is created yet.
             </p>
           </div>
 
@@ -370,7 +436,15 @@ export function ImportWizard({
                         aria-label={`Import ${header} as`}
                       >
                         <option value="">Ignore this column</option>
-                        {IMPORTABLE_FIELDS.map((field) => (
+                        {/*
+                          The two event columns are hidden unless there is an
+                          event. Offering "Captured at" on an ordinary lead
+                          list invites someone to map a column that will then
+                          be silently ignored, which reads as a bug.
+                        */}
+                        {IMPORTABLE_FIELDS.filter(
+                          (field) => eventId || !EVENT_ONLY_FIELDS.includes(field),
+                        ).map((field) => (
                           <option key={field} value={field}>
                             {humanise(field)}
                           </option>
@@ -463,7 +537,9 @@ export function ImportWizard({
                               {row.duplicateOf?.ownerName
                                 ? ` · owned by ${row.duplicateOf.ownerName}`
                                 : ''}
-                              {row.duplicateOf?.reasons[0] ? ` · ${row.duplicateOf.reasons[0]}` : ''}
+                              {row.duplicateOf?.reasons[0]
+                                ? ` · ${row.duplicateOf.reasons[0]}`
+                                : ''}
                             </p>
                           </div>
                         ) : skipOverrides.has(row.rowNumber) ? (
@@ -482,7 +558,9 @@ export function ImportWizard({
                           <button
                             type="button"
                             className="text-left"
-                            onClick={() => setSkipOverrides(new Set(skipOverrides).add(row.rowNumber))}
+                            onClick={() =>
+                              setSkipOverrides(new Set(skipOverrides).add(row.rowNumber))
+                            }
                           >
                             <Badge tone="teal">Will import</Badge>
                             <span className="ml-2 text-xs text-[var(--color-text-subtle)] underline">
@@ -499,8 +577,8 @@ export function ImportWizard({
           </div>
 
           <div className="card p-4 text-xs text-[var(--color-text-muted)]">
-            Leads already in SIHL stay with their current owner. Importing them again would move
-            a colleague&rsquo;s lead, so they are skipped and the claim is recorded against this
+            Leads already in SIHL stay with their current owner. Importing them again would move a
+            colleague&rsquo;s lead, so they are skipped and the claim is recorded against this
             import.
           </div>
 
@@ -517,17 +595,19 @@ export function ImportWizard({
               <span className="text-sm">
                 <span className="font-semibold">These numbers have already been spoken to</span>
                 <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
-                  Marks every row as mobile-confirmed, recorded against your name. Leave this
-                  off for a bought or scraped list &mdash; ticking it puts a confirmation
-                  against numbers nobody has called, and the unverified rate is how anyone
-                  knows whether reps are actually reaching people.
+                  Marks every row as mobile-confirmed, recorded against your name. Leave this off
+                  for a bought or scraped list &mdash; ticking it puts a confirmation against
+                  numbers nobody has called, and the unverified rate is how anyone knows whether
+                  reps are actually reaching people.
                 </span>
               </span>
             </label>
 
             {assignableUsers.length > 0 ? (
               <div>
-                <label className="label" htmlFor="assignToUserId">Give every lead to</label>
+                <label className="label" htmlFor="assignToUserId">
+                  Give every lead to
+                </label>
                 <select
                   id="assignToUserId"
                   className="input"
@@ -549,7 +629,12 @@ export function ImportWizard({
           </div>
 
           <div className="flex gap-2">
-            <button type="button" className="btn btn-primary" onClick={() => void commit()} disabled={busy}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void commit()}
+              disabled={busy}
+            >
               {busy ? 'Importing…' : `Import ${willCreate} lead${willCreate === 1 ? '' : 's'}`}
             </button>
             <button type="button" className="btn btn-outline" onClick={() => setStep('map')}>
@@ -578,8 +663,8 @@ export function ImportWizard({
             {result.skipped > 0 ? `, ${result.skipped} skipped` : ''}.
           </p>
           <p className="mt-2 text-xs text-[var(--color-text-subtle)]">
-            These leads are marked consent-pending: call them, and record consent on that first
-            call before sending any marketing.
+            These leads are marked consent-pending: call them, and record consent on that first call
+            before sending any marketing.
           </p>
           <div className="mt-5 flex justify-center gap-2">
             <a href="/leads?source=IMPORT" className="btn btn-primary">

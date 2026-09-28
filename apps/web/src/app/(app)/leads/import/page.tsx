@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
+import type { EventImportTarget } from '@sihl-one/contracts';
+
 import { ImportWizard } from '@/components/imports/ImportWizard';
 import { apiFetch } from '@/lib/api';
 import { can, requireUser } from '@/lib/auth';
@@ -24,9 +26,26 @@ interface BatchRow {
 
 export default async function ImportLeadsPage() {
   const user = await requireUser();
-  if (!can(user, 'lead:import')) redirect('/leads');
 
-  const history = await apiFetch<BatchRow[]>('/leads/import').catch(() => [] as BatchRow[]);
+  /*
+    Two grants reach this page and they are not the same thing.
+
+    `lead:import` may bring any file. `event:import` may only type up
+    registrations taken at an event, inside the window after it — which is what
+    a rep needs when the network drops at a stall and the names go into a
+    notebook. The API enforces the difference; this decides who gets through the
+    door, and what the screen asks of them.
+  */
+  const mayImportAnything = can(user, 'lead:import');
+  if (!mayImportAnything && !can(user, 'event:import')) redirect('/leads');
+
+  const history = mayImportAnything
+    ? await apiFetch<BatchRow[]>('/leads/import').catch(() => [] as BatchRow[])
+    : [];
+
+  const events = await apiFetch<EventImportTarget[]>('/events/importable').catch(
+    () => [] as EventImportTarget[],
+  );
 
   // Offered only to someone who can assign; everyone else gets the routing
   // rules, which is what they would have got anyway.
@@ -47,14 +66,21 @@ export default async function ImportLeadsPage() {
       </nav>
 
       <header>
-        <h1 className="text-2xl font-bold">Import leads</h1>
+        <h1 className="text-2xl font-bold">
+          {mayImportAnything ? 'Import leads' : 'Upload event registrations'}
+        </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          For a new joiner&rsquo;s contact list, an event capture sheet, or any spreadsheet of
-          prospects. Nothing is created until you have seen exactly what will happen.
+          {mayImportAnything
+            ? 'For a new joiner’s contact list, an event capture sheet, or any spreadsheet of prospects. Nothing is created until you have seen exactly what will happen.'
+            : 'For registrations you took on paper when the network was down. Pick the event, upload the sheet, and check what it found before anything is created.'}
         </p>
       </header>
 
-      <ImportWizard assignableUsers={assignable} />
+      <ImportWizard
+        assignableUsers={assignable}
+        events={events}
+        mustChooseEvent={!mayImportAnything}
+      />
 
       {history.length > 0 ? (
         <section className="card p-5">

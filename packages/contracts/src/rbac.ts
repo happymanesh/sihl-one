@@ -62,6 +62,21 @@ export const PERMISSIONS = [
     switched on — which is what makes the switch take effect immediately.
   */
   'event:view',
+  /*
+    Uploading a file of registrations taken on paper, against one event.
+
+    Deliberately not `lead:import`. When the network drops at a stall the rep
+    writes names in a notebook, and the person who can turn that notebook into
+    leads has to be the rep — routing it through whoever holds `lead:import`
+    means it happens days later or not at all.
+
+    What makes that safe to grant is how narrow it is. It only works against an
+    event the holder can already see, only inside the window after that event,
+    and every row lands on that event. It cannot be used to bring a bought list
+    or a previous employer's spreadsheet into SIHL; that still needs
+    `lead:import`, and the declaration that goes with it.
+  */
+  'event:import',
 
   // Analytics
   'analytics:sales:read',
@@ -157,6 +172,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // and wrong for provenance — the declaration should be made by the person
     // who actually knows where the data came from.
     'lead:import',
+    'event:import',
     'customer:read',
     'customer:update',
     'activity:read',
@@ -191,6 +207,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'visit:read',
     'visit:create',
     'visit:update',
+    'event:import',
     'analytics:sales:read',
   ],
 
