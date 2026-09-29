@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 import { PrismaClient } from '../src/generated/prisma/client';
-import { syncRolePermissions } from './role-catalogue';
+import { syncDesignations, syncRolePermissions } from './role-catalogue';
 
 /**
  * Applies the RBAC matrix to the database. Run on every deploy.
@@ -51,6 +51,13 @@ async function main(): Promise<void> {
       changed === 0
         ? `Role permissions already in sync (${results.length} roles).`
         : `Role permissions synced — ${changed} of ${results.length} roles changed.`,
+    );
+
+    const newDesignations = await syncDesignations(prisma);
+    console.log(
+      newDesignations.length === 0
+        ? 'Designation ladder already in sync.'
+        : `Designations added: ${newDesignations.join(', ')}`,
     );
   } finally {
     await prisma.$disconnect();

@@ -1,4 +1,4 @@
-import { ROLE_PERMISSIONS, ROLES } from '@sihl-one/contracts';
+import { DESIGNATION_SEED, ROLE_PERMISSIONS, ROLES } from '@sihl-one/contracts';
 
 import type { PrismaClient } from '../src/generated/prisma/client';
 
@@ -99,4 +99,48 @@ export async function syncRolePermissions(prisma: PrismaClient): Promise<RoleSyn
   }
 
   return results;
+}
+
+/**
+ * Writes the designation ladder from `contracts` into the `designation` table.
+ *
+ * The same gap the permissions had: a level added in code reached an
+ * environment only if somebody ran the seed, and the seed does not run on
+ * deploy. `BRANCH_MANAGER` was created by hand in production on 29 September
+ * and existed nowhere else.
+ *
+ * Name, level and scope re-sync every run. `isActive` is written **only on
+ * create** and never touched afterwards, because switching a level on or off is
+ * an operator decision — production has `REGIONAL_HEAD` off against a seed that
+ * says on, and a deploy must not quietly undo that.
+ */
+export async function syncDesignations(prisma: PrismaClient): Promise<string[]> {
+  const created: string[] = [];
+
+  for (const designation of DESIGNATION_SEED) {
+    const existing = await prisma.designation.findUnique({
+      where: { code: designation.code },
+      select: { code: true },
+    });
+
+    await prisma.designation.upsert({
+      where: { code: designation.code },
+      update: {
+        name: designation.name,
+        level: designation.level,
+        defaultScope: designation.defaultScope,
+      },
+      create: {
+        code: designation.code,
+        name: designation.name,
+        level: designation.level,
+        defaultScope: designation.defaultScope,
+        isActive: designation.isActive,
+      },
+    });
+
+    if (!existing) created.push(designation.code);
+  }
+
+  return created;
 }
