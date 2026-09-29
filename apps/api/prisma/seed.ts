@@ -17,15 +17,10 @@
 import 'dotenv/config';
 import { hash, Algorithm } from '@node-rs/argon2';
 import { PrismaPg } from '@prisma/adapter-pg';
-import {
-  DESIGNATION_SEED,
-  ROLE_PERMISSIONS,
-  ROLES,
-  scoreLead,
-  type ScoringFeatures,
-} from '@sihl-one/contracts';
+import { DESIGNATION_SEED, ROLES, scoreLead, type ScoringFeatures } from '@sihl-one/contracts';
 
 import { PrismaClient } from '../src/generated/prisma/client';
+import { syncRolePermissions } from './role-catalogue';
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
@@ -67,34 +62,9 @@ function pickMany<T>(items: readonly T[], max: number): T[] {
 // ---------------------------------------------------------------------------
 
 async function seedRoles(): Promise<void> {
-  const descriptions: Record<string, { name: string; description: string }> = {
-    SUPER_ADMIN: { name: 'Super Administrator', description: 'Unrestricted access. Break-glass account.' },
-    MANAGEMENT: { name: 'Management', description: 'Read-only visibility across the business, plus analytics.' },
-    OPERATIONS: { name: 'Operations', description: 'Onboarding, servicing and data quality.' },
-    MARKETING: { name: 'Marketing', description: 'Campaigns, lead sources and attribution.' },
-    SALES_MANAGER: { name: 'Sales Manager', description: 'Owns a team; assigns and reviews their pipeline.' },
-    SALES_EXECUTIVE: { name: 'Sales Executive', description: 'Field and desk sales. Own leads only.' },
-    PARTNER: { name: 'Associate Partner', description: 'External partner. Own sourced business only.' },
-    CUSTOMER: { name: 'Customer', description: 'End customer self-service.' },
-  };
-
-  for (const code of ROLES) {
-    const meta = descriptions[code]!;
-    await prisma.role.upsert({
-      where: { code },
-      // Permissions are re-synced from the contracts matrix on every run so a
-      // code change to the matrix reaches every environment through the normal
-      // deploy, rather than needing a manual SQL fix.
-      update: { permissions: [...ROLE_PERMISSIONS[code]], name: meta.name, description: meta.description },
-      create: {
-        code,
-        name: meta.name,
-        description: meta.description,
-        permissions: [...ROLE_PERMISSIONS[code]],
-        isSystem: true,
-      },
-    });
-  }
+  // Shared with `sync-role-permissions.ts`, which is what actually runs on a
+  // deploy. Two copies of this loop is how the matrix and the database drift.
+  await syncRolePermissions(prisma);
   console.log(`  roles: ${ROLES.length}`);
 }
 
@@ -193,18 +163,111 @@ async function seedUsers(
   const passwordHash = await hashPassword(SEED_PASSWORD);
 
   const people: UserSeed[] = [
-    { firstName: 'Manesh', lastName: 'Mukherjee', email: 'admin@sihl.in', mobile: '9000090001', role: 'SUPER_ADMIN', orgUnit: 'SIHL', employeeCode: 'SIHL-0001' },
-    { firstName: 'Tanmay', lastName: 'Shah', email: 'md@sihl.in', mobile: '9000090002', role: 'MANAGEMENT', orgUnit: 'SIHL', designation: 'NATIONAL_HEAD', employeeCode: 'SIHL-0002' },
-    { firstName: 'Rekha', lastName: 'Iyer', email: 'ops@sihl.in', mobile: '9000090003', role: 'OPERATIONS', orgUnit: 'AHM-HO', employeeCode: 'SIHL-0003' },
-    { firstName: 'Nikhil', lastName: 'Bhatt', email: 'marketing@sihl.in', mobile: '9000090004', role: 'MARKETING', orgUnit: 'AHM-HO', employeeCode: 'SIHL-0004' },
+    {
+      firstName: 'Manesh',
+      lastName: 'Mukherjee',
+      email: 'admin@sihl.in',
+      mobile: '9000090001',
+      role: 'SUPER_ADMIN',
+      orgUnit: 'SIHL',
+      employeeCode: 'SIHL-0001',
+    },
+    {
+      firstName: 'Tanmay',
+      lastName: 'Shah',
+      email: 'md@sihl.in',
+      mobile: '9000090002',
+      role: 'MANAGEMENT',
+      orgUnit: 'SIHL',
+      designation: 'NATIONAL_HEAD',
+      employeeCode: 'SIHL-0002',
+    },
+    {
+      firstName: 'Rekha',
+      lastName: 'Iyer',
+      email: 'ops@sihl.in',
+      mobile: '9000090003',
+      role: 'OPERATIONS',
+      orgUnit: 'AHM-HO',
+      employeeCode: 'SIHL-0003',
+    },
+    {
+      firstName: 'Nikhil',
+      lastName: 'Bhatt',
+      email: 'marketing@sihl.in',
+      mobile: '9000090004',
+      role: 'MARKETING',
+      orgUnit: 'AHM-HO',
+      employeeCode: 'SIHL-0004',
+    },
     // A Zonal Head with no Regional Head beneath them, reporting nowhere. This
     // is the skipped level the hierarchy exists to support.
-    { firstName: 'Kiran', lastName: 'Shah', email: 'zonalhead@sihl.in', mobile: '9000090010', role: 'SALES_MANAGER', orgUnit: 'WEST', designation: 'ZONAL_HEAD', dataScope: 'ZONE', employeeCode: 'SIHL-0010' },
-    { firstName: 'Priya', lastName: 'Desai', email: 'salesmanager@sihl.in', mobile: '9000090005', role: 'SALES_MANAGER', orgUnit: 'AHM-HO', designation: 'SALES_MANAGER', managerEmail: 'zonalhead@sihl.in', employeeCode: 'SIHL-0005' },
-    { firstName: 'Rahul', lastName: 'Mehta', email: 'rahul.mehta@sihl.in', mobile: '9000090006', role: 'SALES_EXECUTIVE', orgUnit: 'AHM-HO', designation: 'SALES_EXECUTIVE', managerEmail: 'salesmanager@sihl.in', employeeCode: 'SIHL-0006' },
-    { firstName: 'Sneha', lastName: 'Patel', email: 'sneha.patel@sihl.in', mobile: '9000090007', role: 'SALES_EXECUTIVE', orgUnit: 'AHM-SAT', designation: 'SALES_EXECUTIVE', managerEmail: 'salesmanager@sihl.in', employeeCode: 'SIHL-0007' },
-    { firstName: 'Vikram', lastName: 'Joshi', email: 'vikram.joshi@sihl.in', mobile: '9000090008', role: 'SALES_EXECUTIVE', orgUnit: 'SUR', designation: 'SALES_EXECUTIVE', managerEmail: 'salesmanager@sihl.in', employeeCode: 'SIHL-0008' },
-    { firstName: 'Anita', lastName: 'Raval', email: 'anita.raval@sihl.in', mobile: '9000090009', role: 'SALES_EXECUTIVE', orgUnit: 'VAD', designation: 'SALES_TEAM_LEADER', managerEmail: 'salesmanager@sihl.in', employeeCode: 'SIHL-0009' },
+    {
+      firstName: 'Kiran',
+      lastName: 'Shah',
+      email: 'zonalhead@sihl.in',
+      mobile: '9000090010',
+      role: 'SALES_MANAGER',
+      orgUnit: 'WEST',
+      designation: 'ZONAL_HEAD',
+      dataScope: 'ZONE',
+      employeeCode: 'SIHL-0010',
+    },
+    {
+      firstName: 'Priya',
+      lastName: 'Desai',
+      email: 'salesmanager@sihl.in',
+      mobile: '9000090005',
+      role: 'SALES_MANAGER',
+      orgUnit: 'AHM-HO',
+      designation: 'SALES_MANAGER',
+      managerEmail: 'zonalhead@sihl.in',
+      employeeCode: 'SIHL-0005',
+    },
+    {
+      firstName: 'Rahul',
+      lastName: 'Mehta',
+      email: 'rahul.mehta@sihl.in',
+      mobile: '9000090006',
+      role: 'SALES_EXECUTIVE',
+      orgUnit: 'AHM-HO',
+      designation: 'SALES_EXECUTIVE',
+      managerEmail: 'salesmanager@sihl.in',
+      employeeCode: 'SIHL-0006',
+    },
+    {
+      firstName: 'Sneha',
+      lastName: 'Patel',
+      email: 'sneha.patel@sihl.in',
+      mobile: '9000090007',
+      role: 'SALES_EXECUTIVE',
+      orgUnit: 'AHM-SAT',
+      designation: 'SALES_EXECUTIVE',
+      managerEmail: 'salesmanager@sihl.in',
+      employeeCode: 'SIHL-0007',
+    },
+    {
+      firstName: 'Vikram',
+      lastName: 'Joshi',
+      email: 'vikram.joshi@sihl.in',
+      mobile: '9000090008',
+      role: 'SALES_EXECUTIVE',
+      orgUnit: 'SUR',
+      designation: 'SALES_EXECUTIVE',
+      managerEmail: 'salesmanager@sihl.in',
+      employeeCode: 'SIHL-0008',
+    },
+    {
+      firstName: 'Anita',
+      lastName: 'Raval',
+      email: 'anita.raval@sihl.in',
+      mobile: '9000090009',
+      role: 'SALES_EXECUTIVE',
+      orgUnit: 'VAD',
+      designation: 'SALES_TEAM_LEADER',
+      managerEmail: 'salesmanager@sihl.in',
+      employeeCode: 'SIHL-0009',
+    },
   ];
 
   const byEmail = new Map<string, { id: string; orgUnitId: string | null }>();
@@ -470,13 +533,58 @@ async function seedCampaigns() {
 }
 
 const FIRST_NAMES = [
-  'Aarav', 'Ishaan', 'Vivaan', 'Kabir', 'Rudra', 'Hetal', 'Jayesh', 'Bhavin', 'Nilesh', 'Paresh',
-  'Ananya', 'Diya', 'Meera', 'Kavya', 'Riya', 'Falguni', 'Hiral', 'Jigna', 'Krupa', 'Nidhi',
-  'Chirag', 'Darshan', 'Harsh', 'Kalpesh', 'Manan', 'Parth', 'Rohan', 'Tejas', 'Yash', 'Dhruv',
+  'Aarav',
+  'Ishaan',
+  'Vivaan',
+  'Kabir',
+  'Rudra',
+  'Hetal',
+  'Jayesh',
+  'Bhavin',
+  'Nilesh',
+  'Paresh',
+  'Ananya',
+  'Diya',
+  'Meera',
+  'Kavya',
+  'Riya',
+  'Falguni',
+  'Hiral',
+  'Jigna',
+  'Krupa',
+  'Nidhi',
+  'Chirag',
+  'Darshan',
+  'Harsh',
+  'Kalpesh',
+  'Manan',
+  'Parth',
+  'Rohan',
+  'Tejas',
+  'Yash',
+  'Dhruv',
 ];
 const LAST_NAMES = [
-  'Patel', 'Shah', 'Desai', 'Mehta', 'Joshi', 'Trivedi', 'Vyas', 'Amin', 'Modi', 'Parikh',
-  'Bhatt', 'Dave', 'Gandhi', 'Kapadia', 'Raval', 'Solanki', 'Chauhan', 'Panchal', 'Thakkar', 'Soni',
+  'Patel',
+  'Shah',
+  'Desai',
+  'Mehta',
+  'Joshi',
+  'Trivedi',
+  'Vyas',
+  'Amin',
+  'Modi',
+  'Parikh',
+  'Bhatt',
+  'Dave',
+  'Gandhi',
+  'Kapadia',
+  'Raval',
+  'Solanki',
+  'Chauhan',
+  'Panchal',
+  'Thakkar',
+  'Soni',
 ];
 const CITIES: Array<[string, string, string]> = [
   ['Ahmedabad', 'Gujarat', '380015'],
@@ -508,9 +616,35 @@ async function seedLeadsAndCustomers(
     { email: 'anita.raval@sihl.in', org: 'VAD' },
   ];
 
-  const sources = ['WEBSITE', 'CAMPAIGN', 'REFERRAL', 'PARTNER', 'WALK_IN', 'INBOUND_CALL', 'SOCIAL'] as const;
-  const products = ['EQUITY', 'DERIVATIVES', 'MUTUAL_FUNDS', 'IPO', 'COMMODITY', 'PMS', 'NRI', 'ALGO'] as const;
-  const statuses = ['NEW', 'NEW', 'CONTACTED', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'LOST', 'DISQUALIFIED'] as const;
+  const sources = [
+    'WEBSITE',
+    'CAMPAIGN',
+    'REFERRAL',
+    'PARTNER',
+    'WALK_IN',
+    'INBOUND_CALL',
+    'SOCIAL',
+  ] as const;
+  const products = [
+    'EQUITY',
+    'DERIVATIVES',
+    'MUTUAL_FUNDS',
+    'IPO',
+    'COMMODITY',
+    'PMS',
+    'NRI',
+    'ALGO',
+  ] as const;
+  const statuses = [
+    'NEW',
+    'NEW',
+    'CONTACTED',
+    'CONTACTED',
+    'QUALIFIED',
+    'PROPOSAL',
+    'LOST',
+    'DISQUALIFIED',
+  ] as const;
 
   let leadCounter = 0;
   let customerCounter = 0;
@@ -558,7 +692,10 @@ async function seedLeadsAndCustomers(
         firstName,
         lastName,
         mobile,
-        email: random() > 0.25 ? `${firstName.toLowerCase()}.${lastName.toLowerCase()}${index}@gmail.com` : null,
+        email:
+          random() > 0.25
+            ? `${firstName.toLowerCase()}.${lastName.toLowerCase()}${index}@gmail.com`
+            : null,
         city,
         state,
         pincode,
@@ -587,7 +724,8 @@ async function seedLeadsAndCustomers(
             ? daysAhead(Math.floor(random() * 10))
             : daysAgo(Math.floor(random() * 6)) // deliberately overdue
           : null,
-        lostReason: status === 'LOST' ? pick(['PRICE', 'COMPETITOR', 'NOT_INTERESTED', 'UNREACHABLE']) : null,
+        lostReason:
+          status === 'LOST' ? pick(['PRICE', 'COMPETITOR', 'NOT_INTERESTED', 'UNREACHABLE']) : null,
         convertedAt: status === 'CONVERTED' ? daysAgo(Math.max(0, ageDays - 8)) : null,
         closedAt: ['LOST', 'DISQUALIFIED', 'CONVERTED'].includes(status)
           ? daysAgo(Math.max(0, ageDays - 8))
@@ -600,7 +738,8 @@ async function seedLeadsAndCustomers(
     // A demo book where every lead scores 0 makes the whole scoring feature —
     // the hot-lead filter, the pipeline sort, the dashboard tile — look broken.
     // Activity rows are created below, so the count is computed first here.
-    const seedActivityCount = status === 'NEW' ? Math.floor(random() * 2) : 1 + Math.floor(random() * 5);
+    const seedActivityCount =
+      status === 'NEW' ? Math.floor(random() * 2) : 1 + Math.floor(random() * 5);
 
     await prisma.leadStatusHistory.create({
       data: { leadId: lead.id, toStatus: 'NEW', changedAt: createdAt, changedById: owner.id },
@@ -665,7 +804,12 @@ async function seedLeadsAndCustomers(
             type === 'CALL'
               ? `Discussed ${productInterest.join(', ').toLowerCase()}. Customer asked about brokerage slabs and margin funding.`
               : null,
-          outcome: pick(['Interested', 'Call back later', 'Needs to discuss with family', 'Comparing brokers']),
+          outcome: pick([
+            'Interested',
+            'Call back later',
+            'Needs to discuss with family',
+            'Comparing brokers',
+          ]),
           durationMinutes: type === 'CALL' ? 3 + Math.floor(random() * 18) : null,
           occurredAt:
             a === 0
@@ -679,7 +823,13 @@ async function seedLeadsAndCustomers(
     if (status === 'CONVERTED') {
       customerCounter += 1;
       const stage = pick([
-        'KYC_STARTED', 'PAN_VERIFIED', 'ESIGN_PENDING', 'UNDER_REVIEW', 'ACCOUNT_OPENED', 'ACTIVATED', 'ACTIVATED',
+        'KYC_STARTED',
+        'PAN_VERIFIED',
+        'ESIGN_PENDING',
+        'UNDER_REVIEW',
+        'ACCOUNT_OPENED',
+        'ACTIVATED',
+        'ACTIVATED',
       ] as const);
       const activated = stage === 'ACTIVATED';
 
@@ -696,7 +846,9 @@ async function seedLeadsAndCustomers(
           state,
           pincode,
           status: activated ? 'ACTIVE' : 'ONBOARDING',
-          kycStatus: activated ? 'COMPLETED' : pick(['IN_PROGRESS', 'PENDING_VERIFICATION'] as const),
+          kycStatus: activated
+            ? 'COMPLETED'
+            : pick(['IN_PROGRESS', 'PENDING_VERIFICATION'] as const),
           onboardingStage: stage,
           stageUpdatedAt: daysAgo(Math.floor(random() * 12)),
           accountOpenedAt: ['ACCOUNT_OPENED', 'ACTIVATED'].includes(stage) ? daysAgo(6) : null,
@@ -750,7 +902,8 @@ async function seedLeadsAndCustomers(
         description: 'Confirm documents and walk through the brokerage plan.',
         status: random() > 0.75 ? 'DONE' : 'OPEN',
         priority: random() > 0.7 ? 'HIGH' : 'MEDIUM',
-        dueAt: random() > 0.4 ? daysAhead(Math.floor(random() * 6)) : daysAgo(Math.floor(random() * 4)),
+        dueAt:
+          random() > 0.4 ? daysAhead(Math.floor(random() * 6)) : daysAgo(Math.floor(random() * 4)),
         assigneeId: lead.ownerId,
         createdById: lead.ownerId,
         completedAt: random() > 0.75 ? daysAgo(1) : null,

@@ -65,6 +65,27 @@ echo "[entrypoint] Applying database migrations…"
 ../../node_modules/.bin/prisma migrate deploy --config prisma.config.production.mjs
 echo "[entrypoint] Migrations applied."
 
+# Apply the RBAC matrix, every boot, with no flag.
+#
+# Authorisation is decided at request time from `role.permissions` in the
+# database; `packages/contracts/src/rbac.ts` is never read at runtime. So a
+# permission added there granted nothing anywhere until somebody remembered to
+# run the seed — and SEED_ON_BOOT is false everywhere, because the rest of the
+# seed must not touch live data. `event:import` shipped on 28 September and no
+# role in either environment held it the next morning, SUPER_ADMIN included.
+#
+# This closes that gap the same way migrations close it for the schema: the
+# change travels with the deploy. It writes three columns of the `role` table
+# and nothing else, so unlike the seed it is safe against a live book.
+#
+# Non-fatal on purpose. An API that starts with yesterday's permissions is
+# better than one that does not start, and the failure line below is the signal
+# that a permission change has not landed.
+echo "[entrypoint] Syncing role permissions…"
+if ! ../../node_modules/.bin/tsx prisma/sync-role-permissions.ts; then
+  echo "[entrypoint] WARNING: role permission sync failed — permissions may be stale."
+fi
+
 # One-off data tasks, each behind its own flag and each off by default. They run
 # here rather than from a developer's machine so the database never needs to be
 # exposed to the public internet for an afternoon's setup.
