@@ -15,7 +15,18 @@ function slugify(name: string): string {
     .slice(0, 60);
 }
 
-export function NewEventForm() {
+export function NewEventForm({
+  owners = [],
+  branches = [],
+  defaultOwnerId,
+}: {
+  /** Who this event may be assigned to. */
+  owners?: Array<{ id: string; fullName: string }>;
+  /** The org tree, so an event can be pinned below the company root. */
+  branches?: Array<{ id: string; name: string; depth: number }>;
+  /** The person creating it, pre-selected because they usually are the owner. */
+  defaultOwnerId?: string;
+}) {
   const [state, action] = useActionState(createEvent, INITIAL);
   const [code, setCode] = useState('');
   const [codeTouched, setCodeTouched] = useState(false);
@@ -97,6 +108,57 @@ export function NewEventForm() {
             className="input"
           />
         </Field>
+      </div>
+
+      {/*
+        Owner and branch, together, because they answer the same question:
+        who is this event's, and where does it sit.
+
+        Both were previously implicit — owner defaulted to whoever clicked
+        create, branch to that person's own unit. For an administrator working
+        at the company root that put every event and every unclaimed lead it
+        produced above the whole org tree, where scope matches downward and so
+        nobody at branch level could see any of it.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {owners.length > 0 ? (
+          <Field label="Owner" name="ownerId" errors={state.errors?.ownerId} required>
+            <select
+              id="ownerId"
+              name="ownerId"
+              className="input"
+              required
+              defaultValue={defaultOwnerId ?? ''}
+            >
+              <option value="" disabled>
+                Choose an owner
+              </option>
+              {owners.map((owner) => (
+                <option key={owner.id} value={owner.id}>
+                  {owner.fullName}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          // No list to choose from — the API still defaults the owner to the
+          // creator, so the event is never left without one.
+          <input type="hidden" name="ownerId" value={defaultOwnerId ?? ''} />
+        )}
+
+        {branches.length > 0 ? (
+          <Field label="Branch" name="orgUnitId" errors={state.errors?.orgUnitId}>
+            <select id="orgUnitId" name="orgUnitId" className="input" defaultValue="">
+              <option value="">Same as mine</option>
+              {branches.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {' '.repeat(unit.depth * 2)}
+                  {unit.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
       </div>
 
       <Submit />

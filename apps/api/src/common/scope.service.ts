@@ -29,6 +29,29 @@ export class ScopeService {
    * (leads, opportunities).
    */
   leadScope(user: AuthenticatedPrincipal): Record<string, unknown> {
+    const base = this.leadScopeBase(user);
+
+    /*
+      An event's owner sees the registrations nobody has claimed yet.
+
+      A common-QR scan lands with no owner and no capturer — only the branch it
+      came in at — so under `SELF` it was visible to nobody who was actually at
+      the stall, and under a branch scope only if the event had been pinned to
+      that branch rather than to the company. Reps read that as the system
+      losing their registration.
+
+      The lead stays unowned, which is the point: it remains in the unassigned
+      queue and can still be handed out. This says only that the person
+      responsible for the event may see what it produced.
+    */
+    const ownedEvents = { AND: [{ ownerId: null }, { event: { ownerId: user.id } }] };
+
+    // An unrestricted scope already covers it; OR-ing would only add work.
+    if (Object.keys(base).length === 0) return base;
+    return { OR: [base, ownedEvents] };
+  }
+
+  private leadScopeBase(user: AuthenticatedPrincipal): Record<string, unknown> {
     switch (user.dataScope) {
       case 'ALL':
         return {};

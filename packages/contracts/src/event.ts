@@ -95,7 +95,19 @@ export const createEventSchema = z
     startsAt: z.coerce.date(),
     endsAt: z.coerce.date().optional(),
     expectedFootfall: z.number().int().min(0).max(1_000_000).optional(),
-    ownerId: idSchema.optional(),
+    /*
+      Required, because the owner is now load-bearing.
+
+      They are who may upload registrations for the event, and who can see the
+      ones that arrive unowned from the common QR. An event with nobody against
+      it is one whose leads only a super admin can reach — which is exactly the
+      hole reps reported as "the registration was not captured".
+
+      Enforced here rather than as a NOT NULL column: the relation is
+      `onDelete: SetNull`, so deleting a user would violate the constraint and
+      block the delete. The rule belongs at the edge where it can be explained.
+    */
+    ownerId: idSchema,
     orgUnitId: idSchema.optional(),
     campaignId: idSchema.optional(),
   })

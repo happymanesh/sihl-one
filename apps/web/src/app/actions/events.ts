@@ -49,6 +49,13 @@ export async function createEvent(
     startsAt: istInstant(formData.get('startsAt')),
     endsAt: istInstant(formData.get('endsAt')),
     expectedFootfall: footfall ? Number(footfall) : undefined,
+    // Required now: the owner is who may upload registrations for this event
+    // and who sees the ones that arrive unclaimed from the common QR.
+    ownerId: formData.get('ownerId') || undefined,
+    // The branch the event belongs to. Left blank it falls back to the
+    // creator's own unit, which for an administrator is the company root —
+    // and a lead at the root is invisible to everyone at branch level.
+    orgUnitId: formData.get('orgUnitId') || undefined,
   });
 
   if (!parsed.success) {
