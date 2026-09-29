@@ -40,13 +40,13 @@ export default async function EventsPage({
         <div className="card p-8 text-center">
           <h1 className="text-xl font-bold">Events are not switched on for you</h1>
           <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-            Seeing events, and getting your own registration QR, is switched on per hierarchy
-            level and per branch. Both have to be on before it reaches you.
+            Seeing events, and getting your own registration QR, is switched on per hierarchy level
+            and per branch. Both have to be on before it reaches you.
           </p>
           <p className="mt-3 text-sm text-[var(--color-text-muted)]">
-            Ask your administrator to switch on your level under Administration → Users →
-            Hierarchy levels, and your office under Branches &amp; Regions. It takes effect on
-            your next page load — you will not need to sign in again.
+            Ask your administrator to switch on your level under Administration → Users → Hierarchy
+            levels, and your office under Branches &amp; Regions. It takes effect on your next page
+            load — you will not need to sign in again.
           </p>
         </div>
       </div>
@@ -70,7 +70,10 @@ export default async function EventsPage({
   );
 
   const isFiltered = Boolean(params.q || params.status);
-  const canCreate = can(user, 'campaign:create');
+  // Creating an event is its own grant now — super admin and management. Reps
+  // and managers keep the rest of the events screen: they see the list, open an
+  // event and read what it produced.
+  const canCreate = can(user, 'event:create');
 
   return (
     <div className="space-y-4">
@@ -122,15 +125,17 @@ export default async function EventsPage({
               <table className="w-full text-sm">
                 <thead className="border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] text-left">
                   <tr>
-                    {['Event', 'Status', 'When', 'Where', 'Captured', 'Converted'].map((heading) => (
-                      <th
-                        key={heading}
-                        scope="col"
-                        className="px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
-                      >
-                        {heading}
-                      </th>
-                    ))}
+                    {['Event', 'Status', 'When', 'Where', 'Captured', 'Converted'].map(
+                      (heading) => (
+                        <th
+                          key={heading}
+                          scope="col"
+                          className="px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
+                        >
+                          {heading}
+                        </th>
+                      ),
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border)]">

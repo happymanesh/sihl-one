@@ -15,7 +15,7 @@ export const metadata = { title: 'New event' };
 
 export default async function NewEventPage() {
   const user = await requireUser();
-  if (!can(user, 'campaign:create')) redirect('/events');
+  if (!can(user, 'event:create')) redirect('/events');
 
   /*
     Both lists are optional. Whoever may create an event does not necessarily

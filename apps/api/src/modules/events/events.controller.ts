@@ -110,7 +110,7 @@ export class EventsController {
 
   @Post()
   @ApiBearerAuth()
-  @RequirePermissions('campaign:create')
+  @RequirePermissions('event:create')
   @ApiOperation({
     summary: 'Create an event',
     description: 'The code is permanent — it goes under the QR that gets printed.',

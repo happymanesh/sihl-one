@@ -81,6 +81,15 @@ export const PERMISSIONS = [
     into SIHL is `lead:import`, and carries its own declaration.
   */
   'event:import',
+  /*
+    Creating an event.
+
+    Split out from `campaign:create`, which it had been riding on. They are not
+    the same act: a campaign is a marketing spend, an event is a stall with a QR
+    code whose owner then decides who may upload for it and who sees what it
+    brings in. Held by super admin and management only, on instruction.
+  */
+  'event:create',
 
   // Analytics
   'analytics:sales:read',
@@ -117,6 +126,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'lead:export',
     'lead:import',
     'event:import',
+    'event:create',
+    // Needed to name an event's owner and pick its branch — both selects read
+    // the user list and the org tree, and neither was reachable without this.
+    'user:read',
     'customer:read',
     'customer:export',
     'activity:read',
