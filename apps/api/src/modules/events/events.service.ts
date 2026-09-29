@@ -407,9 +407,16 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException({ title: 'Event not found' });
 
-    // A rep gets their own row and nothing else. Showing them a league table of
-    // colleagues is a different product decision from the one asked for.
-    const mine = this.seesEverything(user) ? {} : this.myLeadsAtEvent(user);
+    /*
+      A rep gets their own row and nothing else. Showing them a league table of
+      colleagues is a different product decision from the one asked for.
+
+      Keyed on the capturer alone, unlike the counts elsewhere on this screen.
+      This breakdown *is* a grouping by capturer, so widening it to leads the
+      viewer merely owns would file their own work under "Unassigned Leads" —
+      a row that would then be listing leads which are assigned, to them.
+    */
+    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
 
     /*
       Grouped by rep and by whether the number was proven.
