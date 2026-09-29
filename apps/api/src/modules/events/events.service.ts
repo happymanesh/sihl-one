@@ -58,6 +58,28 @@ export class EventsService {
     return user.permissions.includes('campaign:read');
   }
 
+  /**
+   * What counts as "mine" on an event, for somebody who does not see the lot.
+   *
+   * Keyed on `capturedById` alone until now, on the reasoning that credit for a
+   * scan belongs to whoever's QR brought the lead in and should not move when
+   * the lead is handed on. Sound, but it described the wrong population: only a
+   * *personal* QR sets `capturedById`. The common QR sets nothing, and the
+   * assignment rules then give the lead an owner — so of fourteen event leads on
+   * production, three were captured and eight were owned by someone with no
+   * capturer at all. Those eight counted for nobody, and the rep who owned them
+   * was shown zero.
+   *
+   * Both halves count now: a lead this person captured, or one nobody captured
+   * that they ended up owning. A lead captured by a colleague and later handed
+   * over still belongs to the colleague's tally, which was the original point.
+   */
+  private myLeadsAtEvent(user: AuthenticatedPrincipal): Record<string, unknown> {
+    return {
+      OR: [{ capturedById: user.id }, { AND: [{ capturedById: null }, { ownerId: user.id }] }],
+    };
+  }
+
   /** The events a rep may see: their branch's and their ancestors', still open. */
   private repEventFilter(user: AuthenticatedPrincipal): Record<string, unknown> {
     // The principal already carries the materialised path, so the chain of
@@ -129,7 +151,7 @@ export class EventsService {
       lead on it. A count that cannot express the viewer is the wrong tool on a
       screen where the viewer decides what the number means.
     */
-    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
+    const mine = this.seesEverything(user) ? {} : this.myLeadsAtEvent(user);
     const ids = rows.map((row) => row.id);
 
     const [capturedRows, convertedRows] = await Promise.all([
@@ -176,10 +198,23 @@ export class EventsService {
     const now = new Date();
     const reach = this.seesEverything(user) ? {} : this.repEventFilter(user);
 
+    /*
+      Only the events this person may actually upload for.
+
+      Attributing rows to an event is held to `event:import` or to owning it, so
+      listing every event in the window would offer a choice the commit then
+      refuses. Someone with neither gets an empty list and, on the screen, no
+      event question at all — which is the difference between a rep doing a
+      plain import and a rep being told off for trying.
+    */
+    const mayFileAgainstAny = user.permissions.includes('event:import');
+    const uploadable = mayFileAgainstAny ? {} : { ownerId: user.id };
+
     const events = await this.prisma.event.findMany({
       where: {
         deletedAt: null,
         startsAt: { lte: now },
+        ...uploadable,
         // Cheap pre-filter so this never walks the whole table; the exact
         // window is applied below.
         OR: [
@@ -233,7 +268,7 @@ export class EventsService {
       to a colleague still counts for the person whose QR actually brought it
       in. Credit for the scan does not move with the work.
     */
-    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
+    const mine = this.seesEverything(user) ? {} : this.myLeadsAtEvent(user);
 
     /*
       The viewer's own employee code, for their personal QR.
@@ -374,7 +409,7 @@ export class EventsService {
 
     // A rep gets their own row and nothing else. Showing them a league table of
     // colleagues is a different product decision from the one asked for.
-    const mine = this.seesEverything(user) ? {} : { capturedById: user.id };
+    const mine = this.seesEverything(user) ? {} : this.myLeadsAtEvent(user);
 
     /*
       Grouped by rep and by whether the number was proven.

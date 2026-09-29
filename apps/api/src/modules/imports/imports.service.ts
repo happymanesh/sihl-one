@@ -917,23 +917,25 @@ export class ImportsService {
       : null;
 
     /*
-      A blank code stays unowned, and does not fall through to the rules engine.
+      On an event upload the owner is decided in this order.
 
-      A row with nobody's code against it is a visitor nobody claimed, and the
-      right answer is the same one the common QR gives: leave it unassigned for
-      a manager to distribute. Routing it would hand the whole unclaimed half of
-      a notebook to whoever the rules happen to pick, which reads as an
-      allocation somebody made on purpose.
-    */
-    /*
-      A rep's import is their own book.
+      The employee code on the row wins: it names the rep who actually took the
+      registration, which is why the column exists. Failing that, whoever the
+      uploader chose for the whole file — an event owner typing up a stall's
+      notebook may hand the rows to anyone beneath them in the org tree, whether
+      or not that person worked the event.
 
-      Their scope offers them nobody else to choose, so routing the rows through
-      the assignment rules would hand a file they typed up to a colleague the
-      engine happened to pick. Everything they bring in is theirs.
+      Failing both, unowned. A row nobody claimed is the case the common QR
+      produces too, and the answer is to leave it for a manager to distribute
+      rather than let the rules engine pick — which reads as an allocation
+      somebody made on purpose.
+
+      Off an event, a rep's import is simply their own book: their scope offers
+      them nobody else to choose, so routing through the rules would hand a file
+      they typed up to whichever colleague the engine picked.
     */
     const routed = context
-      ? { ownerId: capturedBy?.id ?? null, ruleId: null }
+      ? { ownerId: capturedBy?.id ?? options.assignToUserId ?? null, ruleId: null }
       : user.dataScope === 'SELF'
         ? { ownerId: user.id, ruleId: null }
         : options.assignToUserId
