@@ -11,7 +11,7 @@ import { LeadTable } from '@/components/leads/LeadTable';
 import { Pagination } from '@/components/ui/Pagination';
 import type { LeadOwnerFilterOptions, LeadSourceItem, ProductItem } from '@sihl-one/contracts';
 import { apiFetch, toQuery } from '@/lib/api';
-import { can, requireUser } from '@/lib/auth';
+import { can, canAny, requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 
 export const metadata = { title: 'Leads' };
@@ -225,7 +225,14 @@ export default async function LeadsPage({
               <Icon name="columns" size={16} />
               Pipeline view
             </Link>
-            {can(user, 'lead:import') ? (
+            {/*
+              Either grant reaches this page, and they reach different things
+              once inside it: `lead:import` may bring any file, `event:import`
+              only the registrations from one event inside its window. Gating on
+              `lead:import` alone hid the button from every rep the event upload
+              was built for — the page worked, but nothing led to it.
+            */}
+            {canAny(user, ['lead:import', 'event:import']) ? (
               <Link href="/leads/import" className="btn btn-outline">
                 Import
               </Link>

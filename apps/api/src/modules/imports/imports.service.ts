@@ -28,6 +28,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
+import { ScopeService } from '../../common/scope.service';
 import { istDayKey } from '../../common/ist-day';
 import { OutboxService } from '../../common/outbox.service';
 import { ReferenceService } from '../../common/reference.service';
@@ -73,6 +74,7 @@ export class ImportsService {
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
     private readonly assignment: AssignmentService,
+    private readonly scope: ScopeService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -382,6 +384,29 @@ export class ImportsService {
     */
     const context = await this.resolveEventContext(user, mapping);
 
+    /*
+      Who this file may be assigned to is checked here, not assumed.
+
+      `assignToUserId` arrives in the request body and was written straight onto
+      every lead the batch created. Nothing verified the importer was allowed to
+      assign to that person, so any id would do — which mattered little while
+      `lead:import` belonged to four senior roles, and matters a great deal now
+      that reps and partners hold it. A partner could have addressed a batch to
+      a SIHL employee, a rep to another branch.
+    */
+    if (input.assignToUserId && !(await this.scope.canAssignTo(user, input.assignToUserId))) {
+      throw new ForbiddenException({
+        title: 'You cannot assign to that person',
+        detail: 'Choose somebody in your own team.',
+      });
+    }
+    if (mapping.ownerId && !(await this.scope.canAssignTo(user, mapping.ownerId))) {
+      throw new ForbiddenException({
+        title: 'You cannot assign to that person',
+        detail: 'Choose somebody in your own team.',
+      });
+    }
+
     const overrides = new Map(input.decisions.map((entry) => [entry.rowNumber, entry.decision]));
 
     const rows = await this.prisma.leadImportRow.findMany({
@@ -582,14 +607,24 @@ export class ImportsService {
       });
     }
 
-    const reach = mayImportAnything
-      ? {}
-      : {
-          OR: [
-            { orgUnitId: { in: (user.orgUnitPath ?? '').split('/').filter(Boolean) } },
-            { orgUnitId: null },
-          ],
-        };
+    /*
+      Which events may be named, decided by data scope rather than by the import
+      permission.
+
+      It keyed off `lead:import` until reps were granted it, at which point a rep
+      could have attributed a file to any event in the company — including
+      another region's. What an event belongs to is a visibility question, and
+      visibility is what data scope is for.
+    */
+    const reach =
+      user.dataScope === 'ALL'
+        ? {}
+        : {
+            OR: [
+              { orgUnitId: { in: (user.orgUnitPath ?? '').split('/').filter(Boolean) } },
+              { orgUnitId: null },
+            ],
+          };
 
     const event = await this.prisma.event.findFirst({
       where: { id: mapping.eventId, deletedAt: null, ...reach },
@@ -868,19 +903,28 @@ export class ImportsService {
       a notebook to whoever the rules happen to pick, which reads as an
       allocation somebody made on purpose.
     */
+    /*
+      A rep's import is their own book.
+
+      Their scope offers them nobody else to choose, so routing the rows through
+      the assignment rules would hand a file they typed up to a colleague the
+      engine happened to pick. Everything they bring in is theirs.
+    */
     const routed = context
       ? { ownerId: capturedBy?.id ?? null, ruleId: null }
-      : options.assignToUserId
-        ? { ownerId: options.assignToUserId, ruleId: null }
-        : mapping.ownerId
-          ? { ownerId: mapping.ownerId, ruleId: null }
-          : await this.assignment.resolveOwner({
-              source: mapping.source,
-              productInterest,
-              city: mapped.city ?? null,
-              state: mapped.state ?? null,
-              campaignId: mapping.campaignId ?? null,
-            });
+      : user.dataScope === 'SELF'
+        ? { ownerId: user.id, ruleId: null }
+        : options.assignToUserId
+          ? { ownerId: options.assignToUserId, ruleId: null }
+          : mapping.ownerId
+            ? { ownerId: mapping.ownerId, ruleId: null }
+            : await this.assignment.resolveOwner({
+                source: mapping.source,
+                productInterest,
+                city: mapped.city ?? null,
+                state: mapped.state ?? null,
+                campaignId: mapping.campaignId ?? null,
+              });
 
     // The importer is the fallback owner: an imported lead nobody owns is a
     // lead nobody calls. Not so on an event upload, where unowned is an answer.

@@ -16,7 +16,12 @@ import type { Permission } from '@sihl-one/contracts';
 export interface HelpTopic {
   id: string;
   title: string;
-  permission: Permission | null;
+  /**
+   * `null` means everyone who can sign in. An array means any one of them is
+   * enough — some tasks are reachable by more than one grant, and a topic that
+   * names only the first hides itself from half the people who can do it.
+   */
+  permission: Permission | Permission[] | null;
   area: HelpArea;
   steps: string[];
   /** Shown under the steps where a rule is easy to trip over. */
@@ -108,10 +113,11 @@ export const HELP_TOPICS: HelpTopic[] = [
   {
     id: 'import-leads',
     title: 'Importing leads from a spreadsheet',
-    permission: 'lead:import',
+    permission: ['lead:import', 'event:import'],
     area: 'Leads',
     steps: [
       'Leads, then Import.',
+      'Say whether the file was taken at an event. If it was, pick the event — every row is then counted as a registration at it, and the sheet can carry the time each person came and the employee code of whoever took it.',
       'Upload the file and match your columns to the fields shown.',
       'Review what it found, then commit the batch.',
     ],
@@ -168,7 +174,10 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Assigning a lead',
     permission: 'lead:assign',
     area: 'Leads',
-    steps: ['Open the lead, then Assign.', 'Choose the person. Suggestions appear based on the branch and workload.'],
+    steps: [
+      'Open the lead, then Assign.',
+      'Choose the person. Suggestions appear based on the branch and workload.',
+    ],
   },
   {
     id: 'transfer-lead',
@@ -221,10 +230,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Converting a lead to a customer',
     permission: 'lead:convert',
     area: 'Leads',
-    steps: [
-      'Open the lead, then the Convert tab.',
-      'Enter the PAN and confirm.',
-    ],
+    steps: ['Open the lead, then the Convert tab.', 'Enter the PAN and confirm.'],
     note: 'This is final — a converted lead cannot be moved back. It creates one customer carrying every product they were interested in.',
   },
   {
@@ -232,10 +238,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Attaching a client document',
     permission: 'lead:update',
     area: 'Leads',
-    steps: [
-      'Open the lead and find Documents.',
-      'Choose the category, then attach the file.',
-    ],
+    steps: ['Open the lead and find Documents.', 'Choose the category, then attach the file.'],
     note: 'PDFs and images up to 20 MB. Files are scanned before they can be downloaded again.',
   },
   {
@@ -243,7 +246,10 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Exporting leads',
     permission: 'lead:export',
     area: 'Leads',
-    steps: ['Filter the Leads list to what you need.', 'Choose Export. Dates and times come out in the same format you see on screen.'],
+    steps: [
+      'Filter the Leads list to what you need.',
+      'Choose Export. Dates and times come out in the same format you see on screen.',
+    ],
     note: 'An export carries client contact details. Treat the file the way you would treat the client list itself.',
   },
 
@@ -422,7 +428,10 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Checking your own performance',
     permission: 'analytics:sales:read',
     area: 'Reporting',
-    steps: ['Open My performance from the menu.', 'You see your leads, conversions and activity against any target set for you.'],
+    steps: [
+      'Open My performance from the menu.',
+      'You see your leads, conversions and activity against any target set for you.',
+    ],
   },
   {
     id: 'management-performance',
@@ -437,7 +446,10 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Your partner business',
     permission: 'analytics:partner:read',
     area: 'Reporting',
-    steps: ['Open My business from the menu.', 'You see the leads you referred and what became of them.'],
+    steps: [
+      'Open My business from the menu.',
+      'You see the leads you referred and what became of them.',
+    ],
   },
 
   // ---- Administration -----------------------------------------------------
@@ -459,7 +471,10 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Adding a branch, region or zone',
     permission: 'system:configure',
     area: 'Administration',
-    steps: ['Branches and regions, then add the unit.', 'Choose its type and its parent in the hierarchy.'],
+    steps: [
+      'Branches and regions, then add the unit.',
+      'Choose its type and its parent in the hierarchy.',
+    ],
     note: 'Data scope follows this tree. A branch in the wrong place means the wrong people see those leads.',
   },
   {
@@ -493,7 +508,9 @@ export const HELP_TOPICS: HelpTopic[] = [
 
 /** The topics a given person can act on. Same rule the navigation uses. */
 export function visibleHelpTopics(permissions: readonly string[]): HelpTopic[] {
-  return HELP_TOPICS.filter(
-    (topic) => topic.permission === null || permissions.includes(topic.permission),
-  );
+  return HELP_TOPICS.filter((topic) => {
+    if (topic.permission === null) return true;
+    const needed = Array.isArray(topic.permission) ? topic.permission : [topic.permission];
+    return needed.some((permission) => permissions.includes(permission));
+  });
 }
