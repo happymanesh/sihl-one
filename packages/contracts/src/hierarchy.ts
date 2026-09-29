@@ -24,12 +24,52 @@ import { emailSchema, idSchema, indianMobileSchema } from './common';
 
 /** Higher number means more senior. Gaps left so levels can be slotted between. */
 export const DESIGNATION_SEED = [
-  { code: 'SALES_EXECUTIVE', name: 'Sales Executive', level: 10, defaultScope: 'SELF', isActive: true },
-  { code: 'SALES_TEAM_LEADER', name: 'Sales Team Leader', level: 20, defaultScope: 'TEAM', isActive: true },
+  {
+    code: 'SALES_EXECUTIVE',
+    name: 'Sales Executive',
+    level: 10,
+    defaultScope: 'SELF',
+    isActive: true,
+  },
+  {
+    code: 'SALES_TEAM_LEADER',
+    name: 'Sales Team Leader',
+    level: 20,
+    defaultScope: 'TEAM',
+    isActive: true,
+  },
   // Seeded inactive: available the moment the company needs it, invisible until then.
-  { code: 'AREA_MANAGER', name: 'Area Manager', level: 30, defaultScope: 'BRANCH', isActive: false },
-  { code: 'SALES_MANAGER', name: 'Sales Manager', level: 40, defaultScope: 'BRANCH', isActive: true },
-  { code: 'REGIONAL_HEAD', name: 'Regional Head', level: 60, defaultScope: 'REGION', isActive: true },
+  {
+    code: 'AREA_MANAGER',
+    name: 'Area Manager',
+    level: 30,
+    defaultScope: 'BRANCH',
+    isActive: false,
+  },
+  {
+    code: 'SALES_MANAGER',
+    name: 'Sales Manager',
+    level: 40,
+    defaultScope: 'BRANCH',
+    isActive: true,
+  },
+  // Created directly in production on 29 September and recorded here so every
+  // other environment has it too. `isActive` is only ever written on create, so
+  // this cannot undo an operator switching a level off.
+  {
+    code: 'BRANCH_MANAGER',
+    name: 'Branch Manager',
+    level: 50,
+    defaultScope: 'BRANCH',
+    isActive: true,
+  },
+  {
+    code: 'REGIONAL_HEAD',
+    name: 'Regional Head',
+    level: 60,
+    defaultScope: 'REGION',
+    isActive: true,
+  },
   { code: 'ZONAL_HEAD', name: 'Zonal Head', level: 80, defaultScope: 'ZONE', isActive: true },
   { code: 'NATIONAL_HEAD', name: 'National Head', level: 100, defaultScope: 'ALL', isActive: true },
 ] as const satisfies ReadonlyArray<{
@@ -156,34 +196,35 @@ export function suggestWorkEmail(
   return null;
 }
 
-export const createUserSchema = z.object({
-  firstName: z.string().trim().min(1).max(60),
-  lastName: z.string().trim().min(1).max(60),
-  /**
-   * Optional for staff: left out, the server generates
-   * firstname.lastname@sihl.in. Partners must supply their own address —
-   * they are not SIHL staff and do not get SIHL mail.
-   */
-  email: emailSchema.optional(),
-  mobile: indianMobileSchema.optional(),
-  /**
-   * Generated for staff (SIHL-0001) when absent. Required for partners, where
-   * it is the code the back office already issued them — see the refinement
-   * below for why it is not generated on their behalf.
-   */
-  employeeCode: employeeCodeSchema.optional(),
-  designationId: idSchema,
-  roleCodes: z.array(z.enum(ROLES)).min(1, 'Choose at least one role').max(4),
-  orgUnitId: idSchema,
-  managerId: idSchema.optional(),
-  /**
-   * Optional override. Only ever narrows the designation's default — widening
-   * is silently ignored, which is the same rule effectiveScope() applies to
-   * role defaults.
-   */
-  dataScope: z.enum(DATA_SCOPES).optional(),
-  userType: z.enum(USER_TYPES).default('INTERNAL'),
-})
+export const createUserSchema = z
+  .object({
+    firstName: z.string().trim().min(1).max(60),
+    lastName: z.string().trim().min(1).max(60),
+    /**
+     * Optional for staff: left out, the server generates
+     * firstname.lastname@sihl.in. Partners must supply their own address —
+     * they are not SIHL staff and do not get SIHL mail.
+     */
+    email: emailSchema.optional(),
+    mobile: indianMobileSchema.optional(),
+    /**
+     * Generated for staff (SIHL-0001) when absent. Required for partners, where
+     * it is the code the back office already issued them — see the refinement
+     * below for why it is not generated on their behalf.
+     */
+    employeeCode: employeeCodeSchema.optional(),
+    designationId: idSchema,
+    roleCodes: z.array(z.enum(ROLES)).min(1, 'Choose at least one role').max(4),
+    orgUnitId: idSchema,
+    managerId: idSchema.optional(),
+    /**
+     * Optional override. Only ever narrows the designation's default — widening
+     * is silently ignored, which is the same rule effectiveScope() applies to
+     * role defaults.
+     */
+    dataScope: z.enum(DATA_SCOPES).optional(),
+    userType: z.enum(USER_TYPES).default('INTERNAL'),
+  })
   .superRefine((input, ctx) => {
     if (input.userType !== 'PARTNER') return;
 
@@ -278,7 +319,10 @@ export function canManageUserAt(actor: ActorContext, target: TargetContext): Esc
 
   // 2. Never reach outside your own part of the organisation.
   if (!actor.orgUnitPath) {
-    return { allowed: false, reason: 'You are not attached to a branch, so you cannot manage users.' };
+    return {
+      allowed: false,
+      reason: 'You are not attached to a branch, so you cannot manage users.',
+    };
   }
   if (!target.orgUnitPath || !target.orgUnitPath.startsWith(actor.orgUnitPath)) {
     return {

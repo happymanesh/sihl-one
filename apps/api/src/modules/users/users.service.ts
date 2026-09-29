@@ -3,10 +3,14 @@ import { canTransferLeads } from '@sihl-one/contracts';
 
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ScopeService } from '../../common/scope.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly scope: ScopeService,
+  ) {}
 
   /**
    * Candidate owners for a lead or task.
@@ -27,13 +31,22 @@ export class UsersService {
     const where: Record<string, unknown> = {
       deletedAt: null,
       status: 'ACTIVE',
-      userType: 'INTERNAL',
+      // A partner hands work to their own staff, who are PARTNER logins, not
+      // internal ones. Filtering to INTERNAL returned an empty list for them.
+      userType: user.partnerId ? 'PARTNER' : 'INTERNAL',
     };
 
+    /*
+      The same rule the save enforces.
+
+      This list and `canAssignTo` used to be written out separately, both as
+      "me and my direct reports". Now they share `assignableUserScope`, so a
+      manager offered a name in the dropdown can always act on it — and a
+      regional head sees their whole vertical rather than the handful of people
+      who happen to report to them directly.
+    */
     const widen = forTransfer && canTransferLeads(user.dataScope);
-    if (user.dataScope !== 'ALL' && !widen) {
-      where.id = { in: [user.id, ...user.teamUserIds] };
-    }
+    if (!widen) Object.assign(where, this.scope.assignableUserScope(user));
 
     if (search) {
       where.OR = [

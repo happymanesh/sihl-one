@@ -43,7 +43,10 @@ export class TasksService {
     if (query.entityId) and.push({ entityId: query.entityId });
     if (query.dueBefore) and.push({ dueAt: { lte: query.dueBefore } });
     if (query.overdueOnly) {
-      and.push({ dueAt: { lt: new Date() }, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } });
+      and.push({
+        dueAt: { lt: new Date() },
+        statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
+      });
     }
 
     const where = { deletedAt: null, AND: and };
@@ -125,7 +128,10 @@ export class TasksService {
         // a lead being reassigned out of scope.
         about: task.entityId ? (leadById.get(task.entityId) ?? null) : null,
         assignee: task.assignee
-          ? { id: task.assignee.id, fullName: `${task.assignee.firstName} ${task.assignee.lastName}`.trim() }
+          ? {
+              id: task.assignee.id,
+              fullName: `${task.assignee.firstName} ${task.assignee.lastName}`.trim(),
+            }
           : null,
         completedAt: task.completedAt?.toISOString() ?? null,
         createdAt: task.createdAt.toISOString(),
@@ -138,7 +144,7 @@ export class TasksService {
 
   async create(user: AuthenticatedPrincipal, input: CreateTaskInput) {
     const assigneeId = input.assigneeId ?? user.id;
-    if (!this.scope.canAssignTo(user, assigneeId)) {
+    if (!(await this.scope.canAssignTo(user, assigneeId))) {
       throw new BadRequestException({
         title: 'Cannot assign that task',
         detail: 'You may only create tasks for yourself or your team.',
@@ -230,14 +236,19 @@ export class TasksService {
       });
     }
 
-    if (TERMINAL_CATEGORIES.has(currentCategory) && nextCategory && !TERMINAL_CATEGORIES.has(nextCategory)) {
+    if (
+      TERMINAL_CATEGORIES.has(currentCategory) &&
+      nextCategory &&
+      !TERMINAL_CATEGORIES.has(nextCategory)
+    ) {
       throw new BadRequestException({
         title: 'Task is closed',
-        detail: 'A completed or cancelled task cannot be reopened. Create a follow-up task instead.',
+        detail:
+          'A completed or cancelled task cannot be reopened. Create a follow-up task instead.',
       });
     }
 
-    if (input.assigneeId && !this.scope.canAssignTo(user, input.assigneeId)) {
+    if (input.assigneeId && !(await this.scope.canAssignTo(user, input.assigneeId))) {
       throw new BadRequestException({ title: 'Cannot reassign to that user' });
     }
 
@@ -286,9 +297,15 @@ export class TasksService {
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
     const [open, overdue, dueToday, completedThisWeek] = await this.prisma.$transaction([
-      this.prisma.task.count({ where: { ...base, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } } }),
       this.prisma.task.count({
-        where: { ...base, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } }, dueAt: { lt: now } },
+        where: { ...base, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } },
+      }),
+      this.prisma.task.count({
+        where: {
+          ...base,
+          statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
+          dueAt: { lt: now },
+        },
       }),
       this.prisma.task.count({
         where: {

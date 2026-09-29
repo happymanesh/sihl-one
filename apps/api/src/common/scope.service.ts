@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedPrincipal } from './types';
 
 /**
@@ -21,6 +22,8 @@ import type { AuthenticatedPrincipal } from './types';
  */
 @Injectable()
 export class ScopeService {
+  constructor(private readonly prisma: PrismaService) {}
+
   /**
    * Row filter for entities that carry `ownerId` + `orgUnitId`
    * (leads, opportunities).
@@ -47,7 +50,9 @@ export class ScopeService {
           OR: [
             { ownerId: { in: [user.id, ...user.teamUserIds] } },
             user.orgUnitPath
-              ? { AND: [{ ownerId: null }, { orgUnit: { path: { startsWith: user.orgUnitPath } } }] }
+              ? {
+                  AND: [{ ownerId: null }, { orgUnit: { path: { startsWith: user.orgUnitPath } } }],
+                }
               : { id: '__no_access__' },
           ],
         };
@@ -83,9 +88,7 @@ export class ScopeService {
           // row until the two are joined by id in Phase 2.
           return { email: user.email };
         }
-        return user.partnerId
-          ? { partnerId: user.partnerId }
-          : { relationshipManagerId: user.id };
+        return user.partnerId ? { partnerId: user.partnerId } : { relationshipManagerId: user.id };
     }
   }
 
@@ -164,9 +167,76 @@ export class ScopeService {
    * Used when assigning a lead: a manager may assign within their team, an
    * unscoped role may assign to anyone, a self-scoped user only to themselves.
    */
-  canAssignTo(user: AuthenticatedPrincipal, targetUserId: string): boolean {
-    if (user.dataScope === 'ALL') return true;
-    if (user.dataScope === 'SELF') return targetUserId === user.id;
-    return targetUserId === user.id || user.teamUserIds.includes(targetUserId);
+  /**
+   * Row filter for the people this person may hand work to.
+   *
+   * One definition, used both to build the "assign to" list and to check the id
+   * that comes back from it. Two rules is how a dropdown offers a name the save
+   * then refuses.
+   *
+   * Each scope keeps the meaning it already has elsewhere:
+   *
+   *   SELF     themselves and nobody else, so a sales executive's imports land
+   *            on them because there is no one else to choose.
+   *   TEAM     themselves and their direct reports — a team leader's team is the
+   *            people who report to them, not everyone in the building.
+   *   BRANCH,  themselves and everyone beneath them in the org tree. This is what
+   *   REGION,  "their vertical" means for a branch, regional or zonal manager,
+   *   ZONE     and it is the rule that changed: it was direct reports only, so a
+   *            regional head could not reach a rep two levels down.
+   *   ALL      anyone — management, operations, marketing, super admin.
+   *
+   * A partner is decided before scope: they hand work inside their own firm,
+   * whatever scope their login carries. Their staff sit outside SIHL's org tree,
+   * so a subtree match would return nobody at all.
+   */
+  assignableUserScope(user: AuthenticatedPrincipal): Record<string, unknown> {
+    if (user.partnerId) return { partnerId: user.partnerId };
+
+    switch (user.dataScope) {
+      case 'ALL':
+        return {};
+
+      case 'ZONE':
+      case 'REGION':
+      case 'BRANCH':
+        return user.orgUnitPath
+          ? { OR: [{ id: user.id }, { orgUnit: { path: { startsWith: user.orgUnitPath } } }] }
+          : { id: user.id };
+
+      case 'TEAM':
+        return { id: { in: [user.id, ...user.teamUserIds] } };
+
+      case 'SELF':
+      default:
+        return { id: user.id };
+    }
+  }
+
+  /**
+   * Whether this person may hand work to that one.
+   *
+   * Asynchronous because the answer depends on where the *target* sits, which
+   * the principal does not carry. One indexed lookup; the alternative is
+   * trusting a list the client was handed earlier, which is how a stale dropdown
+   * becomes a way to assign leads out of scope.
+   */
+  async canAssignTo(user: AuthenticatedPrincipal, targetUserId: string): Promise<boolean> {
+    // Two answers that need no query: anyone may assign to themselves, and an
+    // unrestricted scope may assign to anyone.
+    if (targetUserId === user.id) return true;
+    if (user.dataScope === 'ALL' && !user.partnerId) return true;
+
+    const match = await this.prisma.user.findFirst({
+      where: {
+        id: targetUserId,
+        deletedAt: null,
+        status: 'ACTIVE',
+        ...this.assignableUserScope(user),
+      },
+      select: { id: true },
+    });
+
+    return Boolean(match);
   }
 }

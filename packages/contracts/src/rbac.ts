@@ -111,6 +111,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   MANAGEMENT: [
     'lead:read',
     'lead:export',
+    'lead:import',
     'customer:read',
     'customer:export',
     'activity:read',
@@ -131,6 +132,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'lead:read',
     'lead:update',
     'lead:import',
+    'lead:export',
     'customer:read',
     'customer:create',
     'customer:update',
@@ -207,6 +209,21 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'visit:read',
     'visit:create',
     'visit:update',
+    /*
+      Reps import and export their own book.
+
+      Granted on the product owner's instruction: a rep with a list of contacts
+      should not have to queue behind whoever holds the permission, and the
+      export is how they work their own leads in a spreadsheet on the road.
+
+      What they cannot do is choose where the leads land. Their scope is SELF,
+      so `assignableUserScope` offers them only themselves and everything they
+      import is theirs. `event:import` stays alongside this rather than being
+      made redundant by it — it is the narrower grant, and the five-day window
+      still binds any file attributed to an event whoever uploads it.
+    */
+    'lead:import',
+    'lead:export',
     'event:import',
     'analytics:sales:read',
   ],
@@ -214,6 +231,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   PARTNER: [
     'lead:read',
     'lead:create',
+    // A partner brings their own book and works it in a spreadsheet. Both are
+    // confined to their firm: `assignableUserScope` matches on `partnerId`, so
+    // they can hand a lead to their own staff and to nobody at SIHL.
+    'lead:import',
+    'lead:export',
     'customer:read',
     'activity:read',
     'activity:create',

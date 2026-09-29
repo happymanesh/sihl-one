@@ -612,7 +612,7 @@ export class LeadsService {
     // A lead created by a salesperson defaults to that salesperson. Leaving it
     // unassigned would put it in a queue nobody is watching.
     const ownerId = input.ownerId ?? (user.userType === 'INTERNAL' ? user.id : null);
-    if (input.ownerId && !this.scope.canAssignTo(user, input.ownerId)) {
+    if (input.ownerId && !(await this.scope.canAssignTo(user, input.ownerId))) {
       throw new ForbiddenException({
         title: 'Cannot assign to that user',
         detail: 'You may only assign leads to yourself or to your team.',
@@ -1314,7 +1314,7 @@ export class LeadsService {
   async assign(user: AuthenticatedPrincipal, id: string, input: AssignLeadInput) {
     const lead = await this.mustFindInScope(user, id);
 
-    if (!this.scope.canAssignTo(user, input.ownerId)) {
+    if (!(await this.scope.canAssignTo(user, input.ownerId))) {
       throw new ForbiddenException({
         title: 'Cannot assign to that user',
         detail: 'You may only assign leads to yourself or to members of your team.',
@@ -1385,7 +1385,7 @@ export class LeadsService {
   }
 
   async bulkAssign(user: AuthenticatedPrincipal, input: BulkAssignLeadInput) {
-    if (!this.scope.canAssignTo(user, input.ownerId)) {
+    if (!(await this.scope.canAssignTo(user, input.ownerId))) {
       throw new ForbiddenException({ title: 'Cannot assign to that user' });
     }
 
