@@ -628,12 +628,34 @@ export class ImportsService {
 
     const event = await this.prisma.event.findFirst({
       where: { id: mapping.eventId, deletedAt: null, ...reach },
-      select: { id: true, name: true, code: true, startsAt: true, endsAt: true },
+      select: { id: true, name: true, code: true, startsAt: true, endsAt: true, ownerId: true },
     });
     // Not found rather than forbidden, deliberately: the same answer an id that
     // does not exist gets, so this cannot be used to discover which events other
     // branches are running.
     if (!event) throw new NotFoundException({ title: 'Event not found' });
+
+    /*
+      Filing rows against an event is not something `lead:import` buys.
+
+      Attributing a batch moves the numbers the event is judged on — its
+      registered total, its cost per lead, the rep breakdown — so it is held to
+      `event:import`, which the back office has and sales does not. Checking it
+      here rather than at the route is deliberate: the route cannot know which
+      event was chosen, and every role may still import an ordinary file.
+
+      The owner of the event is the second way in, and the one that keeps the
+      stall working: make the rep who runs it the owner, and they may upload for
+      it without holding a permission over anybody else's event.
+    */
+    const ownsThisEvent = event.ownerId === user.id;
+    if (!ownsThisEvent && !user.permissions.includes('event:import')) {
+      throw new ForbiddenException({
+        title: 'You cannot upload registrations for this event',
+        detail:
+          'Only the event owner, or someone in operations or management, can file a file against an event.',
+      });
+    }
 
     if (!eventImportOpen(event)) {
       throw new BadRequestException({

@@ -63,18 +63,22 @@ export const PERMISSIONS = [
   */
   'event:view',
   /*
-    Uploading a file of registrations taken on paper, against one event.
+    Filing a batch of registrations against an event.
 
-    Deliberately not `lead:import`. When the network drops at a stall the rep
-    writes names in a notebook, and the person who can turn that notebook into
-    leads has to be the rep — routing it through whoever holds `lead:import`
-    means it happens days later or not at all.
+    Held by the back office — super admin, operations and management — and by
+    nobody in sales. Attributing rows to an event moves the numbers that event
+    is judged on, so it is a controlled act rather than something any rep can do
+    with a spreadsheet.
 
-    What makes that safe to grant is how narrow it is. It only works against an
-    event the holder can already see, only inside the window after that event,
-    and every row lands on that event. It cannot be used to bring a bought list
-    or a previous employer's spreadsheet into SIHL; that still needs
-    `lead:import`, and the declaration that goes with it.
+    It is not the only way in. The owner of an event may always upload for that
+    event, whoever they are, which is how a stall's own rep files the notebook
+    they filled in: they are made the owner of the event they are working. That
+    check lives in `ImportsService.resolveEventContext`, because it is a
+    question about one event rather than about a role.
+
+    Either way the file is confined — an event the uploader can see, inside the
+    window after it, every row landing on that event. Bringing an arbitrary list
+    into SIHL is `lead:import`, and carries its own declaration.
   */
   'event:import',
 
@@ -112,6 +116,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'lead:read',
     'lead:export',
     'lead:import',
+    'event:import',
     'customer:read',
     'customer:export',
     'activity:read',
@@ -133,6 +138,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'lead:update',
     'lead:import',
     'lead:export',
+    'event:import',
     'customer:read',
     'customer:create',
     'customer:update',
@@ -174,7 +180,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // and wrong for provenance — the declaration should be made by the person
     // who actually knows where the data came from.
     'lead:import',
-    'event:import',
     'customer:read',
     'customer:update',
     'activity:read',
@@ -224,7 +229,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     */
     'lead:import',
     'lead:export',
-    'event:import',
     'analytics:sales:read',
   ],
 
