@@ -46,9 +46,25 @@ export class ScopeService {
     */
     const ownedEvents = { AND: [{ ownerId: null }, { event: { ownerId: user.id } }] };
 
+    /*
+      A lead product owner can see the lead their product sits on.
+
+      Assignment happens per product once a lead has any, so somebody can be
+      handed the Equity business on a lead whose overall owner is a colleague.
+      Scope filters on `lead.ownerId`, so without this they would be given work
+      on a record they cannot open — the assignment would appear to succeed and
+      the lead would be invisible to the person now responsible for it.
+
+      It grants sight of the whole lead, not just their row. There is no way to
+      show one product of a person: the name, the number and the history are the
+      lead, and you cannot call somebody about their mutual funds while being
+      blind to the fact that a colleague is mid-negotiation on their equity.
+    */
+    const ownedProducts = { products: { some: { ownerId: user.id } } };
+
     // An unrestricted scope already covers it; OR-ing would only add work.
     if (Object.keys(base).length === 0) return base;
-    return { OR: [base, ownedEvents] };
+    return { OR: [base, ownedEvents, ownedProducts] };
   }
 
   private leadScopeBase(user: AuthenticatedPrincipal): Record<string, unknown> {

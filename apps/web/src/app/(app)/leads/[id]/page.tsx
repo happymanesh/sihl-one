@@ -49,6 +49,9 @@ interface LeadDetail {
   scoreFactors: Array<{ code: string; label: string; points: number }>;
   nextBestActions: Array<{ code: string; title: string; reason: string; urgency: string }>;
   owner: { id: string; fullName: string; email: string } | null;
+  createdBy: { id: string; fullName: string } | null;
+  capturedBy: { id: string; fullName: string } | null;
+  event: { id: string; name: string; code: string } | null;
   partner: { id: string; name: string; type: string } | null;
   campaign: { id: string; name: string; code: string } | null;
   orgUnit: { id: string; name: string } | null;
@@ -122,7 +125,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // extra here, not the reason anyone opened this screen.
   const templates = can(user, 'activity:create')
     ? await apiFetch<
-        Array<{ code: string; name: string; channel: string; purpose: string; body: string; isActive: boolean }>
+        Array<{
+          code: string;
+          name: string;
+          channel: string;
+          purpose: string;
+          body: string;
+          isActive: boolean;
+        }>
       >('/messaging/templates')
         .then((rows) => rows.filter((row) => row.isActive))
         .catch(() => [])
@@ -351,7 +361,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <section className="card p-5">
             <h2 className="font-bold">Details</h2>
             <dl className="mt-3 space-y-2.5 text-sm">
-              <Detail label="Owner" value={lead.owner?.fullName ?? 'Unassigned'} />
+              <Detail label="Lead owner" value={lead.owner?.fullName ?? 'Unassigned'} />
+              {/*
+                Who put it in, and whose QR brought them in.
+
+                Neither moves when the lead is handed on, which is why they sit
+                beside the owner rather than instead of it — "who has this now"
+                and "who found them" are different questions and the screen was
+                only answering the first.
+
+                Captured by appears only for a lead that came from an event,
+                because for every other origin there is nobody to name and an
+                empty row reads as missing data.
+              */}
+              <Detail label="Created by" value={lead.createdBy?.fullName ?? '—'} />
+              {lead.event ? (
+                <Detail label="Captured by" value={lead.capturedBy?.fullName ?? 'Common QR'} />
+              ) : null}
               <Detail label="Source" value={humanise(lead.source)} />
               <Detail label="Branch" value={lead.orgUnit?.name ?? '—'} />
               <Detail label="Partner" value={lead.partner?.name ?? '—'} />
@@ -379,7 +405,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 {Object.entries(lead.attribution)
                   .filter(([, value]) => value)
                   .map(([key, value]) => (
-                    <Detail key={key} label={humanise(key.replace(/^utm/, 'UTM '))} value={value!} />
+                    <Detail
+                      key={key}
+                      label={humanise(key.replace(/^utm/, 'UTM '))}
+                      value={value!}
+                    />
                   ))}
               </dl>
             </section>

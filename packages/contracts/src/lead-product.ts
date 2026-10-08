@@ -59,9 +59,7 @@ const ADVANCEMENT: Record<LeadProductStatus, number> = {
  * is open the lead takes the best outcome reached: a client who bought equity
  * and declined the rest converted, and reporting them as lost would be wrong.
  */
-export function rollUpLeadStatus(
-  productStatuses: readonly LeadProductStatus[],
-): LeadStatus | null {
+export function rollUpLeadStatus(productStatuses: readonly LeadProductStatus[]): LeadStatus | null {
   // No products is not the same as no interest — plenty of leads are a name and
   // a number for a week. Null means "leave the lead's own status alone".
   if (productStatuses.length === 0) return null;
@@ -136,7 +134,47 @@ export interface LeadProductView {
   /** The PAN or client code the conversion was recorded against. */
   conversionRef: string | null;
   conversionRefKind: string | null;
+
+  /**
+   * The lead product owner — who is working this product.
+   *
+   * Null when nobody has been named for it specifically, in which case the
+   * lead's own owner answers for it. The screen says so rather than showing a
+   * blank, because "nobody" and "the lead owner" are different answers.
+   */
+  owner: { id: string; fullName: string; designation: string | null; branch: string | null } | null;
+  /** When it was handed to that person, for the history. */
+  assignedAt: string | null;
 }
+
+/**
+ * Assigning one product on a lead.
+ *
+ * Separate from `assignLeadSchema`, which moves the lead as a whole. Once a
+ * lead has products, work is handed over a product at a time — a client's
+ * broking business and their wealth business are two conversations with two
+ * desks, and one owner for both was the thing sales asked us to stop doing.
+ */
+export const assignLeadProductSchema = z.object({
+  productCode: codeSchema,
+  /** Null hands the product back, so the lead's own owner answers for it again. */
+  ownerId: idSchema.nullable(),
+  note: z.string().trim().max(500).optional(),
+});
+export type AssignLeadProductInput = z.infer<typeof assignLeadProductSchema>;
+
+/**
+ * Assigning every product on a lead to one person, in a single act.
+ *
+ * A shortcut, not a different rule: it writes the same per-product owner to
+ * each row. Without it, handing a whole lead over means as many clicks as the
+ * client has products, which is where people stop bothering.
+ */
+export const assignAllLeadProductsSchema = z.object({
+  ownerId: idSchema,
+  note: z.string().trim().max(500).optional(),
+});
+export type AssignAllLeadProductsInput = z.infer<typeof assignAllLeadProductsSchema>;
 
 /**
  * How far back the Closed column reaches.

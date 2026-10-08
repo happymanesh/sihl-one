@@ -192,6 +192,33 @@ model User {
   /// deliberately loose in format so it can match whatever HR already uses.
   employeeCode String? @db.VarChar(24)
 
+  /// Whether this person may hand a lead to somebody else.
+  ///
+  /// A per-user subtraction from what their role grants, not an addition to it:
+  /// off removes `lead:assign`, on simply leaves the role's answer alone. That
+  /// direction is deliberate — a switch that could *grant* authority would mean
+  /// two sources of truth for "may this person do X", and "why can they see
+  /// that" becomes unanswerable without reading both.
+  ///
+  /// Defaults to true, so nobody loses a capability by this column appearing.
+  canAssignLeads Boolean @default(true)
+
+  /// Products on leads this person is working, one row per product.
+  leadProducts LeadProduct[] @relation("LeadProductOwner")
+
+  /// Which product groups this person sells.
+  ///
+  /// Group *codes*, matching `product_group.code`, the same shape
+  /// `lead.productInterest` uses for product codes. A plain array rather than a
+  /// join table because it is read on every assignment decision and written
+  /// once in a while from one form; a join would add a query to the hot path to
+  /// buy referential integrity over a list the admin screen already constrains.
+  ///
+  /// Read by the assignment engine as a *preference*: a matching rep is chosen
+  /// ahead of a non-matching one, but a lead whose group nobody claims is still
+  /// assigned rather than left to rot.
+  productGroups String[]
+
   /// True once a record is owned by the HR sync. Without this the first sync
   /// would clobber every user created by hand in the admin screen.
   isHrManaged Boolean @default(false)
@@ -332,10 +359,42 @@ model LeadSourceMaster {
 /// in, and it is the catalogue a salesperson opens in front of a client — which
 /// is why it carries description, benefits, charges and eligibility rather than
 /// just a code and a label.
+/// A desk's worth of products: Broking, Wealth, Research, Algo, Global.
+///
+/// The tier above the product master. A sub-product is a way of buying its
+/// parent; a group is a desk that sells several unrelated products, so they are
+/// deliberately not folded into the same hierarchy — "Equity" would otherwise be
+/// both a product and a group, and every count that walks the tree would have to
+/// know which it was looking at.
+model ProductGroup {
+  id   String @id @default(cuid())
+  code String @unique @db.VarChar(40)
+  name String @db.VarChar(80)
+
+  products Product[]
+
+  isActive  Boolean @default(true)
+  isSystem  Boolean @default(false)
+  sortOrder Int     @default(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("product_group")
+}
+
 model Product {
   id   String @id @default(cuid())
   code String @unique @db.VarChar(40)
   name String @db.VarChar(80)
+
+  /// The desk this product belongs to.
+  ///
+  /// Restrict rather than cascade: deleting a group must never silently take
+  /// its products with it. Move them out first.
+  groupId String?
+  group   ProductGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   /// Parent product, for sub-products such as Equity → Intraday.
   ///
@@ -806,6 +865,23 @@ model LeadProduct {
   /// Code into `product`. Validated on write; the foreign key is the last word.
   productCode String  @db.VarChar(40)
   product     Product @relation(fields: [productCode], references: [code], onDelete: Restrict, onUpdate: Cascade)
+
+  /// The lead product owner — who is working this product on this lead.
+  ///
+  /// Distinct from `lead.ownerId`, which remains the owner of the lead as a
+  /// whole. A whole-lead assignment happens on import and while the lead has no
+  /// products; once products exist, work is handed over one product at a time,
+  /// because a client's broking business and their wealth business are two
+  /// conversations with two desks.
+  ///
+  /// Null means nobody has been named for this product specifically, and the
+  /// lead's own owner answers for it. SetNull rather than Cascade: a leaver must
+  /// not take the product row with them.
+  ownerId String?
+  owner   User?   @relation("LeadProductOwner", fields: [ownerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// When this product was handed to its current owner, for the stage history.
+  assignedAt DateTime?
 
   /// Same vocabulary as the lead's own status, on purpose.
   status String @default("NEW") @db.VarChar(40)

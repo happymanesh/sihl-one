@@ -21,6 +21,8 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import {
+  assignAllLeadProductsSchema,
+  assignLeadProductSchema,
   assignLeadSchema,
   changeLeadProductStatusSchema,
   convertProductSchema,
@@ -43,7 +45,9 @@ import {
   leadExportQuerySchema,
   leadQuerySchema,
   updateLeadSchema,
+  type AssignAllLeadProductsInput,
   type AssignLeadInput,
+  type AssignLeadProductInput,
   type ChangeLeadProductStatusInput,
   type ConvertProductInput,
   type CheckLeadMobileInput,
@@ -467,6 +471,32 @@ export class LeadsController {
   @ApiOperation({ summary: "A lead's products and where each one stands" })
   products(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
     return this.leads.productsFor(user, id);
+  }
+
+  @Post(':id/products/assign')
+  @RequirePermissions('lead:assign')
+  @ApiParam({ name: 'id', description: 'Lead id' })
+  @ApiOperation({ summary: 'Hand one product on this lead to somebody' })
+  @ApiZodBody(assignLeadProductSchema)
+  assignProduct(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(assignLeadProductSchema) body: AssignLeadProductInput,
+  ) {
+    return this.leads.assignProduct(user, id, body);
+  }
+
+  @Post(':id/products/assign-all')
+  @RequirePermissions('lead:assign')
+  @ApiParam({ name: 'id', description: 'Lead id' })
+  @ApiOperation({ summary: 'Hand every open product on this lead to one person' })
+  @ApiZodBody(assignAllLeadProductsSchema)
+  assignAllProducts(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(assignAllLeadProductsSchema) body: AssignAllLeadProductsInput,
+  ) {
+    return this.leads.assignAllProducts(user, id, body);
   }
 
   @Post(':id/products/convert')

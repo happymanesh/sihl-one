@@ -18,7 +18,9 @@ import {
   scoreBandFor,
   STRONG_LEAD_SCORE,
   verificationSurvivesEdit,
+  type AssignAllLeadProductsInput,
   type AssignLeadInput,
+  type AssignLeadProductInput,
   type ChangeLeadProductStatusInput,
   type ClosedPeriod,
   type ConvertProductInput,
@@ -54,6 +56,7 @@ import { ScopeService } from '../../common/scope.service';
 import { RequestContextStore } from '../../common/request-context';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import type { Prisma } from '../../generated/prisma/client';
+import { csvCell } from '../../common/csv';
 import { PrismaService } from '../../prisma/prisma.service';
 import { istDayKey } from '../../common/ist-day';
 import type {
@@ -145,28 +148,6 @@ function istStamp(when: Date): string {
 /** Rows one export may contain. A ceiling, so one click cannot exhaust memory. */
 const LEAD_EXPORT_MAX_ROWS = 20_000;
 
-/**
- * One CSV cell, escaped and defused.
- *
- * Two separate problems, both silent:
- *
- * **Quoting.** A comma, a quote or a newline inside a value breaks the row into
- * pieces, and a client called `Shah, Manesh` quietly becomes two columns.
- * Everything is quoted and inner quotes doubled, which is what RFC 4180 asks
- * for and what every spreadsheet actually implements.
- *
- * **Formula injection.** A value beginning `=`, `+`, `-`, `@`, tab or carriage
- * return is executed as a formula when the file is opened — so a lead whose
- * name is `=HYPERLINK("http://…")` runs on the machine of whoever exports the
- * book. The fix is a leading apostrophe, which spreadsheets strip on display
- * and never execute. Quoting alone does **not** prevent this: the quotes are
- * consumed by the CSV parser before the formula parser ever sees the value.
- */
-function csvCell(value: string): string {
-  const risky = /^[=+\-@\t\r]/.test(value);
-  const text = risky ? `'${value}` : value;
-  return `"${text.replace(/"/g, '""')}"`;
-}
 @Injectable()
 export class LeadsService {
   constructor(
@@ -471,6 +452,11 @@ export class LeadsService {
       where: { id, deletedAt: null, AND: [this.scope.leadScope(user)] },
       include: {
         owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+        // Whose QR brought them in, and from which event. Neither moves when
+        // the lead is handed on, which is the point of showing them beside the
+        // owner rather than instead of it.
+        capturedBy: { select: { id: true, firstName: true, lastName: true } },
+        event: { select: { id: true, name: true, code: true } },
         partner: { select: { id: true, name: true, type: true } },
         campaign: { select: { id: true, name: true, code: true } },
         orgUnit: { select: { id: true, name: true } },
@@ -491,6 +477,26 @@ export class LeadsService {
         detail: 'No lead with that id is visible to you.',
       });
     }
+
+    /*
+      Who created the lead, fetched rather than joined.
+
+      `createdById` is a plain column with no relation on the model — adding one
+      would mean a foreign key and a migration for a field that is read on one
+      screen. One lookup by primary key is cheaper than that, and it keeps the
+      column's deliberate looseness: a creator who has since been deleted leaves
+      the id behind rather than nulling the record of who did it.
+    */
+    const createdBy = lead.createdById
+      ? await this.prisma.user
+          .findUnique({
+            where: { id: lead.createdById },
+            select: { id: true, firstName: true, lastName: true },
+          })
+          .then((row) =>
+            row ? { id: row.id, fullName: `${row.firstName} ${row.lastName}`.trim() } : null,
+          )
+      : null;
 
     const [activityCount, activities] = await Promise.all([
       // Human contact only. A lead does not get warmer because somebody
@@ -555,6 +561,14 @@ export class LeadsService {
             email: lead.owner.email,
           }
         : null,
+      createdBy,
+      capturedBy: lead.capturedBy
+        ? {
+            id: lead.capturedBy.id,
+            fullName: `${lead.capturedBy.firstName} ${lead.capturedBy.lastName}`.trim(),
+          }
+        : null,
+      event: lead.event,
       partner: lead.partner,
       campaign: lead.campaign,
       orgUnit: lead.orgUnit,
@@ -1231,8 +1245,21 @@ export class LeadsService {
           lostNote: input.status === 'LOST' ? (input.note ?? null) : null,
           contactedAt: input.status === 'CONTACTED' ? new Date() : lead.contactedAt,
           qualifiedAt: input.status === 'QUALIFIED' ? new Date() : lead.qualifiedAt,
-          closedAt: ['LOST', 'DISQUALIFIED'].includes(input.status) ? new Date() : null,
-          nextFollowUpAt: input.nextFollowUpAt ?? lead.nextFollowUpAt,
+          closedAt: CLOSED_LEAD_STATUSES.has(input.status) ? new Date() : null,
+          /*
+            A closed lead carries no follow-up date, by whichever route it closed.
+
+            The roll-up already cleared it when the last product resolved, but
+            this path did not — so a lead closed directly kept whatever date it
+            had and sat in the overdue list for ever. Two such rows were still
+            on production from August.
+
+            Written as a rule about the status rather than a step in one branch,
+            so a status added later cannot quietly miss it.
+          */
+          nextFollowUpAt: CLOSED_LEAD_STATUSES.has(input.status)
+            ? null
+            : (input.nextFollowUpAt ?? lead.nextFollowUpAt),
           lastActivityAt: new Date(),
           updatedById: user.id,
         },
@@ -2461,18 +2488,26 @@ export class LeadsService {
     const wanted = [...new Set(codes)];
     const existing = await tx.leadProduct.findMany({
       where: { leadId },
-      select: { productCode: true, status: true },
+      select: { productCode: true, status: true, ownerId: true },
     });
 
     const have = new Set(existing.map((row) => row.productCode));
     const toAdd = wanted.filter((code) => !have.has(code));
 
+    /*
+      Only an untouched product may be dropped.
+
+      It used to be any *open* one, which let a product that had reached
+      Qualified or Negotiation be unticked — losing the fact that somebody had
+      worked it, and with it whatever they had recorded along the way. Once a
+      status has moved at all, the product is part of the lead's history and the
+      way to end it is to mark it lost, not to make it never have existed.
+
+      Still silent on the server; the screen is what stops somebody trying, by
+      disabling the tick with the reason on it.
+    */
     const removable = existing
-      .filter(
-        (row) =>
-          !wanted.includes(row.productCode) &&
-          isOpenLeadProductStatus(row.status as LeadProductStatus),
-      )
+      .filter((row) => !wanted.includes(row.productCode) && row.status === 'NEW')
       .map((row) => row.productCode);
 
     if (removable.length > 0) {
@@ -2480,8 +2515,45 @@ export class LeadsService {
     }
 
     if (toAdd.length > 0) {
+      /*
+        A new product joins whoever already handles that desk on this lead.
+
+        Groups are how expertise is organised, so if somebody already owns the
+        Broking business here and F&O is added, it is theirs — the client deals
+        with one person per desk rather than two. A product in a group nobody
+        owns yet stays with whoever added it, because there is no one else it
+        could sensibly belong to.
+
+        Only products the lead already has are consulted; a group owned on some
+        other lead means nothing here.
+      */
+      const groupOf = new Map(
+        (
+          await tx.product.findMany({
+            where: { code: { in: [...wanted] } },
+            select: { code: true, group: { select: { code: true } } },
+          })
+        ).map((row) => [row.code, row.group?.code ?? null]),
+      );
+
+      const ownerByGroup = new Map<string, string>();
+      for (const row of existing) {
+        const group = groupOf.get(row.productCode);
+        if (group && row.ownerId && !ownerByGroup.has(group)) ownerByGroup.set(group, row.ownerId);
+      }
+
       await tx.leadProduct.createMany({
-        data: toAdd.map((productCode) => ({ leadId, productCode })),
+        data: toAdd.map((productCode) => {
+          const group = groupOf.get(productCode);
+          const inherited = group ? ownerByGroup.get(group) : undefined;
+          const ownerId = inherited ?? actorId ?? null;
+          return {
+            leadId,
+            productCode,
+            ownerId,
+            assignedAt: ownerId ? new Date() : null,
+          };
+        }),
         skipDuplicates: true,
       });
     }
@@ -3044,12 +3116,234 @@ export class LeadsService {
   }
 
   /** The lead's products with their outcomes, for the detail panel and board. */
+  /**
+   * Hand one product on a lead to somebody.
+   *
+   * The lead's own owner is left alone. Once a lead has products this is how
+   * work moves — a client's broking business and their wealth business are two
+   * conversations, and one owner for both was what sales asked us to stop.
+   *
+   * `ownerId: null` hands the product back, so the lead's owner answers for it
+   * again. That has to be expressible or a misassignment is permanent.
+   */
+  async assignProduct(user: AuthenticatedPrincipal, id: string, input: AssignLeadProductInput) {
+    const lead = await this.mustFindInScope(user, id);
+
+    /*
+      Only the lead's owner, or a manager, may move a product.
+
+      A lead product owner holds one desk's work on this client; they do not get
+      to pass it on. Otherwise a lead quietly migrates across the firm one
+      product at a time with nobody having decided it should, and the person
+      accountable for the client — the lead owner — finds out afterwards.
+
+      "Manager" is a scope wider than SELF, the same test `canTransferLeads`
+      uses for the same reason: expressed against the data scope rather than a
+      role name, so a role added later inherits the right behaviour.
+    */
+    if (lead.ownerId !== user.id && user.dataScope === 'SELF') {
+      throw new ForbiddenException({
+        title: 'Cannot assign this product',
+        detail: 'Only the lead owner or a manager can hand a product to somebody else.',
+      });
+    }
+
+    if (input.ownerId && !(await this.scope.canAssignTo(user, input.ownerId))) {
+      throw new ForbiddenException({
+        title: 'Cannot assign to that user',
+        detail: 'You may only assign to yourself or to members of your team.',
+      });
+    }
+
+    const row = await this.prisma.leadProduct.findFirst({
+      where: { leadId: id, productCode: input.productCode },
+      select: { id: true, ownerId: true },
+    });
+    if (!row) {
+      throw new BadRequestException({
+        title: 'Not on this lead',
+        detail: `${input.productCode} is not one of this lead's products.`,
+      });
+    }
+
+    const owner = input.ownerId
+      ? await this.prisma.user.findFirst({
+          where: { id: input.ownerId, deletedAt: null, status: 'ACTIVE' },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : null;
+    if (input.ownerId && !owner) {
+      throw new BadRequestException({
+        title: 'Unknown user',
+        detail: 'The selected owner is not an active user.',
+      });
+    }
+
+    await this.prisma.leadProduct.update({
+      where: { id: row.id },
+      data: {
+        ownerId: owner?.id ?? null,
+        // Stamped only when somebody is actually named; handing a product back
+        // is not an assignment and should not read as one in the history.
+        assignedAt: owner ? new Date() : null,
+      },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        entityType: 'LEAD',
+        entityId: id,
+        type: 'ASSIGNMENT',
+        direction: 'INTERNAL',
+        subject: owner
+          ? `${input.productCode} assigned to ${owner.firstName} ${owner.lastName}`.trim()
+          : `${input.productCode} returned to the lead owner`,
+        body: input.note ?? null,
+        actorId: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'ASSIGN',
+      resource: 'lead.product',
+      resourceId: id,
+      changes: { productCode: input.productCode, from: row.ownerId, to: owner?.id ?? null },
+    });
+
+    if (owner && owner.id !== user.id) {
+      await this.outbox.publish(this.prisma, {
+        aggregateType: 'lead',
+        aggregateId: id,
+        eventType: 'lead.product.assigned',
+        payload: {
+          reference: lead.reference,
+          productCode: input.productCode,
+          assigneeId: owner.id,
+          actorId: user.id,
+        },
+      });
+    }
+
+    return this.productsFor(user, id);
+  }
+
+  /**
+   * Hand every product on a lead to one person.
+   *
+   * A shortcut rather than a different rule — it writes the same per-product
+   * owner to each row. Without it, moving a whole lead costs as many clicks as
+   * the client has products, which is where people stop bothering and the
+   * ownership data stops being true.
+   */
+  async assignAllProducts(
+    user: AuthenticatedPrincipal,
+    id: string,
+    input: AssignAllLeadProductsInput,
+  ) {
+    const lead = await this.mustFindInScope(user, id);
+
+    /*
+      Only the lead's owner, or a manager, may move a product.
+
+      A lead product owner holds one desk's work on this client; they do not get
+      to pass it on. Otherwise a lead quietly migrates across the firm one
+      product at a time with nobody having decided it should, and the person
+      accountable for the client — the lead owner — finds out afterwards.
+
+      "Manager" is a scope wider than SELF, the same test `canTransferLeads`
+      uses for the same reason: expressed against the data scope rather than a
+      role name, so a role added later inherits the right behaviour.
+    */
+    if (lead.ownerId !== user.id && user.dataScope === 'SELF') {
+      throw new ForbiddenException({
+        title: 'Cannot assign this product',
+        detail: 'Only the lead owner or a manager can hand a product to somebody else.',
+      });
+    }
+
+    if (!(await this.scope.canAssignTo(user, input.ownerId))) {
+      throw new ForbiddenException({
+        title: 'Cannot assign to that user',
+        detail: 'You may only assign to yourself or to members of your team.',
+      });
+    }
+
+    const owner = await this.prisma.user.findFirst({
+      where: { id: input.ownerId, deletedAt: null, status: 'ACTIVE' },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    if (!owner) {
+      throw new BadRequestException({
+        title: 'Unknown user',
+        detail: 'The selected owner is not an active user.',
+      });
+    }
+
+    /*
+      Only the products still open.
+
+      A converted or lost product is finished, and moving its owner would
+      rewrite who closed it — which is exactly the number a rep is measured on.
+      The history keeps whoever did the work.
+    */
+    const { count } = await this.prisma.leadProduct.updateMany({
+      where: { leadId: id, status: { in: [...OPEN_LEAD_PRODUCT_STATUSES] } },
+      data: { ownerId: owner.id, assignedAt: new Date() },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        entityType: 'LEAD',
+        entityId: id,
+        type: 'ASSIGNMENT',
+        direction: 'INTERNAL',
+        subject: `All open products assigned to ${owner.firstName} ${owner.lastName}`.trim(),
+        body: input.note ?? null,
+        actorId: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'ASSIGN',
+      resource: 'lead.product',
+      resourceId: id,
+      changes: { to: owner.id, products: count },
+    });
+
+    if (owner.id !== user.id) {
+      await this.outbox.publish(this.prisma, {
+        aggregateType: 'lead',
+        aggregateId: id,
+        eventType: 'lead.product.assigned',
+        payload: {
+          reference: lead.reference,
+          productCount: String(count),
+          assigneeId: owner.id,
+          actorId: user.id,
+        },
+      });
+    }
+
+    return this.productsFor(user, id);
+  }
+
   async productsFor(user: AuthenticatedPrincipal, id: string): Promise<LeadProductView[]> {
     await this.mustFindInScope(user, id);
 
     const rows = await this.prisma.leadProduct.findMany({
       where: { leadId: id },
-      include: { product: { select: { name: true } } },
+      include: {
+        product: { select: { name: true } },
+        owner: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            designation: { select: { name: true } },
+            orgUnit: { select: { name: true } },
+          },
+        },
+      },
       orderBy: [{ createdAt: 'asc' }],
     });
 
@@ -3068,6 +3362,17 @@ export class LeadsService {
       finalAmount: decimalToString(row.finalAmount),
       conversionRef: row.conversionRef,
       conversionRefKind: row.conversionRefKind,
+      owner: row.owner
+        ? {
+            id: row.owner.id,
+            fullName: `${row.owner.firstName} ${row.owner.lastName}`.trim(),
+            // Carried so the screen can say "Priya Desai — Sales Manager,
+            // Ahmedabad" rather than a name that half the firm shares.
+            designation: row.owner.designation?.name ?? null,
+            branch: row.owner.orgUnit?.name ?? null,
+          }
+        : null,
+      assignedAt: row.assignedAt?.toISOString() ?? null,
     }));
   }
 
