@@ -1,4 +1,10 @@
-import { DESIGNATION_SEED, ROLE_PERMISSIONS, ROLES } from '@sihl-one/contracts';
+import {
+  DEFAULT_PRODUCT_GROUP,
+  DESIGNATION_SEED,
+  PRODUCT_GROUP_SEED,
+  ROLE_PERMISSIONS,
+  ROLES,
+} from '@sihl-one/contracts';
 
 import type { PrismaClient } from '../src/generated/prisma/client';
 
@@ -143,4 +149,56 @@ export async function syncDesignations(prisma: PrismaClient): Promise<string[]> 
   }
 
   return created;
+}
+
+/**
+ * Creates the product groups and files any ungrouped product into one.
+ *
+ * Two deliberate restraints. A group is only ever created, never renamed from
+ * code — administrators rename them in the admin screen and a deploy must not
+ * argue. And a product is only given a group when it has none: moving a product
+ * between groups is an operator's decision, and the default map must not
+ * reverse it on the next boot.
+ *
+ * A product missing from the map keeps no group at all, which is right for the
+ * partner-programme entries — they are routes to market, not things a desk
+ * sells.
+ */
+export async function syncProductGroups(
+  prisma: PrismaClient,
+): Promise<{ created: string[]; filed: number }> {
+  const created: string[] = [];
+
+  for (const group of PRODUCT_GROUP_SEED) {
+    const existing = await prisma.productGroup.findUnique({
+      where: { code: group.code },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    await prisma.productGroup.create({
+      data: { code: group.code, name: group.name, sortOrder: group.sortOrder, isSystem: true },
+    });
+    created.push(group.code);
+  }
+
+  const groups = await prisma.productGroup.findMany({ select: { id: true, code: true } });
+  const idByCode = new Map(groups.map((g) => [g.code, g.id]));
+
+  const ungrouped = await prisma.product.findMany({
+    where: { groupId: null },
+    select: { id: true, code: true },
+  });
+
+  let filed = 0;
+  for (const product of ungrouped) {
+    const groupCode = DEFAULT_PRODUCT_GROUP[product.code];
+    const groupId = groupCode ? idByCode.get(groupCode) : undefined;
+    if (!groupId) continue;
+
+    await prisma.product.update({ where: { id: product.id }, data: { groupId } });
+    filed += 1;
+  }
+
+  return { created, filed };
 }

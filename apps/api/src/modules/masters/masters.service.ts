@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   canDeactivateTaskStatus,
   canDeleteMasterRow,
@@ -15,6 +20,7 @@ import {
   type UpdateProductInput,
   type UpdateMeetingModeInput,
   type UpdateTaskStatusInput,
+  type ProductGroupSummary,
 } from '@sihl-one/contracts';
 
 import { AuditService, diffRecords } from '../../common/audit.service';
@@ -93,7 +99,10 @@ export class MastersService {
    * `isActive`. So this is the check that stops a deactivated product being
    * chosen — and the reason it lives in one place rather than at each call site.
    */
-  async assertValid(input: { source?: string; productInterest?: readonly string[] }): Promise<void> {
+  async assertValid(input: {
+    source?: string;
+    productInterest?: readonly string[];
+  }): Promise<void> {
     if (input.source) {
       if (!this.activeSourceCodes) {
         const rows = await this.prisma.leadSourceMaster.findMany({
@@ -118,9 +127,7 @@ export class MastersService {
         });
         this.activeProductCodes = new Set(rows.map((row) => row.code));
       }
-      const unknown = input.productInterest.filter(
-        (code) => !this.activeProductCodes!.has(code),
-      );
+      const unknown = input.productInterest.filter((code) => !this.activeProductCodes!.has(code));
       if (unknown.length > 0) {
         throw new BadRequestException({
           title: 'Unknown product',
@@ -246,6 +253,30 @@ export class MastersService {
   // -------------------------------------------------------------------------
   // Products
   // -------------------------------------------------------------------------
+
+  /**
+   * The product groups — the tier above the product master.
+   *
+   * `productCount` is included so an empty group is obvious in the admin list;
+   * a group with nothing in it is almost always a rename somebody abandoned
+   * half way.
+   */
+  async listProductGroups(query: MasterQuery): Promise<ProductGroupSummary[]> {
+    const rows = await this.prisma.productGroup.findMany({
+      where: query.includeInactive ? {} : { isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      include: { _count: { select: { products: true } } },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      sortOrder: row.sortOrder,
+      isActive: row.isActive,
+      productCount: row._count.products,
+    }));
+  }
 
   async listProducts(query: MasterQuery): Promise<ProductItem[]> {
     const rows = await this.prisma.product.findMany({
@@ -459,7 +490,11 @@ export class MastersService {
     if (input.isActive === false && before.isActive) {
       const all = await this.listTaskStatuses({ includeInactive: true } as MasterQuery);
       const verdict = canDeactivateTaskStatus(
-        { code: before.code, category: before.category as TaskStatusItem['category'], isActive: true },
+        {
+          code: before.code,
+          category: before.category as TaskStatusItem['category'],
+          isActive: true,
+        },
         all,
       );
       if (!verdict.allowed) {
@@ -480,7 +515,6 @@ export class MastersService {
     return after;
   }
 
-
   // -------------------------------------------------------------------------
   // Meeting modes
   // -------------------------------------------------------------------------
@@ -494,7 +528,9 @@ export class MastersService {
   }
 
   async createMeetingMode(user: AuthenticatedPrincipal, input: CreateMeetingModeInput) {
-    const existing = await this.prisma.meetingModeMaster.findUnique({ where: { code: input.code } });
+    const existing = await this.prisma.meetingModeMaster.findUnique({
+      where: { code: input.code },
+    });
     if (existing) {
       throw new ConflictException({
         title: 'That code is taken',
@@ -530,7 +566,8 @@ export class MastersService {
       if (others === 0) {
         throw new ConflictException({
           title: 'Cannot switch that off',
-          detail: 'It is the last active meeting mode — interactions would have no way to record how they happened.',
+          detail:
+            'It is the last active meeting mode — interactions would have no way to record how they happened.',
         });
       }
     }
@@ -547,5 +584,4 @@ export class MastersService {
 
     return after;
   }
-
 }

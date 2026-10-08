@@ -86,6 +86,14 @@ export class MastersController {
     return this.masters.deleteSource(user, id);
   }
 
+  @Get('product-groups')
+  @RequirePermissions('lead:read')
+  @ApiOperation({ summary: 'Product groups — the tier above the product master' })
+  @ApiZodQuery(masterQuerySchema)
+  listProductGroups(@ZodQuery(masterQuerySchema) query: MasterQuery) {
+    return this.masters.listProductGroups(query);
+  }
+
   @Get('products')
   @RequirePermissions('lead:read')
   @ApiOperation({ summary: 'Products, active ones by default' })
@@ -176,7 +184,6 @@ export class MastersController {
     return this.masters.updateTaskStatus(user, id, body);
   }
 
-
   // -------------------------------------------------------------------------
   // Meeting modes
   // -------------------------------------------------------------------------
@@ -212,5 +219,4 @@ export class MastersController {
   ) {
     return this.masters.updateMeetingMode(user, id, body);
   }
-
 }

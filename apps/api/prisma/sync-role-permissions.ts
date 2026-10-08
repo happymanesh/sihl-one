@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 import { PrismaClient } from '../src/generated/prisma/client';
-import { syncDesignations, syncRolePermissions } from './role-catalogue';
+import { syncDesignations, syncProductGroups, syncRolePermissions } from './role-catalogue';
 
 /**
  * Applies the RBAC matrix to the database. Run on every deploy.
@@ -58,6 +58,13 @@ async function main(): Promise<void> {
       newDesignations.length === 0
         ? 'Designation ladder already in sync.'
         : `Designations added: ${newDesignations.join(', ')}`,
+    );
+
+    const groups = await syncProductGroups(prisma);
+    console.log(
+      groups.created.length === 0 && groups.filed === 0
+        ? 'Product groups already in sync.'
+        : `Product groups — created: ${groups.created.join(', ') || 'none'}; products filed: ${groups.filed}`,
     );
   } finally {
     await prisma.$disconnect();

@@ -35,4 +35,5 @@ export * from './report';
 export * from './daily-activity';
 export * from './otp';
 export * from './presentation';
+export * from './product-group';
 export * from './brochures';

@@ -129,7 +129,9 @@ export class AssignmentService {
    * important: a lead with no owner is visible in the unassigned queue, whereas
    * a lead given to the wrong person is invisible.
    */
-  async resolveOwner(lead: AssignableLead): Promise<{ ownerId: string | null; ruleId: string | null }> {
+  async resolveOwner(
+    lead: AssignableLead,
+  ): Promise<{ ownerId: string | null; ruleId: string | null }> {
     const rules = await this.prisma.assignmentRule.findMany({
       where: { isActive: true },
       orderBy: [{ priority: 'asc' }, { name: 'asc' }],
@@ -151,9 +153,7 @@ export class AssignmentService {
     const persisted = rules.find((candidate) => candidate.id === rule.id)!;
 
     const workloads =
-      rule.strategy === 'LOAD_BALANCED'
-        ? await this.workloadsFor(rule.targetUserIds)
-        : [];
+      rule.strategy === 'LOAD_BALANCED' ? await this.workloadsFor(rule.targetUserIds) : [];
 
     // Only people who are still active can receive leads. A rule that names
     // someone who has since left must not silently route to a dead account.
@@ -165,8 +165,27 @@ export class AssignmentService {
       return { ownerId: null, ruleId: rule.id };
     }
 
+    /*
+      Expertise narrows the field; it does not close it.
+
+      A rep who sells the group this lead wants is preferred over one who does
+      not. If nobody on the rule matches — or nobody has stated an expertise at
+      all, which is everyone the day this ships — the rule's full target list is
+      used exactly as before.
+
+      Deliberately a preference, not a filter. A hard match would leave a lead
+      for a group nobody claims sitting unassigned, and an unassigned lead is
+      one nobody calls; a slightly less apt owner beats that. The round-robin
+      cursor still rotates within whichever set is used, so load stays even
+      inside the preferred group.
+
+      Applied on the preview path too. A preview that ignored expertise would
+      name a different owner from the one the save produces, which is worse than
+      having no preview.
+    */
+    const preferred = await this.expertiseMatches(activeTargets, lead.productInterest);
     const ownerId = selectOwner(
-      { ...rule, targetUserIds: activeTargets },
+      { ...rule, targetUserIds: preferred.length > 0 ? preferred : activeTargets },
       workloads,
       persisted.roundRobinCursor,
     );
@@ -215,8 +234,27 @@ export class AssignmentService {
       rule.strategy === 'LOAD_BALANCED' ? await this.workloadsFor(rule.targetUserIds) : [];
     const activeTargets = await this.activeUserIds(rule.targetUserIds);
 
+    /*
+      Expertise narrows the field; it does not close it.
+
+      A rep who sells the group this lead wants is preferred over one who does
+      not. If nobody on the rule matches — or nobody has stated an expertise at
+      all, which is everyone the day this ships — the rule's full target list is
+      used exactly as before.
+
+      Deliberately a preference, not a filter. A hard match would leave a lead
+      for a group nobody claims sitting unassigned, and an unassigned lead is
+      one nobody calls; a slightly less apt owner beats that. The round-robin
+      cursor still rotates within whichever set is used, so load stays even
+      inside the preferred group.
+
+      Applied on the preview path too. A preview that ignored expertise would
+      name a different owner from the one the save produces, which is worse than
+      having no preview.
+    */
+    const preferred = await this.expertiseMatches(activeTargets, lead.productInterest);
     const ownerId = selectOwner(
-      { ...rule, targetUserIds: activeTargets },
+      { ...rule, targetUserIds: preferred.length > 0 ? preferred : activeTargets },
       workloads,
       persisted.roundRobinCursor,
     );
@@ -254,6 +292,43 @@ export class AssignmentService {
     return grouped
       .filter((row): row is typeof row & { ownerId: string } => row.ownerId !== null)
       .map((row) => ({ userId: row.ownerId, openLeads: row._count._all }));
+  }
+
+  /**
+   * Of these people, the ones who sell what this lead is interested in.
+   *
+   * Two hops: the lead names product codes, a product belongs to a group, and a
+   * person states the groups they sell. Returns an empty list when the lead has
+   * no products, when none of them are grouped yet, or when nobody matches —
+   * and the caller reads that as "no preference available", never as "nobody is
+   * eligible".
+   */
+  private async expertiseMatches(
+    userIds: readonly string[],
+    productInterest: readonly string[],
+  ): Promise<string[]> {
+    if (userIds.length === 0 || productInterest.length === 0) return [];
+
+    const products = await this.prisma.product.findMany({
+      where: { code: { in: [...productInterest] }, groupId: { not: null } },
+      select: { group: { select: { code: true } } },
+    });
+
+    const wanted = [
+      ...new Set(
+        products
+          .map((product) => product.group?.code)
+          .filter((code): code is string => Boolean(code)),
+      ),
+    ];
+    if (wanted.length === 0) return [];
+
+    const people = await this.prisma.user.findMany({
+      where: { id: { in: [...userIds] }, productGroups: { hasSome: wanted } },
+      select: { id: true },
+    });
+
+    return people.map((person) => person.id);
   }
 
   private async activeUserIds(userIds: readonly string[]): Promise<string[]> {
