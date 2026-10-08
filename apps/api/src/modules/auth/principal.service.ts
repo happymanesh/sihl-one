@@ -1,10 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  effectiveScope,
-  type DataScope,
-  type Permission,
-  type Role,
-} from '@sihl-one/contracts';
+import { effectiveScope, type DataScope, type Permission, type Role } from '@sihl-one/contracts';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
@@ -80,6 +75,26 @@ export class PrincipalService {
         });
         if (opened > 0) permissions.push('event:view');
       }
+    }
+
+    /*
+      A per-user switch that can only take away.
+
+      `canAssignLeads` is off for somebody who holds a role that grants
+      `lead:assign` but should not be handing leads around — a specialist, a
+      trainee, somebody standing in. Removing the permission here rather than
+      checking a flag at each call site means every guard, every dropdown and
+      every `can()` in the UI gets the right answer without being told about it
+      separately; the four assign and transfer routes are already gated on this
+      permission and need no change at all.
+
+      Subtraction only, and deliberately. A switch that could *grant* authority
+      would put two sources of truth behind "may this person do X", and "why can
+      they do that" would need both read together to answer.
+    */
+    if (user.canAssignLeads === false) {
+      const index = permissions.indexOf('lead:assign');
+      if (index >= 0) permissions.splice(index, 1);
     }
 
     // Touch lastSeenAt without awaiting, so it never adds a write round-trip to

@@ -29,6 +29,10 @@ export interface UserFormValues {
   /** Shown while the option list is loading, so the field is never blank. */
   managerName?: string | null;
   roleCodes?: string[];
+  /** Product group codes this person sells. */
+  productGroups?: string[];
+  /** False when this person may not hand leads to anybody. */
+  canAssignLeads?: boolean;
   status?: string;
 }
 
@@ -64,12 +68,15 @@ export function UserForm({
   designations,
   orgUnits,
   grantableRoles,
+  productGroups = [],
 }: {
   mode: 'create' | 'edit';
   values?: UserFormValues;
   designations: DesignationSummary[];
   orgUnits: Option[];
   grantableRoles: string[];
+  /** Product groups this person can be marked as selling. */
+  productGroups?: Option[];
 }) {
   const [state, action] = useActionState(mode === 'create' ? createUser : updateUser, INITIAL);
   const router = useRouter();
@@ -91,6 +98,30 @@ export function UserForm({
   useEffect(() => {
     if (state.status === 'success') router.refresh();
   }, [state, router]);
+  /*
+    Which action result the dialog has already been dismissed for.
+
+    Compared by identity, not by status: `useActionState` returns a new object
+    per dispatch, so two failed saves in a row are two different objects and the
+    second re-opens the dialog. Comparing the status string would have shown it
+    once and then stayed quiet.
+  */
+  const [dismissed, setDismissed] = useState<unknown>(null);
+  const outcome =
+    state.status !== 'idle' && state !== dismissed
+      ? {
+          status: state.status,
+          message: state.message ?? (state.status === 'success' ? 'Saved.' : 'That did not save.'),
+          // Every field error, spelled out. The banner used to show only the
+          // headline, so "Please correct the highlighted fields" was the whole
+          // explanation for a save that failed on something off-screen.
+          details: Object.entries(state.errors ?? {}).flatMap(([field, messages]) =>
+            (messages ?? []).map((message) => `${humaniseField(field)}: ${message}`),
+          ),
+        }
+      : null;
+
+  const [expertise, setExpertise] = useState<string[]>(values?.productGroups ?? []);
   const [designationId, setDesignationId] = useState(values?.designationId ?? '');
   /*
     Controlled, not `defaultValue`.
@@ -154,7 +185,9 @@ export function UserForm({
     // it before the account exists.
     setEmail(suggestWorkEmail(firstName, lastName) ?? '');
   }, [firstName, lastName, suggestsEmail, emailEdited]);
-  const [managers, setManagers] = useState<Array<{ id: string; fullName: string; designation: string | null }>>([]);
+  const [managers, setManagers] = useState<
+    Array<{ id: string; fullName: string; designation: string | null }>
+  >([]);
   const [loadingManagers, setLoadingManagers] = useState(false);
 
   useEffect(() => {
@@ -189,21 +222,24 @@ export function UserForm({
     <form action={action} className="space-y-5" noValidate>
       {values?.id ? <input type="hidden" name="userId" value={values.id} /> : null}
 
-      {state.status === 'error' && state.message ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2.5 text-sm text-danger-600 dark:bg-danger-500/15"
-        >
-          {state.message}
-        </div>
-      ) : null}
-      {state.status === 'success' && state.message ? (
-        <div
-          role="status"
-          className="rounded-lg border border-teal-500/40 bg-teal-50 px-3 py-2.5 text-sm text-teal-700 dark:bg-teal-900/30 dark:text-teal-200"
-        >
-          {state.message}
-        </div>
+      {/*
+        The outcome of a save, as a dialog rather than a strip at the top.
+
+        The strip appeared above a long form, so on anything below the fold a
+        save looked like it had done nothing at all — the page simply sat there.
+        A dialog is in front of the person wherever they were, and it has to be
+        dismissed, so a failure cannot be scrolled past unnoticed.
+
+        Field-level errors stay where they are, under their fields. This says
+        what happened; those say where.
+      */}
+      {outcome ? (
+        <SaveOutcome
+          status={outcome.status}
+          message={outcome.message}
+          details={outcome.details}
+          onClose={() => setDismissed(state)}
+        />
       ) : null}
 
       {mode === 'create' ? (
@@ -332,19 +368,39 @@ export function UserForm({
                 'Employee code'
               )}
             </label>
-            <input
-              id="employeeCode"
-              name="employeeCode"
-              className="input font-mono uppercase"
-              placeholder={userType === 'PARTNER' ? 'R0018' : 'Generated'}
-              required={userType === 'PARTNER'}
-              defaultValue={values?.employeeCode ?? ''}
-            />
-            <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
-              {userType === 'PARTNER'
-                ? 'The code the back office already issued this partner.'
-                : 'Leave blank to generate the next one, SIHL-0001 onwards.'}
-            </p>
+            {/*
+              Staff type the number; the prefix is shown, not typed.
+
+              A fixed SIHL- in front of the box is the whole instruction, which
+              is why the grey line underneath has gone — it was explaining a
+              format the field now simply has. Partners keep a plain box,
+              because their code is whatever the back office issued and is not
+              ours to shape.
+            */}
+            {userType === 'PARTNER' ? (
+              <input
+                id="employeeCode"
+                name="employeeCode"
+                className="input font-mono uppercase"
+                placeholder="R0018"
+                required
+                defaultValue={values?.employeeCode ?? ''}
+              />
+            ) : (
+              <div className="flex">
+                <span className="inline-flex items-center rounded-l-lg border border-r-0 border-[var(--color-border-strong)] bg-[var(--color-surface-muted)] px-3 font-mono text-sm text-[var(--color-text-muted)]">
+                  SIHL-
+                </span>
+                <input
+                  id="employeeCode"
+                  name="employeeCode"
+                  className="input rounded-l-none font-mono"
+                  inputMode="numeric"
+                  placeholder="Generated"
+                  defaultValue={(values?.employeeCode ?? '').replace(/^SIHL-/i, '')}
+                />
+              </div>
+            )}
             <FieldError errors={state.errors?.employeeCode} />
           </div>
         </div>
@@ -436,9 +492,7 @@ export function UserForm({
               has no option matching its value and silently renders blank.
             */}
             {values?.managerId && !managers.some((m) => m.id === values.managerId) ? (
-              <option value={values.managerId}>
-                {values.managerName ?? 'Current manager'}
-              </option>
+              <option value={values.managerId}>{values.managerName ?? 'Current manager'}</option>
             ) : null}
             {managers.map((manager) => (
               <option key={manager.id} value={manager.id}>
@@ -458,6 +512,91 @@ export function UserForm({
           </p>
           <FieldError errors={state.errors?.managerId} />
         </div>
+      </fieldset>
+
+      {/*
+        What this person sells.
+
+        Offered only when there are groups to offer, so the section does not
+        appear as an empty box on an environment where the product master has
+        not been grouped yet. Unticked across the board means "no stated
+        expertise", which the assignment engine reads as eligible for anything
+        — the opposite would quietly make a new joiner ineligible for every
+        lead until somebody remembered this screen.
+      */}
+      {productGroups.length > 0 ? (
+        <fieldset>
+          <legend className="text-sm font-bold">Expertise</legend>
+          <p className="mt-0.5 text-xs text-[var(--color-text-subtle)]">
+            The product groups this person sells. Leads for a matching group are offered to them
+            first; leaving it blank keeps them eligible for everything.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {productGroups.map((group) => {
+              const on = expertise.includes(group.id);
+              return (
+                <label
+                  key={group.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                    on
+                      ? 'border-teal-500 bg-teal-50 font-semibold dark:bg-teal-900/30'
+                      : 'border-[var(--color-border)]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    name="productGroups"
+                    value={group.id}
+                    checked={on}
+                    onChange={() =>
+                      setExpertise((current) =>
+                        current.includes(group.id)
+                          ? current.filter((code) => code !== group.id)
+                          : [...current, group.id],
+                      )
+                    }
+                    className="h-4 w-4 accent-[var(--color-teal-500)]"
+                  />
+                  {group.label}
+                </label>
+              );
+            })}
+          </div>
+          <FieldError errors={state.errors?.productGroups} />
+        </fieldset>
+      ) : null}
+
+      {/*
+        Whether this person may hand a lead to somebody else.
+
+        Sits with Access because it qualifies the roles directly above it: a
+        role may grant `lead:assign` and this takes it back for one person. It
+        only ever subtracts — switching it on does not give the permission to
+        somebody whose role never had it.
+
+        Deliberately absent from the user list. It is a setting rather than an
+        attribute people scan a directory for, and the list is already seven
+        columns wide; it appears in the download, where somebody auditing who
+        can move leads will actually look.
+      */}
+      <fieldset>
+        <legend className="text-sm font-bold">Lead assignment</legend>
+        <label className="mt-2 flex cursor-pointer items-start gap-2.5 text-sm">
+          <input
+            type="checkbox"
+            name="canAssignLeads"
+            defaultChecked={values?.canAssignLeads ?? true}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-teal-500)]"
+          />
+          <span>
+            May assign leads to other people
+            <span className="mt-0.5 block text-xs text-[var(--color-text-subtle)]">
+              On by default. Switching it off removes the ability for this person only — their role
+              is unchanged, and everyone else who holds it keeps it.
+            </span>
+          </span>
+        </label>
+        <FieldError errors={state.errors?.canAssignLeads} />
       </fieldset>
 
       <fieldset>
@@ -520,5 +659,107 @@ export function UserForm({
         </p>
       ) : null}
     </form>
+  );
+}
+
+/** "orgUnitId" reads as a database column; "Branch" reads as the thing it is. */
+const FIELD_LABELS: Record<string, string> = {
+  firstName: 'First name',
+  lastName: 'Last name',
+  email: 'Email',
+  mobile: 'Mobile',
+  employeeCode: 'Employee code',
+  designationId: 'Designation',
+  orgUnitId: 'Branch',
+  managerId: 'Reports to',
+  roleCodes: 'Roles',
+  dataScope: 'Data scope',
+  productGroups: 'Expertise',
+  userType: 'Login type',
+  _: 'Problem',
+};
+
+function humaniseField(field: string): string {
+  return FIELD_LABELS[field] ?? humanise(field);
+}
+
+/**
+ * What happened to the save, in front of the person who asked.
+ *
+ * Carries an icon as well as a colour, because colour alone is not an answer
+ * for anyone who cannot distinguish the two — and a tick and a cross read
+ * faster than either.
+ */
+function SaveOutcome({
+  status,
+  message,
+  details,
+  onClose,
+}: {
+  status: 'success' | 'error';
+  message: string;
+  details: string[];
+  onClose: () => void;
+}) {
+  const ok = status === 'success';
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-navy-950/50 p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="save-outcome-title"
+    >
+      <div className="card w-full max-w-md p-5">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden
+            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+              ok ? 'bg-teal-500 text-white' : 'bg-danger-500 text-white'
+            }`}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              {ok ? (
+                <path
+                  d="m5 13 4 4L19 7"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <path
+                  d="M18 6 6 18M6 6l12 12"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              )}
+            </svg>
+          </span>
+
+          <div className="min-w-0">
+            <h2 id="save-outcome-title" className="text-base font-bold">
+              {ok ? 'Saved' : 'Not saved'}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">{message}</p>
+
+            {details.length > 0 ? (
+              <ul className="mt-3 list-disc space-y-1 pl-4 text-sm text-danger-600 dark:text-danger-400">
+                {details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button type="button" className="btn btn-primary" onClick={onClose} autoFocus>
+            {ok ? 'Done' : 'Back to the form'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

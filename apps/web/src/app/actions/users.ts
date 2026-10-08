@@ -57,6 +57,8 @@ export async function createUser(
     employeeCode: formData.get('employeeCode') || undefined,
     designationId: formData.get('designationId'),
     roleCodes: formData.getAll('roleCodes') as Role[],
+    productGroups: formData.getAll('productGroups') as string[],
+    canAssignLeads: formData.get('canAssignLeads') === 'on',
     orgUnitId: formData.get('orgUnitId'),
     managerId: formData.get('managerId') || undefined,
   });
@@ -97,6 +99,10 @@ export async function updateUser(
     mobile: formData.get('mobile') || undefined,
     employeeCode: formData.get('employeeCode') || undefined,
     designationId: formData.get('designationId') || undefined,
+    // Always sent, even when empty: clearing every tick has to be able to mean
+    // "no stated expertise", and an omitted key would leave the old list intact.
+    productGroups: formData.getAll('productGroups') as string[],
+    canAssignLeads: formData.get('canAssignLeads') === 'on',
     roleCodes: formData.getAll('roleCodes').length
       ? (formData.getAll('roleCodes') as Role[])
       : undefined,
@@ -167,10 +173,10 @@ export async function resetUserMfa(
   }
 
   try {
-    const result = await apiFetch<{ sessionsRevoked: number }>(
-      `/admin/users/${userId}/mfa-reset`,
-      { method: 'POST', body: parsed.data },
-    );
+    const result = await apiFetch<{ sessionsRevoked: number }>(`/admin/users/${userId}/mfa-reset`, {
+      method: 'POST',
+      body: parsed.data,
+    });
 
     revalidatePath(`/admin/users/${userId}`);
     return {

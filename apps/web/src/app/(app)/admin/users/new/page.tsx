@@ -7,17 +7,24 @@ import { apiFetch } from '@/lib/api';
 import { can, requireUser } from '@/lib/auth';
 import { grantableRolesFor, orgUnitOptions } from '@/lib/admin';
 
+/** Product groups a person can be marked as selling. Never blocks the form. */
+async function productGroupOptions(): Promise<Array<{ id: string; label: string }>> {
+  const groups = await apiFetch<Array<{ code: string; name: string }>>(
+    '/masters/product-groups',
+  ).catch(() => []);
+  return groups.map((group) => ({ id: group.code, label: group.name }));
+}
+
 export const metadata = { title: 'Add user' };
 
 export default async function NewUserPage() {
   const user = await requireUser();
   if (!can(user, 'user:create')) redirect('/admin/users');
 
-  const [designations, orgUnits] = await Promise.all([
-    apiFetch<DesignationSummary[]>('/admin/designations').catch(
-      () => [] as DesignationSummary[],
-    ),
+  const [designations, orgUnits, productGroups] = await Promise.all([
+    apiFetch<DesignationSummary[]>('/admin/designations').catch(() => [] as DesignationSummary[]),
     orgUnitOptions(),
+    productGroupOptions(),
   ]);
 
   return (
@@ -35,8 +42,8 @@ export default async function NewUserPage() {
       <header>
         <h1 className="text-2xl font-bold">Add a user</h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          You can only create people below your own designation, inside your own branch or below
-          it, and with roles you hold yourself.
+          You can only create people below your own designation, inside your own branch or below it,
+          and with roles you hold yourself.
         </p>
       </header>
 
@@ -45,6 +52,7 @@ export default async function NewUserPage() {
           mode="create"
           designations={designations}
           orgUnits={orgUnits}
+          productGroups={productGroups}
           grantableRoles={grantableRolesFor(user)}
         />
       </div>

@@ -1,4 +1,15 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import {
   createDesignationSchema,
@@ -13,6 +24,8 @@ import {
   type ResetMfaInput,
 } from '@sihl-one/contracts';
 
+import { AuditService } from '../../common/audit.service';
+import { istDayKey } from '../../common/ist-day';
 import { CurrentUser, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ApiZodBody, IdParamPipe, ZodBody } from '../../common/zod';
@@ -26,6 +39,7 @@ export class UserAdminController {
   constructor(
     private readonly admin: UserAdminService,
     private readonly mfa: MfaService,
+    private readonly audit: AuditService,
   ) {}
 
   @Get('designations')
@@ -72,6 +86,37 @@ export class UserAdminController {
   })
   users(@CurrentUser() actor: AuthenticatedPrincipal) {
     return this.admin.listUsers(actor);
+  }
+
+  /*
+    Declared before the parameterised routes, as `users/manager-options` is.
+  */
+  @Get('users/export')
+  @RequirePermissions('user:read')
+  @ApiOperation({
+    summary: 'The directory as CSV, scoped exactly as the list screen is',
+  })
+  async exportUsers(
+    @CurrentUser() actor: AuthenticatedPrincipal,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { csv, rows } = await this.admin.exportUsersCsv(actor);
+
+    await this.audit.record({
+      action: 'EXPORT',
+      resource: 'user',
+      reason: `Staff directory exported as CSV - ${rows} rows`,
+      changes: { rows },
+    });
+
+    const stamp = istDayKey(new Date());
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="sihl-users-${stamp}.csv"`);
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    // Never cached: the contents depend on who asked, and a shared cache handing
+    // one person's scoped directory to another is a reportable incident.
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(csv);
   }
 
   @Get('users/manager-options')

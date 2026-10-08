@@ -19,23 +19,11 @@ import {
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
+import { csvCell } from '../../common/csv';
 import { PrismaService } from '../../prisma/prisma.service';
 import { istDayKey } from '../../common/ist-day';
 import { Mailer } from '../mail/mailer';
 import { escapeHtml } from '../mail/password-reset.template';
-
-/**
- * One CSV cell.
- *
- * A leading =, +, - or @ makes Excel treat the value as a formula, so a visitor
- * called "=cmd" would execute on open. Prefixing an apostrophe is the standard
- * defence and is invisible in the cell.
- */
-function csvCell(value: string): string {
-  const risky = /^[=+\-@\t\r]/.test(value);
-  const text = risky ? `'${value}` : value;
-  return `"${text.replace(/"/g, '""')}"`;
-}
 
 /** YYYY-MM-DD in the business timezone, for comparing which day something falls on. */
 const IST_DAY_KEY = new Intl.DateTimeFormat('en-CA', {

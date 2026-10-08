@@ -167,6 +167,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   MARKETING: [
+    'user:read',
     'lead:read',
     'lead:create',
     'lead:import',
@@ -213,6 +214,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   SALES_EXECUTIVE: [
+    // Read-only directory. Without manage rights the list is scoped to their
+    // reporting line, which for a rep is themselves alone.
+    'user:read',
     'lead:read',
     'lead:create',
     'lead:update',

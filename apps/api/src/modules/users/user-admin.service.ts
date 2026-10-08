@@ -11,6 +11,7 @@ import {
   canGrantRoles,
   canManageUserAt,
   formatStaffCode,
+  normaliseStaffCode,
   ROLE_PERMISSIONS,
   scopeForDesignation,
   suggestWorkEmail,
@@ -27,6 +28,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { AuditService } from '../../common/audit.service';
+import { toCsv } from '../../common/csv';
 import { ReferenceService } from '../../common/reference.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -83,7 +85,9 @@ export class UserAdminService {
       });
     }
 
-    const designation = await this.prisma.designation.create({ data: { ...input, isSystem: false } });
+    const designation = await this.prisma.designation.create({
+      data: { ...input, isSystem: false },
+    });
     await this.audit.record({
       action: 'CREATE',
       resource: 'designation',
@@ -130,17 +134,38 @@ export class UserAdminService {
 
   // --- Users ---------------------------------------------------------------
 
+  /**
+   * Everyone the viewer may look at, for the directory and its download.
+   *
+   * Which scope applies depends on whether they can act on what they see.
+   *
+   * With manage rights: the org subtree, as before — the population they are
+   * responsible for and may edit.
+   *
+   * Without them: their *reporting* line, themselves and everybody beneath them
+   * at any depth. For a sales executive that is themselves alone. The two
+   * differ more than they look — an org subtree includes colleagues at the same
+   * branch who report elsewhere, and a read-only viewer has no reason to be
+   * handed them.
+   */
   async listUsers(actor: AuthenticatedPrincipal): Promise<UserSummary[]> {
     const context = await this.actorContext(actor);
+    const canManage =
+      actor.permissions.includes('user:create') || actor.permissions.includes('user:update');
+
+    const reach = context.isUnrestricted
+      ? {}
+      : canManage
+        ? context.orgUnitPath
+          ? { orgUnit: { path: { startsWith: context.orgUnitPath } } }
+          : {}
+        : { id: { in: await this.reportingSubtree(actor.id) } };
 
     const users = await this.prisma.user.findMany({
       where: {
         deletedAt: null,
         userType: 'INTERNAL',
-        // A manager sees their own subtree; an admin sees everyone.
-        ...(context.isUnrestricted || !context.orgUnitPath
-          ? {}
-          : { orgUnit: { path: { startsWith: context.orgUnitPath } } }),
+        ...reach,
       },
       orderBy: [{ designation: { level: 'desc' } }, { firstName: 'asc' }],
       include: {
@@ -160,10 +185,15 @@ export class UserAdminService {
       mobile: user.mobile,
       employeeCode: user.employeeCode,
       status: user.status,
+      productGroups: user.productGroups,
+      canAssignLeads: user.canAssignLeads,
       designation: user.designation,
       orgUnit: user.orgUnit,
       manager: user.manager
-        ? { id: user.manager.id, fullName: `${user.manager.firstName} ${user.manager.lastName}`.trim() }
+        ? {
+            id: user.manager.id,
+            fullName: `${user.manager.firstName} ${user.manager.lastName}`.trim(),
+          }
         : null,
       roles: user.roles.map((assignment) => assignment.roleCode),
       dataScope: user.dataScope ?? 'SELF',
@@ -188,15 +218,26 @@ export class UserAdminService {
       await this.assertReportingLine(input.managerId, designation.level);
     }
 
+    /*
+      The typed code becomes the stored code before anything else sees it.
+
+      Staff type the number alone — 23, 123456 — and the prefix and padding are
+      ours to add. Normalised here rather than in the form so a code arriving
+      from the API directly gets the same treatment, and so the uniqueness check
+      below compares the shape we are actually about to store: "23" and
+      "SIHL-0023" are the same person, and checking the raw input would have let
+      both be created.
+    */
+    if (input.employeeCode && input.userType === 'INTERNAL') {
+      input = { ...input, employeeCode: normaliseStaffCode(input.employeeCode) };
+    }
+
     if (input.employeeCode) await this.assertEmployeeCodeFree(input.employeeCode);
 
     // Staff get a generated code; partners bring the one the back office
     // already issued, which the schema makes mandatory for them.
     const employeeCode =
-      input.employeeCode ??
-      (input.userType === 'INTERNAL'
-        ? await this.generateStaffCode()
-        : null);
+      input.employeeCode ?? (input.userType === 'INTERNAL' ? await this.generateStaffCode() : null);
 
     const email = input.email ?? (await this.generateWorkEmail(input.firstName, input.lastName));
 
@@ -213,6 +254,8 @@ export class UserAdminService {
         email,
         mobile: input.mobile ?? null,
         employeeCode,
+        productGroups: input.productGroups ?? [],
+        canAssignLeads: input.canAssignLeads ?? true,
         designationId: designation.id,
         orgUnitId: orgUnit.id,
         managerId: input.managerId ?? null,
@@ -286,7 +329,11 @@ export class UserAdminService {
     if (input.managerId && designation) {
       await this.assertReportingLine(input.managerId, designation.level);
     }
-    if (input.employeeCode) await this.assertEmployeeCodeFree(input.employeeCode, userId);
+    if (input.employeeCode) {
+      const normalised = normaliseStaffCode(input.employeeCode);
+      input = { ...input, employeeCode: normalised };
+      await this.assertEmployeeCodeFree(normalised, userId);
+    }
 
     const { roleCodes, ...scalar } = input;
 
@@ -479,6 +526,78 @@ export class UserAdminService {
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * The directory as CSV.
+   *
+   * Built from `listUsers`, deliberately — the file and the screen must not be
+   * able to disagree about who the viewer may see, and a second query written
+   * out separately is how they start to. A read-only viewer downloads their own
+   * reporting line; a manager downloads their branch.
+   */
+  async exportUsersCsv(actor: AuthenticatedPrincipal): Promise<{ csv: string; rows: number }> {
+    const users = await this.listUsers(actor);
+
+    const header = [
+      'Reference',
+      'Name',
+      'Employee code',
+      'Email',
+      'Mobile',
+      'Designation',
+      'Branch',
+      'Manager',
+      'Roles',
+      'Data scope',
+      'Expertise',
+      'Can assign leads',
+      'Status',
+      'Direct reports',
+    ];
+
+    const body = users.map((user) => [
+      user.reference,
+      user.fullName,
+      user.employeeCode ?? '',
+      user.email,
+      user.mobile ?? '',
+      user.designation?.name ?? '',
+      user.orgUnit?.name ?? '',
+      user.manager?.fullName ?? '',
+      user.roles.join('; '),
+      user.dataScope,
+      user.productGroups.join('; '),
+      user.canAssignLeads ? 'Yes' : 'No',
+      user.status,
+      String(user.directReports),
+    ]);
+
+    return { csv: toCsv(header, body), rows: users.length };
+  }
+
+  /**
+   * A person and everybody reporting to them, directly or at any depth.
+   *
+   * Walked in batches rather than a query per level, and bounded: a cycle in
+   * the reporting chain is one careless edit away and would otherwise loop
+   * until the request timed out. Ten levels is deeper than this company goes.
+   */
+  private async reportingSubtree(rootId: string): Promise<string[]> {
+    const found = new Set<string>([rootId]);
+    let frontier = [rootId];
+
+    for (let depth = 0; depth < 10 && frontier.length > 0; depth += 1) {
+      const reports = await this.prisma.user.findMany({
+        where: { managerId: { in: frontier }, deletedAt: null },
+        select: { id: true },
+      });
+
+      frontier = reports.map((report) => report.id).filter((id) => !found.has(id));
+      for (const id of frontier) found.add(id);
+    }
+
+    return [...found];
+  }
 
   private async actorContext(actor: AuthenticatedPrincipal): Promise<ActorContext> {
     const user = await this.prisma.user.findUnique({

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { DATA_SCOPES, ROLES, USER_TYPES, type DataScope } from './enums';
-import { emailSchema, idSchema, indianMobileSchema } from './common';
+import { codeSchema, emailSchema, idSchema, indianMobileSchema } from './common';
 
 /**
  * Sales hierarchy.
@@ -141,6 +141,34 @@ export function formatStaffCode(sequence: number): string {
 }
 
 /**
+ * A staff code as somebody types it, turned into the one shape we store.
+ *
+ * People type the number and nothing else — 23, or 123456 — because that is
+ * what they know and what HR says down the phone. The prefix and the padding
+ * are ours, so we add them rather than asking for them: 23 becomes SIHL-0023,
+ * 123456 becomes SIHL-123456. Four digits is a floor, not a width; a longer
+ * number keeps its length.
+ *
+ * A code that is already prefixed is accepted and re-padded, so pasting
+ * SIHL-23 gives the same answer as typing 23. Anything that is not a plain
+ * number is passed through untouched — partner codes and whatever HR hands over
+ * are not ours to reformat, and the schema is deliberately permissive about
+ * them.
+ */
+export function normaliseStaffCode(input: string): string {
+  const trimmed = input.trim().toUpperCase();
+  if (!trimmed) return trimmed;
+
+  const withoutPrefix = trimmed.startsWith(`${STAFF_CODE_PREFIX}-`)
+    ? trimmed.slice(STAFF_CODE_PREFIX.length + 1)
+    : trimmed;
+
+  if (!/^\d+$/.test(withoutPrefix)) return trimmed;
+
+  return `${STAFF_CODE_PREFIX}-${withoutPrefix.padStart(4, '0')}`;
+}
+
+/**
  * The local part of a work address, from a person's name.
  *
  * Strips accents and anything that is not a letter or digit, because an address
@@ -222,6 +250,23 @@ export const createUserSchema = z
      * is silently ignored, which is the same rule effectiveScope() applies to
      * role defaults.
      */
+    /**
+     * The product groups this person sells.
+     *
+     * Group codes, read by the assignment engine as a preference: a matching
+     * rep is chosen ahead of a non-matching one, and an empty list means "no
+     * stated expertise", which is treated as eligible for anything rather than
+     * for nothing — the opposite would strand every lead the day it ships.
+     */
+    productGroups: z.array(codeSchema).max(20).default([]),
+    /**
+     * Whether this person may hand a lead to somebody else.
+     *
+     * Subtracts from what their role grants and never adds to it: off removes
+     * `lead:assign`, on leaves the role's answer alone. Defaults to on, so the
+     * switch appearing takes nothing away from anybody.
+     */
+    canAssignLeads: z.boolean().default(true),
     dataScope: z.enum(DATA_SCOPES).optional(),
     userType: z.enum(USER_TYPES).default('INTERNAL'),
   })
@@ -259,6 +304,10 @@ export const updateUserSchema = z.object({
   roleCodes: z.array(z.enum(ROLES)).min(1).max(4).optional(),
   orgUnitId: idSchema.optional(),
   managerId: idSchema.nullable().optional(),
+  /** See `createUserSchema` — group codes, used as an assignment preference. */
+  productGroups: z.array(codeSchema).max(20).optional(),
+  /** See `createUserSchema` — subtracts `lead:assign` when false. */
+  canAssignLeads: z.boolean().optional(),
   dataScope: z.enum(DATA_SCOPES).nullable().optional(),
   status: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
 });
@@ -431,6 +480,10 @@ export interface UserSummary {
   mobile: string | null;
   employeeCode: string | null;
   status: string;
+  /** Product group codes this person sells. */
+  productGroups: string[];
+  /** False when this person may not hand leads to anybody. */
+  canAssignLeads: boolean;
   designation: { id: string; name: string; level: number } | null;
   orgUnit: { id: string; name: string } | null;
   manager: { id: string; fullName: string } | null;

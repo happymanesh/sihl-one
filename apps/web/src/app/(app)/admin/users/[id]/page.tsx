@@ -13,6 +13,14 @@ import { humanise } from '@/lib/format';
 
 export const metadata = { title: 'Manage user' };
 
+/** Product groups a person can be marked as selling. Never blocks the form. */
+async function productGroupOptions(): Promise<Array<{ id: string; label: string }>> {
+  const groups = await apiFetch<Array<{ code: string; name: string }>>(
+    '/masters/product-groups',
+  ).catch(() => []);
+  return groups.map((group) => ({ id: group.code, label: group.name }));
+}
+
 export default async function ManageUserPage({
   params,
   searchParams,
@@ -30,10 +38,11 @@ export default async function ManageUserPage({
   // designation or roles, which is the escalation the guards exist to stop.
   if (id === actor.id) redirect('/admin/users');
 
-  const [users, designations, orgUnits] = await Promise.all([
+  const [users, designations, orgUnits, productGroups] = await Promise.all([
     apiFetch<UserSummary[]>('/admin/users'),
     apiFetch<DesignationSummary[]>('/admin/designations').catch(() => [] as DesignationSummary[]),
     orgUnitOptions(),
+    productGroupOptions(),
   ]);
 
   const person = users.find((candidate) => candidate.id === id);
@@ -71,10 +80,7 @@ export default async function ManageUserPage({
             {person.designation?.name ?? 'Non-sales'} · sees {humanise(person.dataScope)}
           </p>
         </div>
-        <Link
-          href={`/admin/users/${id}/offboard` as Route}
-          className="btn btn-outline"
-        >
+        <Link href={`/admin/users/${id}/offboard` as Route} className="btn btn-outline">
           Offboard
         </Link>
       </header>
@@ -114,10 +120,13 @@ export default async function ManageUserPage({
               managerId: person.manager?.id ?? null,
               managerName: person.manager?.fullName ?? null,
               roleCodes: person.roles,
+              productGroups: person.productGroups,
+              canAssignLeads: person.canAssignLeads,
               status: person.status,
             }}
             designations={designations}
             orgUnits={orgUnits}
+            productGroups={productGroups}
             grantableRoles={grantableRolesFor(actor)}
           />
         </div>

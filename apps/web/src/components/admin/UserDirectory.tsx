@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import type { UserSummary } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
+import { Icon } from '@/components/shell/Icon';
 import { humanise } from '@/lib/format';
 
 const STATUS_TONE: Record<string, 'green' | 'amber' | 'red' | 'neutral'> = {
@@ -55,18 +56,11 @@ export function UserDirectory({
     () => [...new Set(users.map((u) => u.orgUnit?.name).filter(Boolean))].sort() as string[],
     [users],
   );
-  const roles = useMemo(
-    () => [...new Set(users.flatMap((u) => u.roles))].sort(),
-    [users],
-  );
+  const roles = useMemo(() => [...new Set(users.flatMap((u) => u.roles))].sort(), [users]);
   const statuses = useMemo(() => [...new Set(users.map((u) => u.status))].sort(), [users]);
 
   const activeFilters =
-    (search ? 1 : 0) +
-    (designation ? 1 : 0) +
-    (branch ? 1 : 0) +
-    (role ? 1 : 0) +
-    (status ? 1 : 0);
+    (search ? 1 : 0) + (designation ? 1 : 0) + (branch ? 1 : 0) + (role ? 1 : 0) + (status ? 1 : 0);
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -135,6 +129,7 @@ export function UserDirectory({
     { label: 'Designation', key: 'designation' },
     { label: 'Reports to', key: 'manager' },
     { label: 'Branch', key: 'branch' },
+    { label: 'Expertise', key: null },
     { label: 'Roles', key: null },
     { label: 'Status', key: 'status' },
     { label: '', key: null },
@@ -157,16 +152,30 @@ export function UserDirectory({
               ›
             </span>
             Filters
-            {activeFilters > 0 ? (
-              <Badge tone="teal">{activeFilters}</Badge>
-            ) : null}
+            {activeFilters > 0 ? <Badge tone="teal">{activeFilters}</Badge> : null}
           </button>
 
-          <p className="text-xs text-[var(--color-text-muted)] tnum">
-            {visible.length === users.length
-              ? `${users.length} ${users.length === 1 ? 'person' : 'people'}`
-              : `${visible.length} of ${users.length}`}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-[var(--color-text-muted)] tnum">
+              {visible.length === users.length
+                ? `${users.length} ${users.length === 1 ? 'person' : 'people'}`
+                : `${visible.length} of ${users.length}`}
+            </p>
+            {/*
+              A plain download link, not a fetch into the page.
+
+              The file is built server-side and scoped to exactly the people
+              this viewer may see — the same rule the list itself uses — so it
+              cannot leak more than the screen already shows. It covers the
+              whole scoped list rather than the current filter, because a file
+              that silently reflected a filter somebody forgot they had set is
+              how a partial export gets mistaken for the full one.
+            */}
+            <a href="/api/admin/users/export" download className="btn btn-outline h-8 text-xs">
+              <Icon name="file" size={14} />
+              Download CSV
+            </a>
+          </div>
         </div>
 
         {showFilters ? (
@@ -318,6 +327,25 @@ export function UserDirectory({
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-xs">{person.orgUnit?.name ?? '—'}</td>
+                  {/*
+                    Product groups this person sells. An em dash rather than an
+                    empty cell when nobody has set one — a blank reads as a
+                    rendering fault, and "no stated expertise" is a real answer
+                    the assignment engine acts on.
+                  */}
+                  <td className="px-4 py-3">
+                    {person.productGroups.length === 0 ? (
+                      <span className="text-xs text-[var(--color-text-subtle)]">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {person.productGroups.map((group) => (
+                          <Badge key={group} tone="teal">
+                            {humanise(group)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {person.roles.map((role) => (
