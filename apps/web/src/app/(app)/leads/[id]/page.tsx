@@ -17,6 +17,7 @@ import { Timeline } from '@/components/leads/Timeline';
 import { LeadProductOutcomes } from '@/components/leads/LeadProductOutcomes';
 import { RenameLead } from '@/components/leads/RenameLead';
 import { LeadRecordTabs } from '@/components/leads/LeadRecordTabs';
+import { LeadAssignPanel } from '@/components/leads/LeadAssignPanel';
 import { LeadProductsPanel } from '@/components/leads/LeadProductsPanel';
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
@@ -90,6 +91,8 @@ interface AssignableUser {
   fullName: string;
   email: string;
   orgUnit: string | null;
+  designation: string | null;
+  productGroups: string[];
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -227,6 +230,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               leadId={lead.id}
               selected={lead.productInterest}
               products={products}
+              leadProducts={productOutcomes}
               canEdit={can(user, 'lead:update')}
             />
           </div>
@@ -296,6 +300,32 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               documents somewhere nobody scrolled to. */}
           <LeadRecordTabs
             activityCount={lead.activityCount}
+            /*
+              Only the lead owner or a manager may move a product, so only they
+              are shown the pane. A lead product owner holds one desk's work and
+              does not get to pass it on — the API refuses it either way, and
+              showing a tab that always fails would be worse than not showing it.
+            */
+            assign={
+              can(user, 'lead:assign') &&
+              (lead.owner?.id === user.id || user.dataScope !== 'SELF') ? (
+                <LeadAssignPanel
+                  leadId={lead.id}
+                  leadProducts={productOutcomes}
+                  assignable={assignable.map((person) => ({
+                    id: person.id,
+                    fullName: person.fullName,
+                    designation: person.designation,
+                    branch: person.orgUnit,
+                    productGroups: person.productGroups ?? [],
+                  }))}
+                  groupOfProduct={Object.fromEntries(
+                    products.map((product) => [product.code, product.groupCode ?? null]),
+                  )}
+                  leadOwnerName={lead.owner?.fullName ?? 'Unassigned'}
+                />
+              ) : null
+            }
             activity={<Timeline entries={lead.timeline} />}
             documents={
               <DocumentPanel

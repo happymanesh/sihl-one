@@ -66,6 +66,11 @@ export class UsersService {
         avatarUrl: true,
         orgUnit: { select: { name: true } },
         roles: { select: { roleCode: true } },
+        // Both for the assignment dropdowns: the designation and branch tell
+        // two people of the same name apart, and the groups let the list lead
+        // with whoever actually sells the product being handed over.
+        designation: { select: { name: true } },
+        productGroups: true,
       },
       orderBy: [{ firstName: 'asc' }],
       take: 100,
@@ -77,6 +82,8 @@ export class UsersService {
       email: row.email,
       avatarUrl: row.avatarUrl,
       orgUnit: row.orgUnit?.name ?? null,
+      designation: row.designation?.name ?? null,
+      productGroups: row.productGroups,
       roles: row.roles.map((assignment) => assignment.roleCode),
     }));
   }

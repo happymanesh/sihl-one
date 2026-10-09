@@ -295,6 +295,7 @@ export class MastersService {
       include: {
         parent: { select: { name: true } },
         children: { select: { code: true } },
+        group: { select: { code: true, name: true } },
       },
     });
 
@@ -310,6 +311,8 @@ export class MastersService {
       ...row,
       parentName: row.parent?.name ?? null,
       childCodes: row.children.map((child) => child.code),
+      groupCode: row.group?.code ?? null,
+      groupName: row.group?.name ?? null,
       leadCount: counts[index]!,
     }));
   }
@@ -317,7 +320,11 @@ export class MastersService {
   async findProduct(code: string): Promise<ProductItem> {
     const row = await this.prisma.product.findUnique({
       where: { code },
-      include: { parent: { select: { name: true } }, children: { select: { code: true } } },
+      include: {
+        parent: { select: { name: true } },
+        children: { select: { code: true } },
+        group: { select: { code: true, name: true } },
+      },
     });
     if (!row) throw new NotFoundException({ title: 'Product not found' });
 
@@ -328,6 +335,8 @@ export class MastersService {
       ...row,
       parentName: row.parent?.name ?? null,
       childCodes: row.children.map((child) => child.code),
+      groupCode: row.group?.code ?? null,
+      groupName: row.group?.name ?? null,
       leadCount,
     };
   }

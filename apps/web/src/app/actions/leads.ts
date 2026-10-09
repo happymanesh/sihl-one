@@ -581,6 +581,65 @@ export async function transferLead(
   return { status: 'success', message: 'Lead transferred.' };
 }
 
+/**
+ * Hand one product on a lead to somebody.
+ *
+ * An empty `ownerId` is meaningful rather than missing: it hands the product
+ * back, so the lead's own owner answers for it again. A misassignment has to be
+ * undoable, so the empty string is passed through as null rather than rejected
+ * the way `assignLead` rejects it.
+ */
+export async function assignLeadProduct(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  const productCode = String(formData.get('productCode'));
+  const ownerId = String(formData.get('ownerId') ?? '');
+
+  try {
+    await apiFetch(`/leads/${leadId}/products/assign`, {
+      method: 'POST',
+      body: { productCode, ownerId: ownerId || null },
+    });
+  } catch (error) {
+    return toErrorState(error, 'That product could not be assigned.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return {
+    status: 'success',
+    message: ownerId ? 'Product assigned.' : 'Product handed back to the lead owner.',
+  };
+}
+
+/** Hand every open product on a lead to one person. */
+export async function assignAllLeadProducts(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  const ownerId = String(formData.get('ownerId') ?? '');
+
+  if (!ownerId) {
+    return { status: 'error', message: 'Choose someone to assign these products to.' };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}/products/assign-all`, {
+      method: 'POST',
+      body: { ownerId },
+    });
+  } catch (error) {
+    return toErrorState(error, 'The products could not be assigned.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath('/leads');
+  return { status: 'success', message: 'All open products assigned.' };
+}
+
 export async function assignLead(_previous: ActionState, formData: FormData): Promise<ActionState> {
   const leadId = String(formData.get('leadId'));
   const ownerId = String(formData.get('ownerId'));

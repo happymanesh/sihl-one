@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-type Pane = 'activity' | 'documents';
+type Pane = 'activity' | 'documents' | 'assign';
 
 /**
  * Activity and Documents, one at a time.
@@ -20,10 +20,16 @@ type Pane = 'activity' | 'documents';
 export function LeadRecordTabs({
   activity,
   documents,
+  assign,
   activityCount,
 }: {
   activity: React.ReactNode;
   documents: React.ReactNode;
+  /**
+   * Who owns each product. Null for anyone who may not move one — the pane is
+   * absent rather than present and always refusing.
+   */
+  assign?: React.ReactNode;
   activityCount: number;
 }) {
   const [pane, setPane] = useState<Pane>('activity');
@@ -54,6 +60,7 @@ export function LeadRecordTabs({
       <div className="flex border-b border-[var(--color-border)]">
         {tab('activity', 'Activity', activityCount)}
         {tab('documents', 'Documents')}
+        {assign ? tab('assign', 'Assign') : null}
       </div>
 
       {/* `hidden` rather than unmounting: the panes are server-rendered, and
@@ -64,6 +71,11 @@ export function LeadRecordTabs({
       <div className="p-5" hidden={pane !== 'documents'}>
         {documents}
       </div>
+      {assign ? (
+        <div className="p-5" hidden={pane !== 'assign'}>
+          {assign}
+        </div>
+      ) : null}
     </section>
   );
 }

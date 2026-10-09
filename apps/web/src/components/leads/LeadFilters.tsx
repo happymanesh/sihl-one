@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LEAD_STATUSES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
 import { FilterBar, FilterBarBoundary, ToggleChip } from '@/components/filters/FilterBar';
@@ -73,11 +73,28 @@ function LeadFiltersInner({
   const { searchParams, apply, clear, pending, activeCount, values } = useFilters(OWNED_KEYS);
   const selection = useLeadSelection();
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
+  /** The last value we put into the URL ourselves, so we can ignore it coming back. */
+  const lastSent = useRef(searchParams.get('q') ?? '');
 
   // Keep the box in step when the URL changes from elsewhere — a dashboard
   // deep-link, or the browser back button.
   useEffect(() => {
-    setSearch(searchParams.get('q') ?? '');
+    /*
+      Only when the change came from somewhere else.
+
+      This effect exists so Clear and a back-button navigation reset the box.
+      But the debounce below writes the typed value into the URL, which fires
+      this effect, which wrote the URL's value back into the box — overwriting
+      whatever had been typed in the 350ms since. That is the dropped-character
+      bug: type fast enough and the word loses its middle.
+
+      Comparing against what we last sent means our own round trip is ignored
+      and a genuine outside change still lands.
+    */
+    const incoming = searchParams.get('q') ?? '';
+    if (incoming === lastSent.current) return;
+    lastSent.current = incoming;
+    setSearch(incoming);
   }, [searchParams]);
 
   // Debounced: firing a request per keystroke would hammer the API and race its
@@ -85,7 +102,10 @@ function LeadFiltersInner({
   useEffect(() => {
     const current = searchParams.get('q') ?? '';
     if (search === current) return;
-    const timer = setTimeout(() => apply({ q: search || null }), 350);
+    const timer = setTimeout(() => {
+      lastSent.current = search;
+      apply({ q: search || null });
+    }, 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);

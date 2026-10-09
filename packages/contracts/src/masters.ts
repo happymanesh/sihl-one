@@ -112,6 +112,9 @@ export interface ProductItem {
   parentName: string | null;
   /** Codes of this product's sub-products, for filters that resolve a parent. */
   childCodes: string[];
+  /** The desk this product belongs to. Null until an administrator files it. */
+  groupCode: string | null;
+  groupName: string | null;
   summary: string | null;
   description: string | null;
   keyBenefits: string[];
@@ -140,10 +143,10 @@ export type MasterQuery = z.infer<typeof masterQuerySchema>;
  * — which is not a lesser action, it is the correct one: the row still explains
  * records that already point at it.
  */
-export function canDeleteMasterRow(row: {
-  isSystem: boolean;
-  leadCount: number;
-}): { ok: boolean; reason: string | null } {
+export function canDeleteMasterRow(row: { isSystem: boolean; leadCount: number }): {
+  ok: boolean;
+  reason: string | null;
+} {
   if (row.isSystem) {
     return {
       ok: false,
@@ -254,7 +257,8 @@ export function canDeactivateTaskStatus(
   if (!target.isActive) return { allowed: true };
 
   const siblings = all.filter(
-    (status) => status.category === target.category && status.code !== target.code && status.isActive,
+    (status) =>
+      status.category === target.category && status.code !== target.code && status.isActive,
   );
 
   if (siblings.length === 0) {
