@@ -36,12 +36,21 @@ const INITIAL = { status: 'idle' as const };
 export function LeadAssignPanel({
   leadId,
   leadProducts,
+  assignableCodes,
   assignable,
   groupOfProduct,
   leadOwnerName,
 }: {
   leadId: string;
   leadProducts: LeadProductView[];
+  /**
+   * The products this person is working, and so the ones they can hand on.
+   *
+   * The panel used to list every product on the lead, including ones already
+   * being worked by somebody else — so it offered to move another desk's work
+   * and the save was refused. You give away what you hold.
+   */
+  assignableCodes: string[];
   assignable: AssignableOption[];
   /** Product code to its group code, for ordering the list by expertise. */
   groupOfProduct: Record<string, string | null>;
@@ -64,6 +73,16 @@ export function LeadAssignPanel({
     Object.fromEntries(leadProducts.map((row) => [row.productCode, row.owner?.id ?? ''])),
   );
 
+  /*
+    Products handed on in this sitting.
+
+    The row stops being yours the moment the save lands, so its Save button is
+    dead from that instant — before the refresh arrives and removes the row
+    altogether. Without this there is a second or so in which the button still
+    looks live and a second click would be refused by the API.
+  */
+  const [handedOn, setHandedOn] = useState<string[]>([]);
+
   useEffect(() => {
     if (state.status === 'success' || allState.status === 'success') router.refresh();
   }, [state, allState, router]);
@@ -76,11 +95,26 @@ export function LeadAssignPanel({
     );
   }, [leadProducts]);
 
+  // Only what this person holds. Closed products are excluded for the same
+  // reason the server excludes them: moving one would rewrite who closed it.
+  const mine = leadProducts.filter(
+    (row) => assignableCodes.includes(row.productCode) && row.isOpen,
+  );
+
   if (leadProducts.length === 0) {
     return (
       <p className="text-sm text-[var(--color-text-muted)]">
         No products on this lead yet. Add what they are interested in, and each one can then be
         given its own owner.
+      </p>
+    );
+  }
+
+  if (mine.length === 0) {
+    return (
+      <p className="text-sm text-[var(--color-text-muted)]">
+        None of the open products on this lead are being worked by you, so there is nothing here for
+        you to hand on. Whoever holds a product can pass it on themselves.
       </p>
     );
   }
@@ -135,12 +169,27 @@ export function LeadAssignPanel({
       */}
       <form
         action={allAction}
+        onSubmit={(event) => {
+          const picked = new FormData(event.currentTarget).get('ownerId');
+          const to = assignable.find((person) => person.id === picked);
+          const only = mine.length === 1 ? mine[0] : undefined;
+          const what = only
+            ? `this lead for ${only.productName ?? only.productCode}`
+            : `this lead for ${mine.length} products`;
+          if (
+            !window.confirm(
+              `The ownership of ${what} will be transferred to ${to?.fullName ?? 'the selected person'}. Are you sure?`,
+            )
+          ) {
+            event.preventDefault();
+          }
+        }}
         className="flex flex-wrap items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3"
       >
         <input type="hidden" name="leadId" value={leadId} />
         <div className="min-w-56 flex-1">
           <label className="label" htmlFor="assign-all">
-            Assign all open products to
+            Assign my open products to
           </label>
           <select id="assign-all" name="ownerId" className="input" defaultValue="" required>
             <option value="" disabled>
@@ -181,69 +230,86 @@ export function LeadAssignPanel({
             </tr>
           </thead>
           <tbody>
-            {leadProducts.map((row) => {
+            {mine.map((row) => {
               const { matching, others } = optionsFor(row.productCode);
+              const name = row.productName ?? row.productCode;
+              const done = handedOn.includes(row.productCode);
 
               return (
                 <tr
                   key={row.productCode}
                   className="border-b border-[var(--color-border)] last:border-0"
                 >
-                  <td className="px-2 py-2.5 align-middle font-semibold">
-                    {row.productName ?? row.productCode}
+                  <td className="px-2 py-2.5 align-middle font-semibold">{name}</td>
+                  <td className="px-2 py-2.5 align-middle">
+                    <Badge tone="navy">{humanise(row.status)}</Badge>
                   </td>
                   <td className="px-2 py-2.5 align-middle">
-                    <Badge tone={row.isOpen ? 'navy' : 'neutral'}>{humanise(row.status)}</Badge>
-                  </td>
-                  <td className="px-2 py-2.5 align-middle">
-                    {row.isOpen ? (
-                      <form action={action} className="flex flex-wrap items-center gap-2">
-                        <input type="hidden" name="leadId" value={leadId} />
-                        <input type="hidden" name="productCode" value={row.productCode} />
-                        <select
-                          name="ownerId"
-                          className="input h-9 min-w-56 py-0"
-                          value={choice[row.productCode] ?? ''}
-                          onChange={(event) =>
-                            setChoice((current) => ({
-                              ...current,
-                              [row.productCode]: event.target.value,
-                            }))
-                          }
-                          aria-label={`Owner for ${row.productName ?? row.productCode}`}
-                        >
-                          {/* Empty hands it back, so the lead's own owner answers
-                              for it again. A misassignment has to be undoable. */}
-                          <option value="">{leadOwnerName} (lead owner)</option>
-                          {matching.length > 0 ? (
-                            <optgroup label="Sells this">
-                              {matching.map((person) => (
-                                <option key={person.id} value={person.id}>
-                                  {describe(person)}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ) : null}
-                          {others.length > 0 ? (
-                            <optgroup label={matching.length > 0 ? 'Everyone else' : 'Anyone'}>
-                              {others.map((person) => (
-                                <option key={person.id} value={person.id}>
-                                  {describe(person)}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ) : null}
-                        </select>
-                        <SubmitButton label="Save" compact />
-                      </form>
-                    ) : (
-                      // Closed products keep whoever did the work. Reassigning
-                      // one would rewrite who closed it, which is the number a
-                      // rep is measured on.
-                      <span className="text-xs text-[var(--color-text-muted)]">
-                        {row.owner?.fullName ?? leadOwnerName} · closed
-                      </span>
-                    )}
+                    {/*
+                      `sm:flex-nowrap` so owner and Save stay on the product's
+                      own line on a desktop. Wrapping is kept for narrow
+                      screens, where forcing one line would push the button off
+                      the edge instead.
+                    */}
+                    <form
+                      action={action}
+                      onSubmit={(event) => {
+                        const picked = new FormData(event.currentTarget).get('ownerId');
+                        const to = assignable.find((person) => person.id === picked);
+                        // Handing it back to the lead owner is the empty option,
+                        // and is worth confirming in the same words.
+                        const whom = to?.fullName ?? `${leadOwnerName} (lead owner)`;
+                        if (
+                          !window.confirm(
+                            `The ownership of this lead for ${name} will be transferred to ${whom}. Are you sure?`,
+                          )
+                        ) {
+                          event.preventDefault();
+                          return;
+                        }
+                        setHandedOn((current) => [...current, row.productCode]);
+                      }}
+                      className="flex flex-wrap items-center gap-2 sm:flex-nowrap"
+                    >
+                      <input type="hidden" name="leadId" value={leadId} />
+                      <input type="hidden" name="productCode" value={row.productCode} />
+                      <select
+                        name="ownerId"
+                        className="input h-9 min-w-56 py-0"
+                        value={choice[row.productCode] ?? ''}
+                        disabled={done}
+                        onChange={(event) =>
+                          setChoice((current) => ({
+                            ...current,
+                            [row.productCode]: event.target.value,
+                          }))
+                        }
+                        aria-label={`Owner for ${name}`}
+                      >
+                        {/* Empty hands it back, so the lead's own owner answers
+                            for it again. A misassignment has to be undoable. */}
+                        <option value="">{leadOwnerName} (lead owner)</option>
+                        {matching.length > 0 ? (
+                          <optgroup label="Sells this">
+                            {matching.map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {describe(person)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
+                        {others.length > 0 ? (
+                          <optgroup label={matching.length > 0 ? 'Everyone else' : 'Anyone'}>
+                            {others.map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {describe(person)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
+                      </select>
+                      <SubmitButton label={done ? 'Transferred' : 'Save'} compact disabled={done} />
+                    </form>
                   </td>
                 </tr>
               );
@@ -255,13 +321,22 @@ export function LeadAssignPanel({
   );
 }
 
-function SubmitButton({ label, compact = false }: { label: string; compact?: boolean }) {
+function SubmitButton({
+  label,
+  compact = false,
+  disabled = false,
+}: {
+  label: string;
+  compact?: boolean;
+  /** Already handed on in this sitting, so there is nothing left to save. */
+  disabled?: boolean;
+}) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
-      disabled={pending}
-      className={`btn btn-outline ${compact ? 'h-9 text-xs' : ''}`}
+      disabled={pending || disabled}
+      className={`btn btn-outline shrink-0 disabled:opacity-60 ${compact ? 'h-9 text-xs' : ''}`}
     >
       {pending ? 'Saving…' : label}
     </button>

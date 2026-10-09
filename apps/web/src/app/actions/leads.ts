@@ -551,10 +551,98 @@ export async function changeLeadProductStatus(
     return toErrorState(error, 'That outcome could not be recorded.');
   }
 
+  /*
+    The approval rides on the same save, deliberately.
+
+    It is one decision for the rep — "this is qualified, and here is what I have
+    promised" — and splitting it into two buttons is how the second one does not
+    get pressed. The outcome is recorded first and stands on its own: if routing
+    the approval fails, because the reporting line has no National Head, the
+    stage change is already saved and the message says what else to fix.
+  */
+  if (formData.get('sendForApproval') === 'on') {
+    try {
+      await apiFetch(`/leads/${leadId}/products/approval`, {
+        method: 'POST',
+        body: { productCode, note: formData.get('note') || undefined },
+      });
+    } catch (error) {
+      rethrowControlFlow(error);
+      const detail =
+        error instanceof ApiError ? (error.problem.detail ?? error.problem.title) : null;
+      return {
+        status: 'error',
+        message:
+          `The outcome was saved, but the approval could not be sent. ${detail ?? ''}`.trim(),
+      };
+    }
+  }
+
   revalidatePath(`/leads/${leadId}`);
   revalidatePath('/leads');
   revalidatePath('/pipeline');
-  return { status: 'success', message: 'Outcome recorded.' };
+  return {
+    status: 'success',
+    message:
+      formData.get('sendForApproval') === 'on'
+        ? 'Outcome recorded and sent for approval.'
+        : 'Outcome recorded.',
+  };
+}
+
+/** Nudge the approver. The once-a-day rule is enforced by the API. */
+export async function remindApproval(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  try {
+    await apiFetch(`/leads/${leadId}/products/approval/remind`, {
+      method: 'POST',
+      body: { productCode: String(formData.get('productCode') ?? '') },
+    });
+  } catch (error) {
+    return toErrorState(error, 'The reminder could not be sent.');
+  }
+  revalidatePath(`/leads/${leadId}`);
+  return { status: 'success', message: 'Reminder sent.' };
+}
+
+/** Approve or refuse what was committed. A refusal must carry a reason. */
+export async function decideApproval(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const leadId = String(formData.get('leadId'));
+  const decision = String(formData.get('decision') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+
+  if (decision === 'REJECTED' && !reason) {
+    return {
+      status: 'error',
+      message: 'Say why you are not approving it.',
+      errors: { reason: ['A reason is required'] },
+    };
+  }
+
+  try {
+    await apiFetch(`/leads/${leadId}/products/approval/decide`, {
+      method: 'POST',
+      body: {
+        productCode: String(formData.get('productCode') ?? ''),
+        decision,
+        reason: reason || undefined,
+      },
+    });
+  } catch (error) {
+    return toErrorState(error, 'That decision could not be recorded.');
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  return {
+    status: 'success',
+    message: decision === 'APPROVED' ? 'Approved.' : 'Recorded as not approved.',
+  };
 }
 
 export async function transferLead(

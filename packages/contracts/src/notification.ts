@@ -18,6 +18,12 @@ import { idSchema, paginationQuerySchema } from './common';
  */
 export const NOTIFICATION_TYPES = [
   'LEAD_ASSIGNED',
+  /** One desk's work on a lead, handed to you. See `lead.product.assigned`. */
+  'LEAD_PRODUCT_ASSIGNED',
+  /** A commitment waiting on your sign-off. See `lead.product.approval.*`. */
+  'APPROVAL_REQUESTED',
+  /** Your request was answered, either way. */
+  'APPROVAL_DECIDED',
   'LEAD_TRANSFERRED_IN',
   'LEAD_TRANSFERRED_AWAY',
   'TASK_ASSIGNED',
@@ -106,8 +112,7 @@ const field = (payload: unknown, key: string): string | null =>
 export function notificationsFor(event: RoutableEvent): PlannedNotification[] {
   const actor = str(event.actorId ?? null);
   const reference = field(event.payload, 'reference') ?? event.aggregateId;
-  const notMe = (userId: string | null): userId is string =>
-    userId !== null && userId !== actor;
+  const notMe = (userId: string | null): userId is string => userId !== null && userId !== actor;
 
   switch (event.eventType) {
     case 'lead.assigned': {
@@ -118,6 +123,88 @@ export function notificationsFor(event: RoutableEvent): PlannedNotification[] {
           userId: to,
           type: 'LEAD_ASSIGNED',
           title: `Lead ${reference} assigned to you`,
+          entityType: 'LEAD',
+          entityId: event.aggregateId,
+        },
+      ];
+    }
+
+    /*
+      A product on a lead, handed to somebody.
+
+      The event was being published and nothing routed it, so being given a
+      desk's work on a client arrived silently — the receiver found out by
+      opening a lead they had no reason to open. A whole-lead assignment has
+      always rung the bell; this is the same news about a smaller unit of work.
+
+      One notification whether it was one product or an "assign all" sweep:
+      `productCount` is set by the bulk path and `productCode` by the single
+      one, and six separate rows for one act is how a bell stops being read.
+    */
+    case 'lead.product.assigned': {
+      const to = field(event.payload, 'assigneeId');
+      if (!notMe(to)) return [];
+
+      // The product's name where the payload carries it, its code otherwise —
+      // the receiver knows it as "NRI investing", not NRI.
+      const named = field(event.payload, 'productName') ?? field(event.payload, 'productCode');
+      const count = Number(field(event.payload, 'productCount') ?? '0');
+      const what = named ?? (count > 1 ? `${count} products` : 'A product');
+
+      return [
+        {
+          userId: to,
+          type: 'LEAD_PRODUCT_ASSIGNED',
+          title: `${what} on lead ${reference} assigned to you`,
+          entityType: 'LEAD',
+          entityId: event.aggregateId,
+        },
+      ];
+    }
+
+    /*
+      A commitment waiting on a National Head.
+
+      Reminders route through the same case: the title says so, and the
+      `sourceEventId` differs per event, so a nudge writes a fresh row rather
+      than being swallowed by the duplicate guard on the original request.
+    */
+    case 'lead.product.approval.requested':
+    case 'lead.product.approval.reminded': {
+      const to = field(event.payload, 'approverId');
+      if (!notMe(to)) return [];
+      const product = field(event.payload, 'productName') ?? field(event.payload, 'productCode');
+      const again = event.eventType.endsWith('reminded');
+      return [
+        {
+          userId: to,
+          type: 'APPROVAL_REQUESTED',
+          title: `${again ? 'Still waiting: approve' : 'Approve'} ${product} on lead ${reference}`,
+          body: field(event.payload, 'note') ?? undefined,
+          entityType: 'LEAD',
+          entityId: event.aggregateId,
+        },
+      ];
+    }
+
+    /*
+      The answer goes back to whoever asked.
+
+      Both outcomes are news: an approval is the go-ahead they were waiting on,
+      and a refusal changes what they may promise. A refusal carries its reason
+      into the body, because "rejected" on its own cannot be acted on.
+    */
+    case 'lead.product.approval.decided': {
+      const to = field(event.payload, 'requestedById');
+      if (!notMe(to)) return [];
+      const product = field(event.payload, 'productName') ?? field(event.payload, 'productCode');
+      const approved = field(event.payload, 'decision') === 'APPROVED';
+      return [
+        {
+          userId: to,
+          type: 'APPROVAL_DECIDED',
+          title: `${product} on lead ${reference} ${approved ? 'approved' : 'not approved'}`,
+          body: field(event.payload, 'reason') ?? undefined,
           entityType: 'LEAD',
           entityId: event.aggregateId,
         },
@@ -180,7 +267,9 @@ export function notificationsFor(event: RoutableEvent): PlannedNotification[] {
         {
           userId: to,
           type: 'LEADS_IMPORTED',
-          title: count ? `${count} imported leads assigned to you` : 'Imported leads assigned to you',
+          title: count
+            ? `${count} imported leads assigned to you`
+            : 'Imported leads assigned to you',
           entityType: 'IMPORT',
           entityId: event.aggregateId,
         },

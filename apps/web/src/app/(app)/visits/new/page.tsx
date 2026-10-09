@@ -24,18 +24,39 @@ export default async function PlanVisitPage({
 
   // Only the records the caller can actually visit are offered. Pulling the
   // whole book and filtering in the browser would both leak names and be slow.
+  /*
+    Arriving from one lead means that lead, and nothing else.
+
+    The picker offered fifty others, which is a chance to plan the visit
+    against the wrong client for no benefit — the choice was already made by
+    pressing "Plan a field visit" on a particular record. It also fixes a
+    quieter fault: the list is the first fifty open leads, so a preset lead
+    outside that page was not in the dropdown at all and the form opened with
+    nothing selected.
+  */
+  const presetLeadId = preset.entityType === 'LEAD' && preset.entityId ? preset.entityId : null;
+  const presetLead = presetLeadId
+    ? await apiFetch<{ id: string; fullName: string; reference: string; city: string | null }>(
+        `/leads/${presetLeadId}`,
+      ).catch(() => null)
+    : null;
+
   const [leads, customers, meetingModes, colleagues] = await Promise.all([
-    apiFetch<{ items: LeadListItem[] }>(
-      // Every open stage, NEW included.
-      //
-      // This used to start at CONTACTED, on the reasoning that you do not visit
-      // somebody you have never spoken to. Per-product outcomes broke that: a
-      // lead whose only remaining open product sits at NEW rolls up to NEW, so a
-      // client mid-conversation about F&O disappeared from this list the moment
-      // their equity converted. The stage a lead happens to be at is a poor
-      // reason to refuse to plan a meeting with them.
-      '/leads?pageSize=50&status=NEW&status=CONTACTED&status=QUALIFIED&status=PROPOSAL',
-    ).catch(() => ({ items: [] as LeadListItem[] })),
+    // Skipped entirely when one lead is already chosen — fifty rows nobody
+    // will look at is a request worth not making.
+    presetLead
+      ? Promise.resolve({ items: [] as LeadListItem[] })
+      : apiFetch<{ items: LeadListItem[] }>(
+          // Every open stage, NEW included.
+          //
+          // This used to start at CONTACTED, on the reasoning that you do not visit
+          // somebody you have never spoken to. Per-product outcomes broke that: a
+          // lead whose only remaining open product sits at NEW rolls up to NEW, so a
+          // client mid-conversation about F&O disappeared from this list the moment
+          // their equity converted. The stage a lead happens to be at is a poor
+          // reason to refuse to plan a meeting with them.
+          '/leads?pageSize=50&status=NEW&status=CONTACTED&status=QUALIFIED&status=PROPOSAL',
+        ).catch(() => ({ items: [] as LeadListItem[] })),
     apiFetch<{ items: CustomerRow[] }>('/customers?pageSize=50').catch(() => ({
       items: [] as CustomerRow[],
     })),
@@ -73,7 +94,7 @@ export default async function PlanVisitPage({
         <PlanVisitForm
           colleagues={colleagues}
           meetingModes={meetingModes}
-          leads={leads.items.map((lead) => ({
+          leads={(presetLead ? [presetLead] : leads.items).map((lead) => ({
             id: lead.id,
             label: `${lead.fullName} — ${lead.reference}${lead.city ? ` (${lead.city})` : ''}`,
           }))}

@@ -145,6 +145,106 @@ export interface LeadProductView {
   owner: { id: string; fullName: string; designation: string | null; branch: string | null } | null;
   /** When it was handed to that person, for the history. */
   assignedAt: string | null;
+
+  /**
+   * Sign-off on what was committed, when one has been asked for.
+   *
+   * Visible to everybody who can see the lead — "pending approval" is a thing
+   * the next person to pick this up needs to know, not only the person who
+   * raised it.
+   */
+  approval: LeadProductApprovalView | null;
+}
+
+/**
+ * Whether this product on this lead is the viewer's to act on.
+ *
+ * One definition, used by the API guards and by the screens that decide what to
+ * render, because two of them would drift and the drift shows up as a button
+ * that refuses.
+ *
+ * A product is yours when you hold it. A product nobody holds falls to the
+ * lead's own owner, which is the rule the rest of the product already follows —
+ * the lead owner answers for anything nobody has been named for. A super
+ * administrator acts on anything.
+ *
+ * Note what this is *not*: being the lead owner does not give you a product
+ * somebody else is working. That was the old whole-lead behaviour and it is
+ * what per-product ownership exists to stop.
+ */
+export function ownsLeadProduct(
+  viewer: { id: string; isSuperAdmin: boolean },
+  product: { ownerId: string | null },
+  leadOwnerId: string | null,
+): boolean {
+  if (viewer.isSuperAdmin) return true;
+  if (product.ownerId) return product.ownerId === viewer.id;
+  return leadOwnerId !== null && leadOwnerId === viewer.id;
+}
+
+// ---------------------------------------------------------------------------
+// Commitment approval
+// ---------------------------------------------------------------------------
+
+export const APPROVAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+/** How long a reminder has to wait. One a day, so a nudge stays a nudge. */
+export const APPROVAL_REMINDER_INTERVAL_HOURS = 24;
+
+/**
+ * Whether a reminder may be sent for this request right now.
+ *
+ * Decided here rather than in the button, because a disabled button is a
+ * courtesy and the rule has to hold against a second tab, a stale page and a
+ * direct call. `now` is passed in so the same function answers for the server
+ * and for the screen without either reading its own clock.
+ */
+export function canRemindApproval(
+  approval: { status: ApprovalStatus; lastReminderAt: string | null },
+  now: Date,
+): boolean {
+  if (approval.status !== 'PENDING') return false;
+  if (!approval.lastReminderAt) return true;
+  const since = now.getTime() - new Date(approval.lastReminderAt).getTime();
+  return since >= APPROVAL_REMINDER_INTERVAL_HOURS * 60 * 60 * 1000;
+}
+
+export const requestApprovalSchema = z.object({
+  productCode: codeSchema,
+  /** What was committed. Carried from the remarks the rep just typed. */
+  note: z.string().trim().max(1000).optional(),
+});
+export type RequestApprovalInput = z.infer<typeof requestApprovalSchema>;
+
+/** A nudge names only the product; everything else is already on the record. */
+export const remindApprovalSchema = z.object({ productCode: codeSchema });
+export type RemindApprovalInput = z.infer<typeof remindApprovalSchema>;
+
+export const decideApprovalSchema = z
+  .object({
+    productCode: codeSchema,
+    decision: z.enum(['APPROVED', 'REJECTED']),
+    /** Required on a refusal: "no" without a reason cannot be acted on. */
+    reason: z.string().trim().max(1000).optional(),
+  })
+  .refine((input) => input.decision !== 'REJECTED' || Boolean(input.reason), {
+    message: 'Give a reason for refusing',
+    path: ['reason'],
+  });
+export type DecideApprovalInput = z.infer<typeof decideApprovalSchema>;
+
+export interface LeadProductApprovalView {
+  status: ApprovalStatus;
+  requestedBy: { id: string; fullName: string };
+  approver: { id: string; fullName: string };
+  requestNote: string | null;
+  decisionReason: string | null;
+  requestedAt: string;
+  decidedAt: string | null;
+  lastReminderAt: string | null;
+  /** Null when the email went, a short reason when it did not. */
+  emailNote: string | null;
 }
 
 /**

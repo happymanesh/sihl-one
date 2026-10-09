@@ -204,7 +204,9 @@ model User {
   canAssignLeads Boolean @default(true)
 
   /// Products on leads this person is working, one row per product.
-  leadProducts LeadProduct[] @relation("LeadProductOwner")
+  leadProducts       LeadProduct[]         @relation("LeadProductOwner")
+  approvalsRequested LeadProductApproval[] @relation("ApprovalRequestedBy")
+  approvalsToDecide  LeadProductApproval[] @relation("ApprovalApprover")
 
   /// Which product groups this person sells.
   ///
@@ -812,11 +814,12 @@ model Lead {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  statusHistory LeadStatusHistory[]
-  profile       LeadProfile?
-  familyMembers LeadFamilyMember[]
-  consents      ConsentRecord[]
-  importRows    LeadImportRow[]
+  statusHistory    LeadStatusHistory[]
+  productApprovals LeadProductApproval[]
+  profile          LeadProfile?
+  familyMembers    LeadFamilyMember[]
+  consents         ConsentRecord[]
+  importRows       LeadImportRow[]
 
   /// Duplicate guard. A person is one lead per mobile number in the active
   /// pipeline; re-enquiries attach activities to the existing lead instead of
@@ -964,20 +967,81 @@ model LeadFamilyMember {
   @@map("lead_family_member")
 }
 
+/// Sign-off on what a rep has committed to a client for one product.
+///
+/// Raised by the person working the product when they move it to Qualified and
+/// tick "send for approval", and decided by the National Head above them. It
+/// never blocks the work: a product can be converted while this is pending or
+/// after it has been refused — the record exists so that what was promised is
+/// visible to the person accountable for it, not to gate the sale.
+///
+/// One live row per product per lead. Re-raising replaces the decision rather
+/// than stacking a second request nobody would know which of to answer.
+model LeadProductApproval {
+  id          String @id @default(cuid())
+  leadId      String
+  lead        Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  productCode String @db.VarChar(40)
+
+  /// Who asked. Kept even if they leave: the request is part of the record.
+  requestedById String
+  requestedBy   User   @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  /// The National Head the request was routed to, resolved when it was raised
+  /// and then fixed — a reporting-line change later must not silently move a
+  /// pending request to somebody who has never seen it.
+  approverId String
+  approver   User   @relation("ApprovalApprover", fields: [approverId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  /// PENDING, APPROVED or REJECTED. A string for the same reason the other
+  /// status columns are: the vocabulary lives in the contracts.
+  status String @default("PENDING") @db.VarChar(20)
+
+  /// What the rep committed, copied from the remarks at the moment of asking.
+  requestNote    String? @db.VarChar(1000)
+  /// Why it was approved or refused. Required on a refusal.
+  decisionReason String? @db.VarChar(1000)
+
+  requestedAt DateTime  @default(now())
+  decidedAt   DateTime?
+
+  /// When a nudge was last sent, so the once-a-day rule can be enforced on the
+  /// server rather than only hidden in the button.
+  lastReminderAt DateTime?
+  /// Why the email did not go, when it did not. The bell is the channel that
+  /// always works; this records honestly that the mail did not.
+  emailNote      String?   @db.VarChar(200)
+
+  @@unique([leadId, productCode])
+  @@index([approverId, status])
+  @@map("lead_product_approval")
+}
+
 model LeadStatusHistory {
-  id              String      @id @default(cuid())
-  leadId          String
-  lead            Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  fromStatus      LeadStatus?
-  toStatus        LeadStatus
-  note            String?     @db.VarChar(1000)
+  id         String      @id @default(cuid())
+  leadId     String
+  lead       Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  fromStatus LeadStatus?
+  toStatus   LeadStatus
+
+  /// Which product this stage change was about. Null means the lead as a whole.
+  ///
+  /// Product statuses use the lead's own vocabulary deliberately, so they fit
+  /// the same two columns. Without this the history could not distinguish three
+  /// products moving through their own stages from the lead moving through its.
+  ///
+  /// No relation to `product`: a log must not stop a master row being retired.
+  productCode String? @db.VarChar(40)
+
+  note            String?  @db.VarChar(1000)
   changedById     String?
-  changedAt       DateTime    @default(now())
+  changedAt       DateTime @default(now())
   /// Seconds spent in `fromStatus`. Powers stage-duration and drop-off reports
   /// without a window function over the whole history table.
   durationSeconds Int?
 
   @@index([leadId, changedAt])
+  @@index([leadId, productCode])
   @@map("lead_status_history")
 }
 

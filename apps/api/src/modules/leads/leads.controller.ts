@@ -23,6 +23,11 @@ import { Throttle } from '@nestjs/throttler';
 import {
   assignAllLeadProductsSchema,
   assignLeadProductSchema,
+  requestApprovalSchema,
+  remindApprovalSchema,
+  decideApprovalSchema,
+  type RequestApprovalInput,
+  type DecideApprovalInput,
   assignLeadSchema,
   changeLeadProductStatusSchema,
   convertProductSchema,
@@ -471,6 +476,58 @@ export class LeadsController {
   @ApiOperation({ summary: "A lead's products and where each one stands" })
   products(@CurrentUser() user: AuthenticatedPrincipal, @Param('id', IdParamPipe) id: string) {
     return this.leads.productsFor(user, id);
+  }
+
+  /*
+    Approval of what has been committed.
+
+    All three are `lead:update`, not a permission of their own: raising,
+    chasing and deciding are things done in the course of working a lead, and
+    who may do each is a question about this particular product — the service
+    answers it against ownership and the routed approver rather than a role.
+  */
+  @Post(':id/products/approval')
+  @RequirePermissions('lead:update')
+  @ApiParam({ name: 'id', description: 'Lead id' })
+  @ApiOperation({
+    summary: 'Send what has been committed for this product to the National Head',
+    description:
+      'Routed up the requester’s reporting line. Never blocks the sale: the product can ' +
+      'still be converted while this is pending or after it was refused.',
+  })
+  @ApiZodBody(requestApprovalSchema)
+  requestApproval(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(requestApprovalSchema) body: RequestApprovalInput,
+  ) {
+    return this.leads.requestApproval(user, id, body);
+  }
+
+  @Post(':id/products/approval/remind')
+  @RequirePermissions('lead:update')
+  @ApiParam({ name: 'id', description: 'Lead id' })
+  @ApiOperation({ summary: 'Nudge the approver — once a day' })
+  @ApiZodBody(remindApprovalSchema)
+  remindApproval(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(remindApprovalSchema) body: { productCode: string },
+  ) {
+    return this.leads.remindApproval(user, id, body.productCode);
+  }
+
+  @Post(':id/products/approval/decide')
+  @RequirePermissions('lead:update')
+  @ApiParam({ name: 'id', description: 'Lead id' })
+  @ApiOperation({ summary: 'Approve or refuse, with a reason on a refusal' })
+  @ApiZodBody(decideApprovalSchema)
+  decideApproval(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(decideApprovalSchema) body: DecideApprovalInput,
+  ) {
+    return this.leads.decideApproval(user, id, body);
   }
 
   @Post(':id/products/assign')

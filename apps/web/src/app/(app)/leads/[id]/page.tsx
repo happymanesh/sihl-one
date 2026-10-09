@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   canTransferLeads,
+  ownsLeadProduct,
   type LeadProductView,
   type LeadProfileView,
   type MeetingModeItem,
@@ -19,6 +20,7 @@ import { RenameLead } from '@/components/leads/RenameLead';
 import { LeadRecordTabs } from '@/components/leads/LeadRecordTabs';
 import { LeadAssignPanel } from '@/components/leads/LeadAssignPanel';
 import { LeadProductsPanel } from '@/components/leads/LeadProductsPanel';
+import { MissingProductsPrompt } from '@/components/leads/MissingProductsPrompt';
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
 import { apiFetch } from '@/lib/api';
@@ -80,6 +82,9 @@ interface LeadDetail {
     id: string;
     fromStatus: string | null;
     toStatus: string;
+    /** Null for a change to the lead as a whole. */
+    productCode: string | null;
+    productName: string | null;
     note: string | null;
     changedAt: string;
     durationSeconds: number | null;
@@ -172,6 +177,20 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     () => [] as ProductItem[],
   );
 
+  /*
+    Which products on this lead are this person's to act on.
+
+    Codes rather than a predicate, because a function cannot cross into a client
+    component. One list, used for both the status change and the assign panel,
+    so the two cannot disagree about what somebody holds.
+  */
+  const viewer = { id: user.id, isSuperAdmin: can(user, 'system:configure') };
+  const myProductCodes = productOutcomes
+    .filter((row) =>
+      ownsLeadProduct(viewer, { ownerId: row.owner?.id ?? null }, lead.owner?.id ?? null),
+    )
+    .map((row) => row.productCode);
+
   return (
     <div className="space-y-5">
       <nav className="text-xs text-[var(--color-text-muted)]">
@@ -225,6 +244,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 canVerify={lead.owner?.id === user.id}
               />
             </div>
+
+            {/*
+              A confirmed number with no product recorded is the one state a
+              lead cannot be worked from, so it is asked about rather than left
+              to be noticed. Only for the person who can actually answer.
+            */}
+            {lead.mobileVerifiedAt &&
+            lead.productInterest.length === 0 &&
+            productOutcomes.length === 0 &&
+            can(user, 'lead:update') ? (
+              <MissingProductsPrompt
+                leadId={lead.id}
+                leadName={lead.fullName}
+                mobile={lead.mobile}
+                products={products}
+              />
+            ) : null}
 
             <LeadProductsPanel
               leadId={lead.id}
@@ -287,7 +323,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <LeadProductOutcomes
             leadId={lead.id}
             outcomes={productOutcomes}
-            canEdit={can(user, 'lead:update')}
+            // Only the person working a product may record its outcome, so
+            // Change appears per row rather than for the whole panel.
+            editableCodes={can(user, 'lead:update') ? myProductCodes : []}
+            leadOwnerName={lead.owner?.fullName ?? 'Unassigned'}
+            // Requests routed to this person, and anything for a super admin.
+            canDecideApproval={
+              productOutcomes.some((row) => row.approval?.approver.id === user.id) ||
+              can(user, 'system:configure')
+            }
           />
 
           <LeadProfilePanel
@@ -301,17 +345,19 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <LeadRecordTabs
             activityCount={lead.activityCount}
             /*
-              Only the lead owner or a manager may move a product, so only they
-              are shown the pane. A lead product owner holds one desk's work and
-              does not get to pass it on — the API refuses it either way, and
-              showing a tab that always fails would be worse than not showing it.
+              Shown to anybody who may hand work on at all.
+
+              That is `lead:assign`, which the per-user "may assign leads to
+              other people" switch subtracts — so the switch alone decides who
+              sees this. The panel then shows only the products this person is
+              working, which is what they are able to give away.
             */
             assign={
-              can(user, 'lead:assign') &&
-              (lead.owner?.id === user.id || user.dataScope !== 'SELF') ? (
+              can(user, 'lead:assign') ? (
                 <LeadAssignPanel
                   leadId={lead.id}
                   leadProducts={productOutcomes}
+                  assignableCodes={myProductCodes}
                   assignable={assignable.map((person) => ({
                     id: person.id,
                     fullName: person.fullName,
@@ -391,7 +437,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <section className="card p-5">
             <h2 className="font-bold">Details</h2>
             <dl className="mt-3 space-y-2.5 text-sm">
-              <Detail label="Lead owner" value={lead.owner?.fullName ?? 'Unassigned'} />
               {/*
                 Who put it in, and whose QR brought them in.
 
@@ -426,6 +471,58 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 <Detail label="Lost reason" value={humanise(lead.lostReason)} />
               ) : null}
             </dl>
+
+            {/*
+              Who is working each product.
+
+              The lead owner above answers "who is accountable for the client";
+              this answers "who do I ring about the mutual funds", which since
+              ownership went per-product is a different question and was not on
+              the screen anywhere. A product nobody has been named for says so
+              explicitly rather than showing a blank — "nobody" and "the lead
+              owner" are different answers, and here they resolve to the same
+              person.
+            */}
+            {productOutcomes.length > 0 ? (
+              <div className="mt-4 border-t border-[var(--color-border)] pt-3">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+                  Product owners
+                </h3>
+                <ul className="mt-2 space-y-2 text-sm">
+                  {productOutcomes.map((row) => (
+                    <li key={row.productCode} className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0 shrink-0 text-[var(--color-text-muted)]">
+                        {row.productName ?? row.productCode}
+                      </span>
+                      <span className="min-w-0 text-right">
+                        {row.owner ? (
+                          <>
+                            <span className="font-medium">{row.owner.fullName}</span>
+                            {row.owner.designation || row.owner.branch ? (
+                              <span className="block text-xs text-[var(--color-text-subtle)]">
+                                {[row.owner.designation, row.owner.branch]
+                                  .filter(Boolean)
+                                  .join(', ')}
+                              </span>
+                            ) : null}
+                            {row.assignedAt ? (
+                              <span className="block text-xs text-[var(--color-text-subtle)]">
+                                since {formatDate(row.assignedAt)}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-[var(--color-text-subtle)]">
+                            {lead.owner?.fullName ?? 'Unassigned'}{' '}
+                            <span className="text-xs">(lead owner)</span>
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
 
           {lead.attribution.utmSource || lead.attribution.landingPath ? (
@@ -444,23 +541,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </dl>
             </section>
           ) : null}
-
-          <section className="card p-5">
-            <h2 className="font-bold">Stage history</h2>
-            <ol className="mt-3 space-y-2 text-xs">
-              {lead.statusHistory.map((entry) => (
-                <li key={entry.id} className="flex items-baseline justify-between gap-2">
-                  <span>
-                    {entry.fromStatus ? `${humanise(entry.fromStatus)} → ` : ''}
-                    <span className="font-semibold">{humanise(entry.toStatus)}</span>
-                  </span>
-                  <span className="shrink-0 text-[var(--color-text-subtle)]">
-                    {formatDate(entry.changedAt)}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </section>
         </aside>
       </div>
     </div>

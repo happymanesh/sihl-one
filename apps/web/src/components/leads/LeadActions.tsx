@@ -100,7 +100,12 @@ function ProductValueFields({ products }: { products: ProductItem[] }) {
             return (
               <div key={code} className="flex items-center gap-2">
                 <label className="flex-1 text-xs" htmlFor={`productValue.${code}`}>
-                  {product?.parentName ? `${product.parentName} › ${product.name}` : (product?.name ?? code)}
+                  {/* Group, then parent, then the product — the same reading
+                      order used wherever a product is named, so "Intraday" is
+                      never shown without saying intraday of what. */}
+                  {[product?.groupName, product?.parentName, product?.name ?? code]
+                    .filter(Boolean)
+                    .join(' : ')}
                 </label>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-[var(--color-text-subtle)]">₹</span>
@@ -388,11 +393,17 @@ function LogInteractionForm({
       </div>
 
       <div>
-        <label className="label" htmlFor="subject">Summary</label>
+        {/* Marked required, because it is — the form refuses without it, and
+            the only field that enforces a rule it does not advertise is the
+            one people hit. */}
+        <label className="label" htmlFor="subject">
+          Summary <span className="text-danger-500">*</span>
+        </label>
         <input
           id="subject"
           name="subject"
           className="input"
+          required
           placeholder="Enter discussion topic or agenda"
           aria-invalid={missing.includes('subject') || Boolean(state.errors?.subject)}
           aria-describedby={missing.includes('subject') ? 'subject-error' : undefined}

@@ -10,6 +10,7 @@ import {
 import {
   PASSWORD_RESET_TTL_MINUTES,
   effectiveScope,
+  withLeadAssignSwitch,
   type AuthTokens,
   type AuthenticatedUser,
   type ChangePasswordInput,
@@ -112,7 +113,10 @@ export class AuthService {
       // Hash a dummy value anyway. Returning early on "no such user" makes the
       // response measurably faster than a wrong-password response, and that
       // timing difference alone enumerates accounts.
-      await this.passwords.verify(input.password, '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+      await this.passwords.verify(
+        input.password,
+        '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      );
       await this.recordAttempt(identifier, null, false, 'NO_SUCH_USER');
       throw new UnauthorizedException(GENERIC_LOGIN_FAILURE);
     }
@@ -148,9 +152,10 @@ export class AuthService {
       });
     }
 
-    const permissions = [
-      ...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[])),
-    ];
+    const permissions = withLeadAssignSwitch(
+      [...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[]))],
+      user.canAssignLeads,
+    );
     const scope = effectiveScope(roles, user.dataScope as DataScope | null);
 
     // Password proven. If a second factor is enrolled, no session is created
@@ -213,9 +218,10 @@ export class AuthService {
     }
 
     const roles = user.roles.map((assignment) => assignment.roleCode as Role);
-    const permissions = [
-      ...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[])),
-    ];
+    const permissions = withLeadAssignSwitch(
+      [...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[]))],
+      user.canAssignLeads,
+    );
     const scope = effectiveScope(roles, user.dataScope as DataScope | null);
 
     return this.completeSignIn(user, roles, permissions, scope, user.email);
@@ -341,7 +347,9 @@ export class AuthService {
         // Either the client raced itself outside the window or the token
         // leaked; the safe response to both is to kill every session for that
         // user and force a fresh sign-in.
-        this.logger.warn(`Refresh token reuse detected for user ${session.userId}; revoking all sessions.`);
+        this.logger.warn(
+          `Refresh token reuse detected for user ${session.userId}; revoking all sessions.`,
+        );
         await this.prisma.session.updateMany({
           where: { userId: session.userId, revokedAt: null },
           data: { revokedAt: new Date(), revokedReason: 'TOKEN_REUSE_DETECTED' },
@@ -354,7 +362,10 @@ export class AuthService {
     }
 
     if (session.user.status !== 'ACTIVE' || session.user.deletedAt) {
-      throw new UnauthorizedException({ title: 'Session expired', detail: 'Sign in again to continue.' });
+      throw new UnauthorizedException({
+        title: 'Session expired',
+        detail: 'Sign in again to continue.',
+      });
     }
 
     // Idle timeout, enforced here rather than only in the browser. A countdown
@@ -420,9 +431,10 @@ export class AuthService {
     }
 
     const roles = session.user.roles.map((assignment) => assignment.role.code as Role);
-    const permissions = [
-      ...new Set(session.user.roles.flatMap((a) => a.role.permissions as Permission[])),
-    ];
+    const permissions = withLeadAssignSwitch(
+      [...new Set(session.user.roles.flatMap((a) => a.role.permissions as Permission[]))],
+      session.user.canAssignLeads,
+    );
     const rotated = this.tokens.createRefreshToken();
 
     const newSession = await this.prisma.$transaction(async (tx) => {
@@ -656,8 +668,7 @@ export class AuthService {
 
     const invalid = new BadRequestException({
       title: 'This reset link is no longer valid',
-      detail:
-        'It may have expired, or already been used. Ask for a new one from the sign-in page.',
+      detail: 'It may have expired, or already been used. Ask for a new one from the sign-in page.',
     });
 
     if (!record || record.usedAt || record.expiresAt < new Date()) throw invalid;
@@ -720,9 +731,7 @@ export class AuthService {
       },
     });
     const roles = user.roles.map((assignment) => assignment.role.code as Role);
-    const permissions = [
-      ...new Set(user.roles.flatMap((a) => a.role.permissions as Permission[])),
-    ];
+    const permissions = [...new Set(user.roles.flatMap((a) => a.role.permissions as Permission[]))];
 
     /*
       The same event-access grant the request guard applies.
@@ -747,7 +756,10 @@ export class AuthService {
     return this.toAuthenticatedUser(
       user,
       roles,
-      permissions,
+      // And the assign switch, for the same reason as the grant above: this is
+      // the payload every `can(...)` in the interface reads, so leaving it out
+      // hid the Assign tab from people the API would have let through.
+      withLeadAssignSwitch(permissions, user.canAssignLeads),
       effectiveScope(roles, user.dataScope as DataScope | null),
     );
   }

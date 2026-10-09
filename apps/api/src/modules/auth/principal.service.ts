@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { effectiveScope, type DataScope, type Permission, type Role } from '@sihl-one/contracts';
+import {
+  effectiveScope,
+  withLeadAssignSwitch,
+  type DataScope,
+  type Permission,
+  type Role,
+} from '@sihl-one/contracts';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
@@ -44,7 +50,7 @@ export class PrincipalService {
     // contracts matrix. The database is authoritative at runtime so compliance
     // can adjust a role without a deployment.
     const roles = user.roles.map((assignment) => assignment.role.code as Role);
-    const permissions = [
+    let permissions = [
       ...new Set(user.roles.flatMap((assignment) => assignment.role.permissions as Permission[])),
     ];
 
@@ -78,24 +84,33 @@ export class PrincipalService {
     }
 
     /*
-      A per-user switch that can only take away.
+      The one switch that decides who may hand work to somebody else.
 
-      `canAssignLeads` is off for somebody who holds a role that grants
-      `lead:assign` but should not be handing leads around — a specialist, a
-      trainee, somebody standing in. Removing the permission here rather than
-      checking a flag at each call site means every guard, every dropdown and
-      every `can()` in the UI gets the right answer without being told about it
-      separately; the four assign and transfer routes are already gated on this
-      permission and need no change at all.
+      "May assign leads to other people" on the user record is the whole answer,
+      whatever role, designation or access that person has. Ticked, they hold
+      `lead:assign`; cleared, they do not. The product owner asked for exactly
+      this, and the reason is practical: `lead:assign` sat in one role only, so
+      a rep with the box ticked was still refused and the box appeared to do
+      nothing. A setting that is visibly on and has no effect is worse than no
+      setting.
 
-      Subtraction only, and deliberately. A switch that could *grant* authority
-      would put two sources of truth behind "may this person do X", and "why can
-      they do that" would need both read together to answer.
+      It replaces a subtract-only switch. That earlier design kept roles as the
+      single source of authority and is the safer shape in the abstract — but it
+      cannot express "this person, regardless of role", which is the thing being
+      asked for. The trade is stated here so it is not rediscovered as a bug:
+      asking why somebody can assign now means reading this flag, not the role
+      matrix.
+
+      Granting it is narrower than it sounds. What you may do with it is still
+      bounded elsewhere: `ownsLeadProduct` restricts you to the products you are
+      working, and `canAssignTo` restricts who you may hand them to. The switch
+      opens the door; it does not widen the room.
+
+      Applied here rather than at each call site so every guard, dropdown and
+      `can()` in the UI inherits it — the assign and transfer routes are already
+      gated on this permission and need no change.
     */
-    if (user.canAssignLeads === false) {
-      const index = permissions.indexOf('lead:assign');
-      if (index >= 0) permissions.splice(index, 1);
-    }
+    permissions = withLeadAssignSwitch(permissions, user.canAssignLeads);
 
     // Touch lastSeenAt without awaiting, so it never adds a write round-trip to
     // the critical path of every request.

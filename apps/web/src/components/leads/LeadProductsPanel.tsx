@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { LeadProductView, ProductItem } from '@sihl-one/contracts';
 
 import { updateLeadProducts, type ActionState } from '@/app/actions/leads';
-import { Badge } from '@/components/ui/Badge';
+import { ProductGroupList } from '@/components/products/ProductGroupList';
 import { humanise } from '@/lib/format';
 
 const INITIAL: ActionState = { status: 'idle' };
@@ -54,8 +54,6 @@ export function LeadProductsPanel({
   // does not leave the checkboxes showing something that was never saved.
   useEffect(() => setPicked(selected), [selected]);
 
-  const label = (code: string) => products.find((product) => product.code === code)?.name ?? code;
-
   /*
     A product somebody has worked cannot be unticked.
 
@@ -76,17 +74,27 @@ export function LeadProductsPanel({
   };
 
   if (!editing) {
-    return (
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {selected.map((code) => (
-          <Badge key={code} tone="navy">
-            {label(code)}
-          </Badge>
-        ))}
+    /*
+      Everything on this lead, including anything locked.
 
-        {selected.length === 0 ? (
-          <span className="text-xs text-[var(--color-text-subtle)]">No products recorded</span>
-        ) : null}
+      The chips were drawn from `productInterest` alone, so a product that had
+      been worked but was missing from that array — which legacy rows and the
+      old interest cap both produced — was invisible here while still being
+      locked, still carrying a status, and still counting towards the lead. The
+      union is the honest list: what they are interested in, plus anything with
+      work recorded against it.
+    */
+    const shown = [...new Set([...selected, ...leadProducts.map((row) => row.productCode)])];
+
+    return (
+      <div className="mt-3 flex flex-wrap items-start gap-x-3 gap-y-1.5">
+        <ProductGroupList
+          codes={shown}
+          products={products}
+          // The same marker the edit view uses, so "why can I not untick this"
+          // is answered before the edit view is opened.
+          annotate={(code) => (isLocked(code) ? <span aria-label=" (locked)"> 🔒</span> : null)}
+        />
 
         {canEdit ? (
           <button
@@ -94,7 +102,7 @@ export function LeadProductsPanel({
             onClick={() => setEditing(true)}
             className="text-xs font-semibold text-teal-600 underline underline-offset-2 hover:text-teal-700 dark:text-teal-300"
           >
-            {selected.length === 0 ? 'Add products' : 'Edit'}
+            {shown.length === 0 ? 'Add products' : 'Edit'}
           </button>
         ) : null}
       </div>

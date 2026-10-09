@@ -294,6 +294,29 @@ export function isScopeBroaderThan(a: DataScope, b: DataScope): boolean {
  * own record requests. Widening via the user record is silently ignored rather
  * than rejected, so a mis-keyed admin edit degrades to less access, not more.
  */
+/**
+ * Applies the per-user "may assign leads to other people" switch.
+ *
+ * The switch is the whole answer to who may hand work to somebody else,
+ * whatever role that person holds — so it both grants `lead:assign` and takes
+ * it away. See the note in `PrincipalService` for why it works that way.
+ *
+ * It lives here because two places compute a person's permissions: the guard
+ * on every request, and the payload the sign-in and `/auth/me` return for the
+ * UI to read. They disagreed, which is the worst shape this can take — the API
+ * allowed an assign the screen had already hidden the button for.
+ */
+export function withLeadAssignSwitch(
+  permissions: readonly Permission[],
+  canAssignLeads: boolean | null | undefined,
+): Permission[] {
+  // Annotated, because the filter predicate narrows the element type to
+  // "every permission except lead:assign" and the push below would not fit it.
+  const out: Permission[] = permissions.filter((permission) => permission !== 'lead:assign');
+  if (canAssignLeads !== false) out.push('lead:assign');
+  return out;
+}
+
 export function effectiveScope(roles: readonly Role[], requested?: DataScope | null): DataScope {
   const broadestFromRoles = roles.reduce<DataScope>((widest, role) => {
     const roleScope = ROLE_DEFAULT_SCOPE[role];

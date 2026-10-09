@@ -10,6 +10,7 @@ import {
 } from '@sihl-one/contracts';
 
 import { changeLeadProductStatus, type ActionState } from '@/app/actions/leads';
+import { ApprovalPanel } from '@/components/leads/ApprovalPanel';
 import { ConversionFields } from '@/components/leads/ConversionFields';
 import { formatCurrency, humanise } from '@/lib/format';
 
@@ -59,11 +60,25 @@ const TONES: Record<string, string> = {
 export function LeadProductOutcomes({
   leadId,
   outcomes,
-  canEdit,
+  editableCodes,
+  leadOwnerName,
+  canDecideApproval,
 }: {
   leadId: string;
   outcomes: LeadProductView[];
-  canEdit: boolean;
+  /**
+   * The products this viewer may record an outcome for.
+   *
+   * Per product, not per panel: on a lead with three desks on it, each person
+   * moves their own and reads the others. Whoever does not hold one sees its
+   * stage and owner without a Change button, which is the honest rendering of
+   * a rule the API enforces anyway.
+   */
+  editableCodes: string[];
+  /** Shown for a product nobody has been named for. */
+  leadOwnerName: string;
+  /** Requests routed to this viewer, or any of them for a super administrator. */
+  canDecideApproval: boolean;
 }) {
   const router = useRouter();
   const [state, action] = useActionState(changeLeadProductStatus, INITIAL);
@@ -111,13 +126,34 @@ export function LeadProductOutcomes({
         </p>
       ) : null}
 
-      <ul className="mt-3 space-y-2">
+      {/* Column headings, desktop only. On a phone the rows stack and a header
+          row would label nothing. */}
+      <div
+        aria-hidden
+        className="mt-3 hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto] gap-x-3 px-3 text-[0.7rem] font-bold uppercase tracking-wide text-[var(--color-text-subtle)] sm:grid"
+      >
+        <span>Product</span>
+        <span>Owner</span>
+        <span>Branch</span>
+        <span className="justify-self-center">Stage</span>
+        <span className="min-w-[3.5rem] justify-self-end" />
+      </div>
+
+      <ul className="mt-1.5 space-y-2">
         {ordered.map((row) => (
           <li
             key={row.productCode}
             className="rounded-lg border border-[var(--color-border)] px-3 py-2"
           >
-            <div className="flex flex-wrap items-start justify-between gap-2">
+            {/*
+              One row, five columns, the same five on every line.
+
+              Product, owner, branch, stage, action — laid out on a grid rather
+              than flowed, so on a lead with several products the owners read
+              down one column and the stages down another. Collapses to stacked
+              rows on a phone, where five columns cannot fit honestly.
+            */}
+            <div className="grid grid-cols-1 items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">
                   {row.productName ?? row.productCode}
@@ -141,9 +177,7 @@ export function LeadProductOutcomes({
                     {row.finalAmount ? (
                       <>
                         <dt className="text-[var(--color-text-subtle)]">Final amount</dt>
-                        <dd className="tnum font-semibold">
-                          {formatCurrency(row.finalAmount)}
-                        </dd>
+                        <dd className="tnum font-semibold">{formatCurrency(row.finalAmount)}</dd>
                       </>
                     ) : null}
                     {row.conversionRef ? (
@@ -166,15 +200,36 @@ export function LeadProductOutcomes({
                 ) : null}
               </div>
 
-              <div className="flex items-center gap-2">
-                <span
-                  className={`rounded-lg border px-2 py-0.5 text-xs font-semibold ${
-                    TONES[row.status] ?? TONES.NEW
-                  }`}
-                >
-                  {humanise(row.status)}
-                </span>
-                {canEdit ? (
+              {/* Who is working it, and where they sit. Two columns rather than
+                  one string: a branch under a branch is scannable, "Name,
+                  Branch" repeated down a list is not. */}
+              <p className="min-w-0 truncate text-xs">
+                {row.owner ? (
+                  <span className="font-medium">{row.owner.fullName}</span>
+                ) : (
+                  <span className="text-[var(--color-text-muted)]">
+                    {leadOwnerName}
+                    <span className="text-[var(--color-text-subtle)]"> (lead owner)</span>
+                  </span>
+                )}
+              </p>
+              <p className="min-w-0 truncate text-xs text-[var(--color-text-muted)]">
+                {row.owner?.branch ?? '—'}
+              </p>
+
+              <span
+                className={`justify-self-start rounded-lg border px-2 py-0.5 text-xs font-semibold sm:justify-self-center ${
+                  TONES[row.status] ?? TONES.NEW
+                }`}
+              >
+                {humanise(row.status)}
+              </span>
+
+              {/* A fixed cell whether or not the button is there, so the stage
+                  column does not shift between rows the viewer owns and rows
+                  they do not. */}
+              <span className="justify-self-start sm:min-w-[3.5rem] sm:justify-self-end">
+                {editableCodes.includes(row.productCode) ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -186,15 +241,59 @@ export function LeadProductOutcomes({
                     {editing === row.productCode ? 'Cancel' : 'Change'}
                   </button>
                 ) : null}
-              </div>
+              </span>
             </div>
 
+            {/* Where the commitment stands, under the product it was made
+                for — read by everybody, acted on by the approver and the
+                person working it. */}
+            {row.approval ? (
+              <ApprovalPanel
+                leadId={leadId}
+                productCode={row.productCode}
+                approval={row.approval}
+                canDecide={canDecideApproval}
+                canRemind={editableCodes.includes(row.productCode)}
+              />
+            ) : null}
+
             {editing === row.productCode ? (
-              <form action={action} className="mt-2 space-y-2 border-t border-[var(--color-border)] pt-2">
+              <form
+                action={action}
+                onSubmit={(event) => {
+                  /*
+                    Converting against a refused commitment is allowed, and said
+                    out loud.
+
+                    The approval never gated the sale — but the rep should not
+                    discover afterwards that what they promised was not backed.
+                    One confirm, naming the consequence, and the choice is
+                    theirs.
+                  */
+                  if (
+                    status === 'CONVERTED' &&
+                    row.approval?.status === 'REJECTED' &&
+                    !window.confirm(
+                      `The commitments recorded for ${row.productName ?? row.productCode} were not approved, and will not be honoured for this client. Convert anyway?`,
+                    )
+                  ) {
+                    event.preventDefault();
+                  }
+                }}
+                className="mt-2 space-y-2 border-t border-[var(--color-border)] pt-2"
+              >
                 <input type="hidden" name="leadId" value={leadId} />
                 <input type="hidden" name="productCode" value={row.productCode} />
 
-                <div className="flex flex-wrap gap-2">
+                {/*
+                  Stage, reference and amount on one line.
+
+                  They are one decision — where this product now stands, and on
+                  what evidence — and stacking them made recording a conversion
+                  read as three separate steps down the card. Remarks sit below
+                  because a sentence needs the width.
+                */}
+                <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap">
                   <select
                     name="status"
                     className="input h-9 w-auto text-sm"
@@ -222,21 +321,22 @@ export function LeadProductOutcomes({
                       ))}
                     </select>
                   ) : null}
-                </div>
 
-                {/* Converting opens the customer record, so it asks for the
-                    reference the back office knows the client by. Either kind
-                    is accepted — a rep who has the client code should not be
-                    sent away to look up a PAN. */}
-                {status === 'CONVERTED' ? (
-                  <div className="rounded-lg border border-teal-500/40 bg-teal-50/60 p-2.5 dark:bg-teal-500/10">
-                    <ConversionFields
-                      idPrefix={`panel-${row.productCode}`}
-                      inputClassName="input h-9 text-sm"
-                      invalid={Boolean(state.errors?.identifier)}
-                    />
-                  </div>
-                ) : null}
+                  {/* Converting opens the customer record, so it asks for the
+                      reference the back office knows the client by. Either kind
+                      is accepted — a rep who has the client code should not be
+                      sent away to look up a PAN. In the same row as the stage,
+                      because they are recorded in one breath. */}
+                  {status === 'CONVERTED' ? (
+                    <div className="min-w-0 flex-1">
+                      <ConversionFields
+                        idPrefix={`panel-${row.productCode}`}
+                        inputClassName="input h-9 text-sm"
+                        invalid={Boolean(state.errors?.identifier)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
 
                 <input
                   name="note"
@@ -244,6 +344,30 @@ export function LeadProductOutcomes({
                   placeholder="Remarks (optional)"
                   maxLength={1000}
                 />
+
+                {/*
+                  Offered only at Qualified, which is the point at which a rep
+                  has promised something concrete and before anything has been
+                  opened on it. Unticked by default: sign-off is the exception,
+                  and a box that arrives ticked gets sent without being read.
+                */}
+                {status === 'QUALIFIED' ? (
+                  <label className="flex items-start gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-2.5 text-xs">
+                    <input
+                      type="checkbox"
+                      name="sendForApproval"
+                      className="mt-0.5"
+                      defaultChecked={false}
+                    />
+                    <span>
+                      <span className="font-semibold">Send for approval</span>
+                      <span className="block text-[var(--color-text-subtle)]">
+                        The remarks above go to the National Head above you for sign-off. It does
+                        not hold up the sale — you can carry on while it is pending.
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
 
                 {/*
                   One label for both outcomes. The button used to rename itself

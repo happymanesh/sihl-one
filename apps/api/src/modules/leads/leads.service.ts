@@ -47,6 +47,13 @@ import {
   type UpdateLeadInput,
   type VerifyLeadMobileInput,
   type LeadExportLayout,
+  ownsLeadProduct,
+  canRemindApproval,
+  APPROVAL_REMINDER_INTERVAL_HOURS,
+  type ApprovalStatus,
+  type DecideApprovalInput,
+  type RequestApprovalInput,
+  type LeadProductApprovalView,
 } from '@sihl-one/contracts';
 
 import { AuditService, diffRecords } from '../../common/audit.service';
@@ -57,6 +64,7 @@ import { RequestContextStore } from '../../common/request-context';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import type { Prisma } from '../../generated/prisma/client';
 import { csvCell } from '../../common/csv';
+import { Mailer } from '../mail/mailer';
 import { PrismaService } from '../../prisma/prisma.service';
 import { istDayKey } from '../../common/ist-day';
 import type {
@@ -163,6 +171,7 @@ export class LeadsService {
     private readonly visits: VisitsService,
     private readonly existingClients: ExistingClientService,
     private readonly presentations: PresentationsService,
+    private readonly mailer: Mailer,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -498,6 +507,27 @@ export class LeadsService {
           )
       : null;
 
+    /*
+      Names for the products the history mentions.
+
+      One query for the distinct codes rather than a join, because the history
+      deliberately has no relation to the product master — see the note on the
+      column. Codes the master no longer has simply fall back to the code.
+    */
+    const historyCodes = [
+      ...new Set(lead.statusHistory.map((entry) => entry.productCode).filter(Boolean)),
+    ] as string[];
+    const historyProductNames = new Map(
+      historyCodes.length === 0
+        ? []
+        : (
+            await this.prisma.product.findMany({
+              where: { code: { in: historyCodes } },
+              select: { code: true, name: true },
+            })
+          ).map((row) => [row.code, row.name] as const),
+    );
+
     const [activityCount, activities] = await Promise.all([
       // Human contact only. A lead does not get warmer because somebody
       // edited it, and activities.service already counts it this way — leaving
@@ -593,6 +623,19 @@ export class LeadsService {
         id: entry.id,
         fromStatus: entry.fromStatus,
         toStatus: entry.toStatus,
+        /*
+          The product the change was about, by code and by name.
+
+          The name is resolved here rather than joined: the history has no
+          relation to `product` on purpose, so that retiring a product from the
+          master is never blocked by the log that mentions it. A code with no
+          master row left falls back to the code itself, which still reads
+          correctly in the panel.
+        */
+        productCode: entry.productCode,
+        productName: entry.productCode
+          ? (historyProductNames.get(entry.productCode) ?? entry.productCode)
+          : null,
         note: entry.note,
         changedAt: entry.changedAt.toISOString(),
         durationSeconds: entry.durationSeconds,
@@ -1964,8 +2007,39 @@ export class LeadsService {
 
     if (query.q) {
       const term = query.q.trim();
+      /*
+        A full name is two columns, and nobody types it as two words.
+
+        Every clause below matches the whole term against one column, so
+        "Jay Trivedi" was tested against `firstName` ("Jay") and `lastName`
+        ("Trivedi") and matched neither — the lead was unfindable by the name
+        on it while searching the mobile found it at once. Reported from
+        production, and it would have affected every lead whose full name was
+        typed in full, which is how people search.
+
+        Each word has to match somewhere across the two name columns, so
+        "Jay Trivedi" and "Trivedi Jay" both find him, and "Jay" alone still
+        does. ANDed across words rather than ORed, or "Jay Trivedi" would also
+        return every other Jay.
+      */
+      const words = term.split(/\s+/).filter(Boolean);
+      const nameWords =
+        words.length > 1
+          ? [
+              {
+                AND: words.map((word) => ({
+                  OR: [
+                    { firstName: { contains: word, mode: 'insensitive' as const } },
+                    { lastName: { contains: word, mode: 'insensitive' as const } },
+                  ],
+                })),
+              },
+            ]
+          : [];
+
       and.push({
         OR: [
+          ...nameWords,
           { firstName: { contains: term, mode: 'insensitive' } },
           { lastName: { contains: term, mode: 'insensitive' } },
           { mobile: { contains: term } },
@@ -2082,14 +2156,44 @@ export class LeadsService {
       });
     }
 
-    await this.prisma.lead.update({
-      where: { id },
-      data: {
-        mobileVerifiedAt: new Date(),
-        mobileVerificationMethod: input.method,
-        mobileVerificationNote: input.note ?? null,
-        mobileVerifiedById: user.id,
-      },
+    /*
+      Confirming the number is contact, so the stage says so.
+
+      Reaching the client is the whole of what CONTACTED means, and a rep who
+      had just spoken to somebody still had to go and change the stage by hand —
+      which is the kind of second step that quietly does not happen, leaving the
+      pipeline reporting leads as untouched when they had been.
+
+      Only from NEW. A lead at Qualified or Proposal has been contacted by
+      definition and has moved past it; setting CONTACTED there would drag it
+      backwards, and a closed lead must not reopen. The verification itself is
+      recorded either way.
+    */
+    const promoted = lead.status === 'NEW';
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lead.update({
+        where: { id },
+        data: {
+          mobileVerifiedAt: new Date(),
+          mobileVerificationMethod: input.method,
+          mobileVerificationNote: input.note ?? null,
+          mobileVerifiedById: user.id,
+          ...(promoted ? { status: 'CONTACTED' } : {}),
+        },
+      });
+
+      if (promoted) {
+        await tx.leadStatusHistory.create({
+          data: {
+            leadId: id,
+            fromStatus: 'NEW',
+            toStatus: 'CONTACTED',
+            note: 'Mobile number confirmed',
+            changedById: user.id,
+          },
+        });
+      }
     });
 
     await this.audit.record({
@@ -2098,7 +2202,11 @@ export class LeadsService {
       resourceId: id,
       // The number itself is deliberately not written here: the lead row holds
       // it, and the audit table is read by more people than the lead is.
-      changes: { method: input.method, verified: true },
+      changes: {
+        method: input.method,
+        verified: true,
+        ...(promoted ? { status: 'CONTACTED' } : {}),
+      },
     });
 
     return this.findOne(user, id);
@@ -2742,7 +2850,7 @@ export class LeadsService {
     id: string,
     input: ChangeLeadProductStatusInput,
   ) {
-    await this.mustFindInScope(user, id);
+    const lead = await this.mustFindInScope(user, id);
 
     const row = await this.prisma.leadProduct.findUnique({
       where: { leadId_productCode: { leadId: id, productCode: input.productCode } },
@@ -2751,6 +2859,24 @@ export class LeadsService {
       throw new BadRequestException({
         title: 'Not an interest on this lead',
         detail: 'Add the product to the lead before recording an outcome for it.',
+      });
+    }
+
+    /*
+      Only the person working this product may say where it stands.
+
+      Anyone with `lead:update` in scope could move any product on any lead they
+      could see, which on a lead with three desks on it meant three people able
+      to overwrite each other's outcome — and the outcome is what a rep is
+      measured on. An unowned product still falls to the lead owner, and a super
+      administrator can correct anything.
+    */
+    if (!ownsLeadProduct(this.viewerOf(user), row, lead.ownerId)) {
+      throw new ForbiddenException({
+        title: 'Not yours to update',
+        detail:
+          'Only the person working this product can record its outcome. Ask whoever holds it, ' +
+          'or a super administrator.',
       });
     }
 
@@ -2793,6 +2919,25 @@ export class LeadsService {
           body: input.note ?? null,
           actorId: user.id,
           isSystemGenerated: true,
+        },
+      });
+
+      /*
+        The same change, in the stage history.
+
+        It was only ever written to the timeline, which is a stream of
+        everything that has happened and is read for "what did we do"; the
+        history panel answers "how did this progress" and had nothing about any
+        product in it at all. Both, because they are two questions.
+      */
+      await tx.leadStatusHistory.create({
+        data: {
+          leadId: id,
+          productCode: input.productCode,
+          fromStatus: row.status as LeadStatus,
+          toStatus: input.status,
+          note: input.note ?? null,
+          changedById: user.id,
         },
       });
 
@@ -2929,6 +3074,19 @@ export class LeadsService {
             identifierKind: input.identifierKind,
             finalAmount: input.finalAmount ?? null,
           } as never,
+        },
+      });
+
+      // A conversion is the stage change that matters most, and it is the one
+      // path that does not go through `changeProductStatus`.
+      await tx.leadStatusHistory.create({
+        data: {
+          leadId: id,
+          productCode: input.productCode,
+          fromStatus: row.status as LeadStatus,
+          toStatus: 'CONVERTED',
+          note: input.note ?? null,
+          changedById: user.id,
         },
       });
 
@@ -3129,22 +3287,35 @@ export class LeadsService {
   async assignProduct(user: AuthenticatedPrincipal, id: string, input: AssignLeadProductInput) {
     const lead = await this.mustFindInScope(user, id);
 
+    const row = await this.prisma.leadProduct.findFirst({
+      where: { leadId: id, productCode: input.productCode },
+      // The name comes along for the notification: "NRI investing assigned to
+      // you" is what the receiver calls it, where the bare code is ours.
+      select: { id: true, ownerId: true, product: { select: { name: true } } },
+    });
+    if (!row) {
+      throw new BadRequestException({
+        title: 'Not on this lead',
+        detail: `${input.productCode} is not one of this lead's products.`,
+      });
+    }
+
     /*
-      Only the lead's owner, or a manager, may move a product.
+      You may hand on the work you hold, and nothing else.
 
-      A lead product owner holds one desk's work on this client; they do not get
-      to pass it on. Otherwise a lead quietly migrates across the firm one
-      product at a time with nobody having decided it should, and the person
-      accountable for the client — the lead owner — finds out afterwards.
-
-      "Manager" is a scope wider than SELF, the same test `canTransferLeads`
-      uses for the same reason: expressed against the data scope rather than a
-      role name, so a role added later inherits the right behaviour.
+      This replaces "the lead owner or a manager may move anything on the lead".
+      Holding the lead no longer carries the right to move a desk's work out
+      from under the person doing it; what gates the action is whether this
+      product is yours. `lead:assign` is checked by the route, and that
+      permission is what the per-user "may assign leads to other people" switch
+      subtracts — so the switch gates the whole panel without a second test.
     */
-    if (lead.ownerId !== user.id && user.dataScope === 'SELF') {
+    if (!ownsLeadProduct(this.viewerOf(user), row, lead.ownerId)) {
       throw new ForbiddenException({
-        title: 'Cannot assign this product',
-        detail: 'Only the lead owner or a manager can hand a product to somebody else.',
+        title: 'Not yours to hand on',
+        detail:
+          'You can only assign a product you are working yourself. Ask whoever holds it, or a ' +
+          'super administrator, to move it.',
       });
     }
 
@@ -3152,17 +3323,6 @@ export class LeadsService {
       throw new ForbiddenException({
         title: 'Cannot assign to that user',
         detail: 'You may only assign to yourself or to members of your team.',
-      });
-    }
-
-    const row = await this.prisma.leadProduct.findFirst({
-      where: { leadId: id, productCode: input.productCode },
-      select: { id: true, ownerId: true },
-    });
-    if (!row) {
-      throw new BadRequestException({
-        title: 'Not on this lead',
-        detail: `${input.productCode} is not one of this lead's products.`,
       });
     }
 
@@ -3218,6 +3378,7 @@ export class LeadsService {
         payload: {
           reference: lead.reference,
           productCode: input.productCode,
+          productName: row.product?.name ?? input.productCode,
           assigneeId: owner.id,
           actorId: user.id,
         },
@@ -3242,25 +3403,6 @@ export class LeadsService {
   ) {
     const lead = await this.mustFindInScope(user, id);
 
-    /*
-      Only the lead's owner, or a manager, may move a product.
-
-      A lead product owner holds one desk's work on this client; they do not get
-      to pass it on. Otherwise a lead quietly migrates across the firm one
-      product at a time with nobody having decided it should, and the person
-      accountable for the client — the lead owner — finds out afterwards.
-
-      "Manager" is a scope wider than SELF, the same test `canTransferLeads`
-      uses for the same reason: expressed against the data scope rather than a
-      role name, so a role added later inherits the right behaviour.
-    */
-    if (lead.ownerId !== user.id && user.dataScope === 'SELF') {
-      throw new ForbiddenException({
-        title: 'Cannot assign this product',
-        detail: 'Only the lead owner or a manager can hand a product to somebody else.',
-      });
-    }
-
     if (!(await this.scope.canAssignTo(user, input.ownerId))) {
       throw new ForbiddenException({
         title: 'Cannot assign to that user',
@@ -3280,14 +3422,33 @@ export class LeadsService {
     }
 
     /*
-      Only the products still open.
+      The open products that are this person's to give.
 
-      A converted or lost product is finished, and moving its owner would
-      rewrite who closed it — which is exactly the number a rep is measured on.
-      The history keeps whoever did the work.
+      Open, because a converted or lost product is finished and moving its owner
+      would rewrite who closed it — exactly the number a rep is measured on.
+
+      And theirs, because "assign all" is a shortcut for doing each one by hand,
+      not a wider power than that. It used to move every open product on the
+      lead whoever held them, so one rep pressing it could sweep another desk's
+      work onto their own candidate. A super administrator does get all of them,
+      which is the whole point of the exception.
     */
+    const mine = (
+      await this.prisma.leadProduct.findMany({
+        where: { leadId: id, status: { in: [...OPEN_LEAD_PRODUCT_STATUSES] } },
+        select: { id: true, ownerId: true },
+      })
+    ).filter((row) => ownsLeadProduct(this.viewerOf(user), row, lead.ownerId));
+
+    if (mine.length === 0) {
+      throw new ForbiddenException({
+        title: 'Nothing to hand on',
+        detail: 'None of the open products on this lead are being worked by you.',
+      });
+    }
+
     const { count } = await this.prisma.leadProduct.updateMany({
-      where: { leadId: id, status: { in: [...OPEN_LEAD_PRODUCT_STATUSES] } },
+      where: { id: { in: mine.map((row) => row.id) } },
       data: { ownerId: owner.id, assignedAt: new Date() },
     });
 
@@ -3327,6 +3488,407 @@ export class LeadsService {
     return this.productsFor(user, id);
   }
 
+  // -------------------------------------------------------------------------
+  // Commitment approval
+  // -------------------------------------------------------------------------
+
+  /**
+   * The National Head this person's commitments go to.
+   *
+   * Walks the reporting line upward, which is what "of his vertical" means —
+   * the chain of people actually accountable for this rep, rather than a
+   * branch or a region, both of which cut across verticals.
+   *
+   * If the chain reaches the top without one, and the firm has exactly one
+   * active National Head, that is unambiguous and is used. Anything else is
+   * refused with the reason, because the failure mode of guessing here is a
+   * commitment approved by somebody who was never responsible for it — which
+   * is worse than being told to fix the reporting line.
+   *
+   * Capped, because a reporting line that loops would otherwise spin for ever.
+   */
+  private async nationalHeadFor(
+    userId: string,
+  ): Promise<{ id: string; email: string; firstName: string; lastName: string }> {
+    const seen = new Set<string>();
+    let currentId: string | null = userId;
+
+    for (let hop = 0; hop < 12 && currentId && !seen.has(currentId); hop += 1) {
+      seen.add(currentId);
+      const current: {
+        managerId: string | null;
+        id: string;
+        email: string;
+        firstName: string;
+        lastName: string;
+        status: string;
+        designation: { code: string } | null;
+      } | null = await this.prisma.user.findUnique({
+        where: { id: currentId },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+          managerId: true,
+          designation: { select: { code: true } },
+        },
+      });
+      if (!current) break;
+
+      // Not the requester themselves, even if they are a National Head —
+      // nobody approves their own commitment.
+      if (
+        current.id !== userId &&
+        current.designation?.code === 'NATIONAL_HEAD' &&
+        current.status === 'ACTIVE'
+      ) {
+        return current;
+      }
+      currentId = current.managerId;
+    }
+
+    const heads = await this.prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        status: 'ACTIVE',
+        id: { not: userId },
+        designation: { code: 'NATIONAL_HEAD' },
+      },
+      select: { id: true, email: true, firstName: true, lastName: true },
+      take: 2,
+    });
+
+    if (heads.length === 1) return heads[0]!;
+
+    throw new BadRequestException({
+      title: 'No approver found',
+      detail:
+        heads.length === 0
+          ? 'There is no active National Head above you to approve this. Ask an administrator to ' +
+            'check your reporting line.'
+          : 'Your reporting line does not reach a National Head, and the firm has more than one. ' +
+            'Ask an administrator to set your manager so the request can be routed.',
+    });
+  }
+
+  /**
+   * Ask for sign-off on what has been committed for one product.
+   *
+   * Raised by the person working the product, which is the same test used for
+   * recording its outcome — you can only commit on work you hold.
+   *
+   * Re-raising after a decision replaces it. A rep who was refused, changed
+   * what they were offering and asked again should be asking the same question
+   * afresh, not adding a second row beside an answered one.
+   */
+  async requestApproval(user: AuthenticatedPrincipal, id: string, input: RequestApprovalInput) {
+    const lead = await this.mustFindInScope(user, id);
+
+    const row = await this.prisma.leadProduct.findUnique({
+      where: { leadId_productCode: { leadId: id, productCode: input.productCode } },
+      select: { ownerId: true, product: { select: { name: true } } },
+    });
+    if (!row) {
+      throw new BadRequestException({
+        title: 'Not on this lead',
+        detail: `${input.productCode} is not one of this lead's products.`,
+      });
+    }
+    if (!ownsLeadProduct(this.viewerOf(user), row, lead.ownerId)) {
+      throw new ForbiddenException({
+        title: 'Not yours to send',
+        detail: 'Only the person working this product can send its commitments for approval.',
+      });
+    }
+
+    const approver = await this.nationalHeadFor(user.id);
+    const productName = row.product?.name ?? input.productCode;
+
+    const approval = await this.prisma.leadProductApproval.upsert({
+      where: { leadId_productCode: { leadId: id, productCode: input.productCode } },
+      create: {
+        leadId: id,
+        productCode: input.productCode,
+        requestedById: user.id,
+        approverId: approver.id,
+        requestNote: input.note ?? null,
+      },
+      update: {
+        requestedById: user.id,
+        approverId: approver.id,
+        status: 'PENDING',
+        requestNote: input.note ?? null,
+        requestedAt: new Date(),
+        decidedAt: null,
+        decisionReason: null,
+        lastReminderAt: null,
+      },
+    });
+
+    const emailNote = await this.emailApprover(approver, {
+      lead: `${lead.firstName} ${lead.lastName}`.trim(),
+      reference: lead.reference,
+      productName,
+      note: input.note ?? null,
+      asker: `${user.email}`,
+      again: false,
+    });
+    await this.prisma.leadProductApproval.update({
+      where: { id: approval.id },
+      data: { emailNote },
+    });
+
+    await this.outbox.publish(this.prisma, {
+      aggregateType: 'lead',
+      aggregateId: id,
+      eventType: 'lead.product.approval.requested',
+      payload: {
+        reference: lead.reference,
+        productCode: input.productCode,
+        productName,
+        approverId: approver.id,
+        requestedById: user.id,
+        note: input.note ?? null,
+        actorId: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'lead.product.approval',
+      resourceId: id,
+      changes: { productCode: input.productCode, requestedTo: approver.id },
+    });
+
+    return this.productsFor(user, id);
+  }
+
+  /**
+   * Nudge the approver. Once a day, enforced here and not only in the button.
+   */
+  async remindApproval(user: AuthenticatedPrincipal, id: string, productCode: string) {
+    const lead = await this.mustFindInScope(user, id);
+
+    const approval = await this.prisma.leadProductApproval.findUnique({
+      where: { leadId_productCode: { leadId: id, productCode } },
+      include: {
+        approver: { select: { id: true, email: true, firstName: true, lastName: true } },
+        lead: { select: { firstName: true, lastName: true, reference: true } },
+      },
+    });
+    if (!approval) {
+      throw new BadRequestException({
+        title: 'Nothing to remind about',
+        detail: 'No approval has been requested for this product.',
+      });
+    }
+
+    const row = await this.prisma.leadProduct.findUnique({
+      where: { leadId_productCode: { leadId: id, productCode } },
+      select: { ownerId: true, product: { select: { name: true } } },
+    });
+    if (!ownsLeadProduct(this.viewerOf(user), row ?? { ownerId: null }, lead.ownerId)) {
+      throw new ForbiddenException({
+        title: 'Not yours to chase',
+        detail: 'Only the person working this product can send a reminder for it.',
+      });
+    }
+
+    if (
+      !canRemindApproval(
+        {
+          status: approval.status as ApprovalStatus,
+          lastReminderAt: approval.lastReminderAt?.toISOString() ?? null,
+        },
+        new Date(),
+      )
+    ) {
+      // Two different refusals, and the title has to say which — "already
+      // reminded today" on a request that was answered last week reads as the
+      // system losing track.
+      throw new BadRequestException(
+        approval.status === 'PENDING'
+          ? {
+              title: 'Already reminded today',
+              detail: `A reminder has gone in the last ${APPROVAL_REMINDER_INTERVAL_HOURS} hours. You can send another tomorrow.`,
+            }
+          : {
+              title: 'Already decided',
+              detail: 'This request has been answered, so there is nobody left to chase.',
+            },
+      );
+    }
+
+    const productName = row?.product?.name ?? productCode;
+    const emailNote = await this.emailApprover(approval.approver, {
+      lead: `${approval.lead.firstName} ${approval.lead.lastName}`.trim(),
+      reference: approval.lead.reference,
+      productName,
+      note: approval.requestNote,
+      asker: user.email,
+      again: true,
+    });
+
+    await this.prisma.leadProductApproval.update({
+      where: { id: approval.id },
+      data: { lastReminderAt: new Date(), emailNote },
+    });
+
+    await this.outbox.publish(this.prisma, {
+      aggregateType: 'lead',
+      aggregateId: id,
+      eventType: 'lead.product.approval.reminded',
+      payload: {
+        reference: approval.lead.reference,
+        productCode,
+        productName,
+        approverId: approval.approverId,
+        note: approval.requestNote,
+        actorId: user.id,
+      },
+    });
+
+    return this.productsFor(user, id);
+  }
+
+  /**
+   * Approve or refuse. Only the person it was routed to, or a super admin.
+   */
+  async decideApproval(user: AuthenticatedPrincipal, id: string, input: DecideApprovalInput) {
+    const lead = await this.mustFindInScope(user, id);
+
+    const approval = await this.prisma.leadProductApproval.findUnique({
+      where: { leadId_productCode: { leadId: id, productCode: input.productCode } },
+    });
+    if (!approval) {
+      throw new BadRequestException({
+        title: 'Nothing to decide',
+        detail: 'No approval has been requested for this product.',
+      });
+    }
+
+    const isSuperAdmin = user.permissions.includes('system:configure');
+    if (approval.approverId !== user.id && !isSuperAdmin) {
+      throw new ForbiddenException({
+        title: 'Not yours to decide',
+        detail: 'This request was sent to somebody else.',
+      });
+    }
+    if (approval.status !== 'PENDING') {
+      throw new BadRequestException({
+        title: 'Already decided',
+        detail: 'This request has already been answered.',
+      });
+    }
+
+    await this.prisma.leadProductApproval.update({
+      where: { id: approval.id },
+      data: {
+        status: input.decision,
+        decisionReason: input.reason ?? null,
+        decidedAt: new Date(),
+      },
+    });
+
+    const product = await this.prisma.product.findUnique({
+      where: { code: input.productCode },
+      select: { name: true },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        entityType: 'LEAD',
+        entityId: id,
+        type: 'STATUS_CHANGE',
+        direction: 'INTERNAL',
+        subject: `${input.productCode} commitments ${
+          input.decision === 'APPROVED' ? 'approved' : 'not approved'
+        }`,
+        body: input.reason ?? null,
+        actorId: user.id,
+        isSystemGenerated: true,
+      },
+    });
+
+    await this.outbox.publish(this.prisma, {
+      aggregateType: 'lead',
+      aggregateId: id,
+      eventType: 'lead.product.approval.decided',
+      payload: {
+        reference: lead.reference,
+        productCode: input.productCode,
+        productName: product?.name ?? input.productCode,
+        decision: input.decision,
+        reason: input.reason ?? null,
+        requestedById: approval.requestedById,
+        actorId: user.id,
+      },
+    });
+
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'lead.product.approval',
+      resourceId: id,
+      changes: { productCode: input.productCode, decision: input.decision },
+    });
+
+    return this.productsFor(user, id);
+  }
+
+  /**
+   * Mail the approver, and never let the mail decide whether the request stands.
+   *
+   * The bell is the channel that always works; this is the one that depends on
+   * a provider, a key and an allow-listed IP. A failure is recorded on the
+   * request so somebody can see the mail did not go, rather than being thrown
+   * and losing the approval that had already been written.
+   */
+  private async emailApprover(
+    approver: { email: string; firstName: string },
+    about: {
+      lead: string;
+      reference: string;
+      productName: string;
+      note: string | null;
+      asker: string;
+      again: boolean;
+    },
+  ): Promise<string | null> {
+    const subject = `${about.again ? 'Reminder: ' : ''}Approval needed — ${about.productName} for ${about.lead}`;
+    const lines = [
+      `Hello ${approver.firstName},`,
+      '',
+      `${about.asker} has asked you to approve what has been committed to ${about.lead} (${about.reference}) for ${about.productName}.`,
+      ...(about.note ? ['', `What was committed: ${about.note}`] : []),
+      '',
+      'Open the lead in SIHL ONE to approve or decline it.',
+    ];
+
+    try {
+      const result = await this.mailer.send({
+        to: approver.email,
+        subject,
+        text: lines.join('\n'),
+        html: `<p>${lines.join('</p><p>')}</p>`,
+      });
+      return result.accepted ? null : (result.failureReason ?? 'The email was not accepted.');
+    } catch (error) {
+      return error instanceof Error ? error.message.slice(0, 200) : 'The email could not be sent.';
+    }
+  }
+
+  /**
+   * The principal, in the shape `ownsLeadProduct` wants.
+   *
+   * `system:configure` is the super-administrator marker used throughout —
+   * somebody who can reconfigure the platform sits above the ownership rules.
+   */
+  private viewerOf(user: AuthenticatedPrincipal): { id: string; isSuperAdmin: boolean } {
+    return { id: user.id, isSuperAdmin: user.permissions.includes('system:configure') };
+  }
+
   async productsFor(user: AuthenticatedPrincipal, id: string): Promise<LeadProductView[]> {
     await this.mustFindInScope(user, id);
 
@@ -3347,7 +3909,46 @@ export class LeadsService {
       orderBy: [{ createdAt: 'asc' }],
     });
 
+    /*
+      Approvals for these products, in one query.
+
+      Read for everybody who can see the lead, not only the two people in the
+      conversation: "pending approval" is exactly what the next person to pick
+      this up needs to know before they promise anything else.
+    */
+    const approvals = new Map(
+      (
+        await this.prisma.leadProductApproval.findMany({
+          where: { leadId: id },
+          include: {
+            requestedBy: { select: { id: true, firstName: true, lastName: true } },
+            approver: { select: { id: true, firstName: true, lastName: true } },
+          },
+        })
+      ).map((row) => [
+        row.productCode,
+        {
+          status: row.status as ApprovalStatus,
+          requestedBy: {
+            id: row.requestedBy.id,
+            fullName: `${row.requestedBy.firstName} ${row.requestedBy.lastName}`.trim(),
+          },
+          approver: {
+            id: row.approver.id,
+            fullName: `${row.approver.firstName} ${row.approver.lastName}`.trim(),
+          },
+          requestNote: row.requestNote,
+          decisionReason: row.decisionReason,
+          requestedAt: row.requestedAt.toISOString(),
+          decidedAt: row.decidedAt?.toISOString() ?? null,
+          lastReminderAt: row.lastReminderAt?.toISOString() ?? null,
+          emailNote: row.emailNote,
+        } satisfies LeadProductApprovalView,
+      ]),
+    );
+
     return rows.map((row) => ({
+      approval: approvals.get(row.productCode) ?? null,
       productCode: row.productCode,
       productName: row.product?.name ?? null,
       status: row.status as LeadProductStatus,
