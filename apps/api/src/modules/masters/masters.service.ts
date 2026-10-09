@@ -20,6 +20,8 @@ import {
   type UpdateProductInput,
   type UpdateMeetingModeInput,
   type UpdateTaskStatusInput,
+  type CreateProductGroupInput,
+  type UpdateProductGroupInput,
   type ProductGroupSummary,
 } from '@sihl-one/contracts';
 
@@ -278,6 +280,93 @@ export class MastersService {
     }));
   }
 
+  async createProductGroup(user: AuthenticatedPrincipal, input: CreateProductGroupInput) {
+    const existing = await this.prisma.productGroup.findUnique({ where: { code: input.code } });
+    if (existing) {
+      throw new ConflictException({
+        title: 'That code is taken',
+        detail: `"${input.code}" is already used by ${existing.name}.`,
+      });
+    }
+
+    // `isSystem` stays false: the five seeded groups are the firm's own desks
+    // and are protected from deletion, but one an administrator adds is theirs
+    // to remove again.
+    const created = await this.prisma.productGroup.create({
+      data: { code: input.code, name: input.name, sortOrder: input.sortOrder },
+    });
+
+    this.invalidate();
+    await this.audit.record({
+      action: 'CREATE',
+      resource: 'master.product_group',
+      resourceId: created.id,
+      changes: { code: created.code, name: created.name },
+    });
+
+    return created;
+  }
+
+  async updateProductGroup(
+    user: AuthenticatedPrincipal,
+    id: string,
+    input: UpdateProductGroupInput,
+  ) {
+    const before = await this.prisma.productGroup.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException({ title: 'Group not found' });
+
+    /*
+      Switching a group off leaves its products in it.
+
+      Emptying it would be the destructive reading of "off", and the products
+      would land ungrouped with nothing recording where they had been. Off means
+      it stops being offered for new filing; what is already filed stays put and
+      comes back if it is switched on again.
+    */
+    const after = await this.prisma.productGroup.update({ where: { id }, data: input });
+
+    this.invalidate();
+    await this.audit.record({
+      action: 'UPDATE',
+      resource: 'master.product_group',
+      resourceId: id,
+      changes: {
+        ...(input.name !== undefined ? { name: { from: before.name, to: after.name } } : {}),
+        ...(input.isActive !== undefined
+          ? { isActive: { from: before.isActive, to: after.isActive } }
+          : {}),
+        ...(input.sortOrder !== undefined
+          ? { sortOrder: { from: before.sortOrder, to: after.sortOrder } }
+          : {}),
+      },
+    });
+
+    return after;
+  }
+
+  /**
+   * Checks a group exists and is still on, and returns its name for the trail.
+   *
+   * Prisma would refuse an id that does not exist, but as a foreign-key error
+   * the administrator reads as a failed save with no reason. An inactive group
+   * it would accept happily, which is worse: the product would be filed
+   * somewhere that no longer appears in any dropdown.
+   */
+  private async assertFilableGroup(groupId: string): Promise<string> {
+    const group = await this.prisma.productGroup.findUnique({
+      where: { id: groupId },
+      select: { name: true, isActive: true },
+    });
+    if (!group) throw new NotFoundException({ title: 'Product group not found' });
+    if (!group.isActive) {
+      throw new BadRequestException({
+        title: 'That group is switched off',
+        detail: `Switch "${group.name}" back on before filing products into it.`,
+      });
+    }
+    return group.name;
+  }
+
   async listProducts(query: MasterQuery): Promise<ProductItem[]> {
     const rows = await this.prisma.product.findMany({
       where: {
@@ -368,6 +457,8 @@ export class MastersService {
       }
     }
 
+    if (input.groupId) await this.assertFilableGroup(input.groupId);
+
     const created = await this.prisma.product.create({
       data: {
         ...input,
@@ -385,15 +476,25 @@ export class MastersService {
       action: 'CREATE',
       resource: 'master.product',
       resourceId: created.id,
-      changes: { code: created.code, name: created.name },
+      changes: { code: created.code, name: created.name, groupId: created.groupId },
     });
 
     return created;
   }
 
   async updateProduct(user: AuthenticatedPrincipal, id: string, input: UpdateProductInput) {
-    const before = await this.prisma.product.findUnique({ where: { id } });
+    const before = await this.prisma.product.findUnique({
+      where: { id },
+      include: { group: { select: { name: true } } },
+    });
     if (!before) throw new NotFoundException({ title: 'Product not found' });
+
+    // Null is a real value here — it means "out of every group" — so the check
+    // is on the key being present with something in it, not on truthiness.
+    const movedTo =
+      input.groupId !== undefined && input.groupId !== null
+        ? await this.assertFilableGroup(input.groupId)
+        : null;
 
     const after = await this.prisma.product.update({ where: { id }, data: input });
 
@@ -406,6 +507,11 @@ export class MastersService {
         ...(input.name !== undefined ? { name: { from: before.name, to: after.name } } : {}),
         ...(input.isActive !== undefined
           ? { isActive: { from: before.isActive, to: after.isActive } }
+          : {}),
+        // Names rather than ids: this is the entry somebody reads when they ask
+        // why a product stopped appearing for a desk.
+        ...(input.groupId !== undefined
+          ? { group: { from: before.group?.name ?? 'none', to: movedTo ?? 'none' } }
           : {}),
         // The catalogue body is what a rep reads to a client, so a change to it
         // is recorded as having happened without copying it into the trail.

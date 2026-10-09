@@ -2,15 +2,19 @@ import { Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post } fro
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import {
   createLeadSourceSchema,
+  createProductGroupSchema,
   createProductSchema,
   createMeetingModeSchema,
   createTaskStatusSchema,
   masterQuerySchema,
   updateMeetingModeSchema,
+  updateProductGroupSchema,
   updateTaskStatusSchema,
   updateLeadSourceSchema,
   updateProductSchema,
   type CreateLeadSourceInput,
+  type CreateProductGroupInput,
+  type UpdateProductGroupInput,
   type CreateProductInput,
   type CreateMeetingModeInput,
   type CreateTaskStatusInput,
@@ -92,6 +96,38 @@ export class MastersController {
   @ApiZodQuery(masterQuerySchema)
   listProductGroups(@ZodQuery(masterQuerySchema) query: MasterQuery) {
     return this.masters.listProductGroups(query);
+  }
+
+  @Post('product-groups')
+  @RequirePermissions('system:configure')
+  @ApiOperation({
+    summary: 'Add a product group',
+    description: 'A desk that sells several products — the tier above the product master.',
+  })
+  @ApiZodBody(createProductGroupSchema)
+  createProductGroup(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(createProductGroupSchema) body: CreateProductGroupInput,
+  ) {
+    return this.masters.createProductGroup(user, body);
+  }
+
+  @Patch('product-groups/:id')
+  @RequirePermissions('system:configure')
+  @ApiParam({ name: 'id' })
+  @ApiOperation({
+    summary: 'Rename a group, reorder it, or switch it off',
+    description:
+      'The code is immutable — the seed map and the reports that roll up by desk are ' +
+      'written against it. Switching a group off leaves its products in it.',
+  })
+  @ApiZodBody(updateProductGroupSchema)
+  updateProductGroup(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(updateProductGroupSchema) body: UpdateProductGroupInput,
+  ) {
+    return this.masters.updateProductGroup(user, id, body);
   }
 
   @Get('products')

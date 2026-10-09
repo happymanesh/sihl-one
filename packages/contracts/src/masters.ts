@@ -78,6 +78,12 @@ export const createProductSchema = z.object({
    * refuses a parent that already has one.
    */
   parentId: idSchema.optional(),
+  /**
+   * The desk that sells it. Optional, because a product with no group still
+   * works everywhere — it just loses the expertise ordering on the assign
+   * dropdowns and the group-inheritance rule when it is added to a lead.
+   */
+  groupId: idSchema.optional(),
   summary: z.string().trim().max(300).optional(),
   description: z.string().trim().max(8000).optional(),
   keyBenefits: z.array(z.string().trim().min(2).max(200)).max(12).default([]),
@@ -90,6 +96,8 @@ export type CreateProductInput = z.infer<typeof createProductSchema>;
 
 export const updateProductSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
+  /** Null moves it out of every group; omitted leaves it where it is. */
+  groupId: idSchema.nullable().optional(),
   summary: z.string().trim().max(300).nullable().optional(),
   description: z.string().trim().max(8000).nullable().optional(),
   keyBenefits: z.array(z.string().trim().min(2).max(200)).max(12).optional(),
@@ -113,6 +121,7 @@ export interface ProductItem {
   /** Codes of this product's sub-products, for filters that resolve a parent. */
   childCodes: string[];
   /** The desk this product belongs to. Null until an administrator files it. */
+  groupId: string | null;
   groupCode: string | null;
   groupName: string | null;
   summary: string | null;

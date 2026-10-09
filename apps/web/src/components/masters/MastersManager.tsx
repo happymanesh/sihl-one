@@ -2,13 +2,15 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import type { LeadSourceItem, ProductItem } from '@sihl-one/contracts';
+import type { LeadSourceItem, ProductGroupSummary, ProductItem } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
 import {
   createProduct,
+  createProductGroup,
   createSource,
   updateProduct,
+  updateProductGroup,
   updateSource,
   type MasterState,
 } from '@/app/actions/masters';
@@ -16,24 +18,27 @@ import { formatNumber } from '@/lib/format';
 
 const INITIAL: MasterState = { status: 'idle' };
 
-type Tab = 'sources' | 'products';
+type Tab = 'sources' | 'products' | 'groups';
 
 export function MastersManager({
   sources,
   products,
+  groups,
 }: {
   sources: LeadSourceItem[];
   products: ProductItem[];
+  groups: ProductGroupSummary[];
 }) {
   const [tab, setTab] = useState<Tab>('sources');
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {(
           [
             ['sources', `Lead sources (${sources.length})`],
             ['products', `Products (${products.length})`],
+            ['groups', `Product groups (${groups.length})`],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -52,8 +57,142 @@ export function MastersManager({
         ))}
       </div>
 
-      {tab === 'sources' ? <SourcesTab sources={sources} /> : <ProductsTab products={products} />}
+      {tab === 'sources' ? <SourcesTab sources={sources} /> : null}
+      {tab === 'products' ? <ProductsTab products={products} groups={groups} /> : null}
+      {tab === 'groups' ? <GroupsTab groups={groups} /> : null}
     </div>
+  );
+}
+
+/**
+ * The desks, and what sits in each.
+ *
+ * Until this screen existed the five groups were created by the deploy script
+ * and a product could only be filed into one by changing a hard-coded map and
+ * releasing — so a new product was permanently ungrouped, and nothing said so.
+ */
+function GroupsTab({ groups }: { groups: ProductGroupSummary[] }) {
+  const [state, action] = useActionState(createProductGroup, INITIAL);
+
+  return (
+    <div className="space-y-4">
+      <section className="card p-0">
+        <ul className="divide-y divide-[var(--color-border)]">
+          {groups.map((group) => (
+            <GroupRow key={group.id} group={group} />
+          ))}
+        </ul>
+      </section>
+
+      <form action={action} className="card space-y-3 p-5">
+        <h2 className="font-bold">Add a group</h2>
+        <p className="text-xs text-[var(--color-text-subtle)]">
+          A desk that sells several products — Broking and Wealth are two. A person says which
+          groups they sell on their user record, and lead assignment prefers somebody who sells what
+          the client asked about.
+        </p>
+        <Feedback state={state} />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Code" hint="Permanent. Uppercase, e.g. INSURANCE.">
+            <input name="code" required maxLength={40} className="input font-mono" />
+          </Field>
+          <Field label="Name" hint="What people see.">
+            <input name="name" required maxLength={80} className="input" />
+          </Field>
+        </div>
+
+        <Field label="Order" hint="Low numbers first. The five built-in desks are 10 to 50.">
+          <input
+            name="sortOrder"
+            type="number"
+            min={0}
+            max={10000}
+            defaultValue={100}
+            className="input max-w-[8rem]"
+          />
+        </Field>
+
+        <Submit label="Add group" pendingLabel="Adding…" />
+      </form>
+    </div>
+  );
+}
+
+function GroupRow({ group }: { group: ProductGroupSummary }) {
+  const [state, action] = useActionState(updateProductGroup, INITIAL);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <li className="px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{group.name}</span>
+            <span className="font-mono text-xs text-[var(--color-text-subtle)]">{group.code}</span>
+            {!group.isActive ? <Badge tone="amber">Off</Badge> : null}
+          </div>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+            {group.productCount === 0
+              ? 'No products filed here yet'
+              : `${formatNumber(group.productCount)} ${
+                  group.productCount === 1 ? 'product' : 'products'
+                }`}{' '}
+            · order {group.sortOrder}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <form action={action}>
+            <input type="hidden" name="id" value={group.id} />
+            <input type="hidden" name="isActive" value={String(!group.isActive)} />
+            <ToggleButton on={group.isActive} />
+          </form>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="text-xs font-semibold text-[var(--color-text-muted)] underline underline-offset-2"
+          >
+            {open ? 'Cancel' : 'Edit'}
+          </button>
+        </div>
+      </div>
+
+      <Feedback state={state} />
+
+      {open ? (
+        <form action={action} className="mt-3 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="id" value={group.id} />
+          <div className="min-w-[12rem] flex-1">
+            <label className="label">Name</label>
+            <input name="name" defaultValue={group.name} maxLength={80} className="input h-9" />
+          </div>
+          <div>
+            <label className="label">Order</label>
+            <input
+              name="sortOrder"
+              type="number"
+              min={0}
+              max={10000}
+              defaultValue={group.sortOrder}
+              className="input h-9 w-24"
+            />
+          </div>
+          <Submit label="Save" pendingLabel="Saving…" small />
+        </form>
+      ) : null}
+
+      {/* Switching a group off does not empty it — the products stay filed and
+          come back if it is switched on again. Said here because "off" could
+          reasonably be read the other way. */}
+      {!group.isActive && group.productCount > 0 ? (
+        <p className="mt-2 text-xs text-[var(--color-text-subtle)]">
+          Its {formatNumber(group.productCount)}{' '}
+          {group.productCount === 1 ? 'product stays' : 'products stay'} filed here, but it is no
+          longer offered when filing others.
+        </p>
+      ) : null}
+    </li>
   );
 }
 
@@ -171,8 +310,19 @@ function SourceRow({ source }: { source: LeadSourceItem }) {
   );
 }
 
-function ProductsTab({ products }: { products: ProductItem[] }) {
+function ProductsTab({
+  products,
+  groups,
+}: {
+  products: ProductItem[];
+  groups: ProductGroupSummary[];
+}) {
   const [state, action] = useActionState(createProduct, INITIAL);
+
+  // Only groups that are on. Filing something into a switched-off group would
+  // put it somewhere that appears in no dropdown, and the API refuses it.
+  const filable = groups.filter((group) => group.isActive);
+  const ungrouped = products.filter((product) => !product.groupId).length;
 
   const topLevel = products.filter((product) => !product.parentId);
   const childrenOf = (parentId: string) =>
@@ -180,6 +330,20 @@ function ProductsTab({ products }: { products: ProductItem[] }) {
 
   return (
     <div className="space-y-4">
+      {/*
+        Ungrouped products are not an error, but they are never what anybody
+        intended: expertise ordering and the group-inheritance rule both do
+        nothing for them, silently. Worth saying once, where they can be fixed.
+      */}
+      {ungrouped > 0 ? (
+        <p className="rounded-lg border border-warn-500/40 bg-warn-50 px-3 py-2 text-xs text-warn-600 dark:bg-warn-500/15">
+          {ungrouped} {ungrouped === 1 ? 'product has' : 'products have'} no group. Lead assignment
+          cannot prefer a rep by expertise for {ungrouped === 1 ? 'it' : 'them'}, and a new one
+          added to a lead will not join whoever already handles that desk. Use Edit below to file{' '}
+          {ungrouped === 1 ? 'it' : 'them'}.
+        </p>
+      ) : null}
+
       <section className="card p-0">
         <ul className="divide-y divide-[var(--color-border)]">
           {/* Parents first, each followed by its own sub-products. A flat
@@ -187,12 +351,15 @@ function ProductsTab({ products }: { products: ProductItem[] }) {
               worth having — "Equity" and "Equity intraday" would sit apart. */}
           {topLevel.map((parent) => (
             <li key={parent.id}>
-              <ProductRow product={parent} />
+              <ProductRow product={parent} groups={filable} />
               {childrenOf(parent.id).length > 0 ? (
                 <ul className="border-t border-[var(--color-border)] bg-[var(--color-surface-muted)] pl-6">
                   {childrenOf(parent.id).map((child) => (
-                    <li key={child.id} className="border-b border-[var(--color-border)] last:border-b-0">
-                      <ProductRow product={child} />
+                    <li
+                      key={child.id}
+                      className="border-b border-[var(--color-border)] last:border-b-0"
+                    >
+                      <ProductRow product={child} groups={filable} />
                     </li>
                   ))}
                 </ul>
@@ -233,6 +400,20 @@ function ProductsTab({ products }: { products: ProductItem[] }) {
           </select>
         </Field>
 
+        <Field
+          label="Group"
+          hint="The desk that sells it. Leave blank only for something no desk owns — a partner programme, say."
+        >
+          <select name="groupId" className="input" defaultValue="">
+            <option value="">No group</option>
+            {filable.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
         <Field label="Summary" hint="One line, shown on the chip and the card.">
           <input name="summary" maxLength={300} className="input" />
         </Field>
@@ -260,8 +441,19 @@ function ProductsTab({ products }: { products: ProductItem[] }) {
   );
 }
 
-function ProductRow({ product }: { product: ProductItem }) {
+function ProductRow({ product, groups }: { product: ProductItem; groups: ProductGroupSummary[] }) {
   const [state, action] = useActionState(updateProduct, INITIAL);
+  const [open, setOpen] = useState(false);
+
+  /*
+    A group this product sits in but which has since been switched off still
+    belongs in its own dropdown, or opening Edit and saving would silently move
+    the product out of it. The list is otherwise the filable ones.
+  */
+  const options: Array<{ id: string; name: string }> =
+    product.groupId && !groups.some((group) => group.id === product.groupId)
+      ? [...groups, { id: product.groupId, name: `${product.groupName ?? 'Current'} (off)` }]
+      : groups;
 
   return (
     <li className="px-4 py-3">
@@ -272,6 +464,11 @@ function ProductRow({ product }: { product: ProductItem }) {
             <span className="font-mono text-xs text-[var(--color-text-subtle)]">
               {product.code}
             </span>
+            {product.groupName ? (
+              <Badge tone="navy">{product.groupName}</Badge>
+            ) : (
+              <Badge tone="amber">No group</Badge>
+            )}
             {product.isSystem ? <Badge tone="neutral">Built in</Badge> : null}
             {!product.isActive ? <Badge tone="amber">Off</Badge> : null}
             {!product.description ? <Badge tone="amber">No details yet</Badge> : null}
@@ -282,14 +479,63 @@ function ProductRow({ product }: { product: ProductItem }) {
           </p>
         </div>
 
-        <form action={action}>
-          <input type="hidden" name="id" value={product.id} />
-          <input type="hidden" name="isActive" value={String(!product.isActive)} />
-          <ToggleButton on={product.isActive} />
-        </form>
+        <div className="flex items-center gap-2">
+          {/* Its own form, carrying only `id` and `isActive`. The edit form
+              below posts the fields it shows; neither sends the other's, so a
+              switch-off cannot overwrite a group. */}
+          <form action={action}>
+            <input type="hidden" name="id" value={product.id} />
+            <input type="hidden" name="isActive" value={String(!product.isActive)} />
+            <ToggleButton on={product.isActive} />
+          </form>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="text-xs font-semibold text-[var(--color-text-muted)] underline underline-offset-2"
+          >
+            {open ? 'Cancel' : 'Edit'}
+          </button>
+        </div>
       </div>
 
       <Feedback state={state} />
+
+      {open ? (
+        <form action={action} className="mt-3 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="id" value={product.id} />
+          <div className="min-w-[10rem] flex-1">
+            <label className="label" htmlFor={`name-${product.id}`}>
+              Name
+            </label>
+            <input
+              id={`name-${product.id}`}
+              name="name"
+              defaultValue={product.name}
+              maxLength={80}
+              className="input h-9"
+            />
+          </div>
+          <div className="min-w-[10rem]">
+            <label className="label" htmlFor={`group-${product.id}`}>
+              Group
+            </label>
+            <select
+              id={`group-${product.id}`}
+              name="groupId"
+              defaultValue={product.groupId ?? ''}
+              className="input h-9 py-0"
+            >
+              <option value="">No group</option>
+              {options.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Submit label="Save" pendingLabel="Saving…" small />
+        </form>
+      ) : null}
     </li>
   );
 }

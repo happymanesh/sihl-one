@@ -76,9 +76,16 @@ export const createProductGroupSchema = z.object({
 });
 export type CreateProductGroupInput = z.infer<typeof createProductGroupSchema>;
 
-export const updateProductGroupSchema = createProductGroupSchema.partial().extend({
-  isActive: z.boolean().optional(),
-});
+/**
+ * The code is not here on purpose: it is immutable, as it is for every other
+ * master. Products point at a group by id, but the seed map and the reports
+ * that ask "how is wealth doing" are written against codes, so a renamed code
+ * would quietly detach them. The name is the part meant to be changed.
+ */
+export const updateProductGroupSchema = createProductGroupSchema
+  .omit({ code: true })
+  .partial()
+  .extend({ isActive: z.boolean().optional() });
 export type UpdateProductGroupInput = z.infer<typeof updateProductGroupSchema>;
 
 export interface ProductGroupSummary {
