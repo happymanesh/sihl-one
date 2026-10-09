@@ -160,19 +160,62 @@ export function UserForm({
     Remounting the whole form would achieve the same and would take the "Saved."
     confirmation with it — the one thing the reader is actually looking for.
   */
-  const recordSignature = `${values?.status ?? ''}|${values?.orgUnitId ?? ''}|${values?.managerId ?? ''}`;
+  const [userType, setUserType] = useState(values?.userType ?? 'INTERNAL');
+  /*
+    The identity fields are controlled, not `defaultValue`.
+
+    A form action resets uncontrolled inputs once it returns, so every refused
+    save — a duplicate mobile, a code already taken, anything the server
+    rejects — handed back an empty form and the whole record had to be retyped
+    to fix one field. Holding the values here means a rejection changes nothing
+    but the message.
+  */
+  const [firstName, setFirstName] = useState(values?.firstName ?? '');
+  const [lastName, setLastName] = useState(values?.lastName ?? '');
+  const [mobile, setMobile] = useState(values?.mobile ?? '');
+  // What the visible box shows: the number alone for staff, since the SIHL-
+  // prefix sits beside the field rather than inside it.
+  const [employeeCode, setEmployeeCode] = useState(
+    (values?.employeeCode ?? '').replace(/^SIHL-/i, ''),
+  );
+  const [email, setEmail] = useState(values?.email ?? '');
+  const [emailEdited, setEmailEdited] = useState(mode === 'edit');
+
+  /*
+    Follow the record, not the last thing typed.
+
+    Adjusted during render rather than in an effect — the pattern React
+    documents for "reset state when a prop changes". An effect would work but
+    renders once with the stale value first, and the linter is right to object.
+
+    Compared on a signature of the fields rather than on `values`, which is a
+    fresh object on every server render and would loop. A refused save does not
+    change the record, so the signature holds and nothing the administrator
+    typed is thrown away; a genuinely different record re-seeds everything.
+
+    Remounting the whole form would achieve the same and would take the "Saved."
+    confirmation with it — the one thing the reader is actually looking for.
+  */
+  const recordSignature = [
+    values?.status ?? '',
+    values?.orgUnitId ?? '',
+    values?.managerId ?? '',
+    values?.firstName ?? '',
+    values?.lastName ?? '',
+    values?.mobile ?? '',
+    values?.employeeCode ?? '',
+  ].join('|');
   const [seenSignature, setSeenSignature] = useState(recordSignature);
   if (seenSignature !== recordSignature) {
     setSeenSignature(recordSignature);
     setStatus(values?.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE');
     setOrgUnitId(values?.orgUnitId ?? '');
     setManagerId(values?.managerId ?? '');
+    setFirstName(values?.firstName ?? '');
+    setLastName(values?.lastName ?? '');
+    setMobile(values?.mobile ?? '');
+    setEmployeeCode((values?.employeeCode ?? '').replace(/^SIHL-/i, ''));
   }
-  const [userType, setUserType] = useState(values?.userType ?? 'INTERNAL');
-  const [firstName, setFirstName] = useState(values?.firstName ?? '');
-  const [lastName, setLastName] = useState(values?.lastName ?? '');
-  const [email, setEmail] = useState(values?.email ?? '');
-  const [emailEdited, setEmailEdited] = useState(mode === 'edit');
 
   // Staff get an address built from their name; partners keep their own, so
   // there is nothing to suggest for them.
@@ -291,7 +334,7 @@ export function UserForm({
               name="firstName"
               className="input"
               required
-              defaultValue={values?.firstName ?? ''}
+              value={firstName}
               onChange={(event) => setFirstName(event.target.value)}
             />
             <FieldError errors={state.errors?.firstName} />
@@ -305,7 +348,7 @@ export function UserForm({
               name="lastName"
               className="input"
               required
-              defaultValue={values?.lastName ?? ''}
+              value={lastName}
               onChange={(event) => setLastName(event.target.value)}
             />
             <FieldError errors={state.errors?.lastName} />
@@ -354,7 +397,8 @@ export function UserForm({
               name="mobile"
               className="input"
               inputMode="numeric"
-              defaultValue={values?.mobile ?? ''}
+              value={mobile}
+              onChange={(event) => setMobile(event.target.value)}
             />
             <FieldError errors={state.errors?.mobile} />
           </div>
@@ -384,7 +428,8 @@ export function UserForm({
                 className="input font-mono uppercase"
                 placeholder="R0018"
                 required
-                defaultValue={values?.employeeCode ?? ''}
+                value={employeeCode}
+                onChange={(event) => setEmployeeCode(event.target.value)}
               />
             ) : (
               <div className="flex">
@@ -397,7 +442,8 @@ export function UserForm({
                   className="input rounded-l-none font-mono"
                   inputMode="numeric"
                   placeholder="Generated"
-                  defaultValue={(values?.employeeCode ?? '').replace(/^SIHL-/i, '')}
+                  value={employeeCode}
+                  onChange={(event) => setEmployeeCode(event.target.value)}
                 />
               </div>
             )}

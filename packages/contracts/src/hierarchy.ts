@@ -119,11 +119,19 @@ export type UpdateDesignationInput = z.infer<typeof updateDesignationSchema>;
  * Deliberately permissive on format: it has to match whatever HR already uses,
  * and inventing a pattern now guarantees a mismatch later.
  */
+/*
+  One character is enough.
+
+  Staff type the number alone and the padding is ours to add, so employee 5 is
+  a real thing to type — and `normaliseStaffCode` turns it into SIHL-0005. The
+  old floor of two rejected it before normalisation ever ran, which read as the
+  system refusing a valid code.
+*/
 export const employeeCodeSchema = z
   .string()
   .trim()
   .toUpperCase()
-  .min(2, 'Employee code is too short')
+  .min(1, 'Enter an employee code')
   .max(24)
   .regex(/^[A-Z0-9][A-Z0-9/-]*$/, 'Use letters, digits, hyphens and slashes only');
 

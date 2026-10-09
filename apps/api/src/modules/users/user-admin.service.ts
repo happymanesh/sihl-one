@@ -147,19 +147,27 @@ export class UserAdminService {
    * differ more than they look — an org subtree includes colleagues at the same
    * branch who report elsewhere, and a read-only viewer has no reason to be
    * handed them.
+   *
+   * Except for a viewer whose data scope is already the whole business.
+   * Management holds `user:read` and scope ALL but neither manage rights nor
+   * `system:configure`, so it fell to the reporting-line branch and saw only
+   * itself — a directory of one, for the people the directory is most for.
+   * Scope ALL means "may see the whole business" everywhere else in the
+   * product; it has to mean the same here.
    */
   async listUsers(actor: AuthenticatedPrincipal): Promise<UserSummary[]> {
     const context = await this.actorContext(actor);
     const canManage =
       actor.permissions.includes('user:create') || actor.permissions.includes('user:update');
 
-    const reach = context.isUnrestricted
-      ? {}
-      : canManage
-        ? context.orgUnitPath
-          ? { orgUnit: { path: { startsWith: context.orgUnitPath } } }
-          : {}
-        : { id: { in: await this.reportingSubtree(actor.id) } };
+    const reach =
+      context.isUnrestricted || actor.dataScope === 'ALL'
+        ? {}
+        : canManage
+          ? context.orgUnitPath
+            ? { orgUnit: { path: { startsWith: context.orgUnitPath } } }
+            : {}
+          : { id: { in: await this.reportingSubtree(actor.id) } };
 
     const users = await this.prisma.user.findMany({
       where: {
@@ -233,6 +241,7 @@ export class UserAdminService {
     }
 
     if (input.employeeCode) await this.assertEmployeeCodeFree(input.employeeCode);
+    if (input.mobile) await this.assertMobileFree(input.mobile);
 
     // Staff get a generated code; partners bring the one the back office
     // already issued, which the schema makes mandatory for them.
@@ -334,6 +343,9 @@ export class UserAdminService {
       input = { ...input, employeeCode: normalised };
       await this.assertEmployeeCodeFree(normalised, userId);
     }
+    // Excluding this user, or saving a record without changing its mobile
+    // would report the person as clashing with themselves.
+    if (input.mobile) await this.assertMobileFree(input.mobile, userId);
 
     const { roleCodes, ...scalar } = input;
 
@@ -725,6 +737,36 @@ export class UserAdminService {
       throw new BadRequestException({
         title: 'Employee code already in use',
         detail: `${clash.firstName} ${clash.lastName} already has employee code ${code}.`,
+      });
+    }
+  }
+
+  /**
+   * Refuses a mobile somebody else already has, by name.
+   *
+   * There was no check here at all, so a duplicate reached the database and
+   * came back as its unique violation — "A record with the same unique details
+   * already exists", which does not say which detail or who has it. Prisma
+   * reports the *index* name rather than the column, so the error filter could
+   * not name the field either; the only place that knows it is the mobile is
+   * here, before the write.
+   */
+  private async assertMobileFree(mobile: string, exceptUserId?: string): Promise<void> {
+    const clash = await this.prisma.user.findFirst({
+      where: {
+        mobile,
+        deletedAt: null,
+        ...(exceptUserId ? { id: { not: exceptUserId } } : {}),
+      },
+      select: { firstName: true, lastName: true, employeeCode: true },
+    });
+    if (clash) {
+      const who = `${clash.firstName} ${clash.lastName}`.trim();
+      throw new BadRequestException({
+        title: 'Mobile number already in use',
+        detail: `${mobile} is already registered to ${who}${
+          clash.employeeCode ? ` (${clash.employeeCode})` : ''
+        }.`,
       });
     }
   }
