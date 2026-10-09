@@ -25,6 +25,28 @@ const isProduction = process.env.NODE_ENV === 'production';
  * arbitrary server render would let several in-flight renders spend the same
  * token and log the user out. A single navigation-time route serialises it.
  */
+/**
+ * A redirect to a path, with no host in it at all.
+ *
+ * `NextResponse.redirect` demands an absolute URL, and the only host available
+ * in a route handler is the one `request.url` carries — which is the address
+ * the *container* was reached on, not the one the browser used. Behind a
+ * reverse proxy that is `localhost:3000`, so every redirect out of this route
+ * sent people to a host their machine refuses to connect to. It is how a
+ * session that expired mid-edit became ERR_CONNECTION_REFUSED on
+ * `localhost:3000/leads/<id>`.
+ *
+ * A relative `Location` has no host to get wrong: the browser resolves it
+ * against wherever it actually is. RFC 7231 has allowed this since 2014 and
+ * every browser in use handles it.
+ *
+ * 303 rather than 307: this ends a GET and the next request must also be a GET,
+ * whatever the navigation that started it was.
+ */
+function redirectTo(path: string): NextResponse {
+  return new NextResponse(null, { status: 303, headers: { Location: path } });
+}
+
 export async function GET(request: Request): Promise<NextResponse> {
   const url = new URL(request.url);
   const rawNext = url.searchParams.get('next') ?? '/dashboard';
@@ -34,7 +56,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard';
 
   const refreshToken = await getRefreshToken();
-  if (!refreshToken) return signOut(url, next);
+  if (!refreshToken) return signOut(next);
 
   let tokens: AuthTokens;
   try {
@@ -45,17 +67,16 @@ export async function GET(request: Request): Promise<NextResponse> {
       cache: 'no-store',
     });
 
-    if (!response.ok) return signOut(url, next);
+    if (!response.ok) return signOut(next);
     tokens = (await response.json()) as AuthTokens;
   } catch {
     // The API is unreachable. Do not clear the cookies — the session may still
     // be perfectly valid, and destroying it because of a transient network
     // failure would sign everyone out during a blip.
-    const retry = NextResponse.redirect(new URL('/login?reason=unavailable', url));
-    return retry;
+    return redirectTo('/login?reason=unavailable');
   }
 
-  const response = NextResponse.redirect(new URL(next, url));
+  const response = redirectTo(next);
   const options = {
     httpOnly: true,
     sameSite: 'lax' as const,
@@ -76,12 +97,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 /** Clears both cookies and sends the user to sign in again. */
-function signOut(base: URL, next: string): NextResponse {
-  const target = new URL(
-    `/login?reason=expired&next=${encodeURIComponent(next)}`,
-    base,
-  );
-  const response = NextResponse.redirect(target);
+function signOut(next: string): NextResponse {
+  const response = redirectTo(`/login?reason=expired&next=${encodeURIComponent(next)}`);
   response.cookies.delete(ACCESS_COOKIE);
   response.cookies.delete(REFRESH_COOKIE);
   return response;

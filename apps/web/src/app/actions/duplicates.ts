@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { mergeLeadsSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -10,10 +11,7 @@ export interface MergeState {
   message?: string;
 }
 
-export async function mergeLeads(
-  _previous: MergeState,
-  formData: FormData,
-): Promise<MergeState> {
+export async function mergeLeads(_previous: MergeState, formData: FormData): Promise<MergeState> {
   const parsed = mergeLeadsSchema.safeParse({
     survivorId: formData.get('survivorId'),
     duplicateId: formData.get('duplicateId'),
@@ -40,6 +38,7 @@ export async function mergeLeads(
           : 'Merged.',
     };
   } catch (error) {
+    rethrowControlFlow(error);
     if (error instanceof ApiError) {
       // The API explains *why* — a converted lead cannot be merged away, for
       // instance — and that reason is the whole value of the message.

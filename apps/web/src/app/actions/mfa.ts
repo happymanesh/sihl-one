@@ -1,11 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import {
-  disableMfaSchema,
-  enableMfaSchema,
-  type MfaEnabledResponse,
-} from '@sihl-one/contracts';
+import { rethrowControlFlow } from '@/lib/rethrow';
+import { disableMfaSchema, enableMfaSchema, type MfaEnabledResponse } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
 
@@ -46,6 +43,7 @@ export async function enableMfa(_previous: MfaState, formData: FormData): Promis
       recoveryCodes: result.recoveryCodes,
     };
   } catch (error) {
+    rethrowControlFlow(error);
     return toError(error, 'Two-step verification could not be turned on.');
   }
 }
@@ -68,6 +66,7 @@ export async function disableMfa(_previous: MfaState, formData: FormData): Promi
     revalidatePath('/settings/security');
     return { status: 'success', message: 'Two-step verification is off.' };
   } catch (error) {
+    rethrowControlFlow(error);
     return toError(error, 'Two-step verification could not be turned off.');
   }
 }

@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { redirect } from 'next/navigation';
 import {
   cancelVisitSchema,
@@ -27,6 +28,9 @@ function optionalNumber(value: FormDataEntryValue | null): number | undefined {
 }
 
 function toErrorState(error: unknown, fallback: string): VisitActionState {
+  // A redirect thrown by `apiFetch` on a 401 must not be mistaken for a
+  // failure and reported as one. See `rethrowControlFlow`.
+  rethrowControlFlow(error);
   if (error instanceof ApiError) {
     return {
       status: 'error',

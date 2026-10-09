@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import {
   createLeadSourceSchema,
   createProductSchema,
@@ -45,6 +46,7 @@ export async function createSource(_p: MasterState, formData: FormData): Promise
   try {
     await apiFetch('/masters/lead-sources', { method: 'POST', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The source could not be added.');
   }
   refresh();
@@ -65,6 +67,7 @@ export async function updateSource(_p: MasterState, formData: FormData): Promise
   try {
     await apiFetch(`/masters/lead-sources/${id}`, { method: 'PATCH', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The source could not be updated.');
   }
   refresh();
@@ -95,6 +98,7 @@ export async function createProduct(_p: MasterState, formData: FormData): Promis
   try {
     await apiFetch('/masters/products', { method: 'POST', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The product could not be added.');
   }
   refresh();
@@ -104,7 +108,14 @@ export async function createProduct(_p: MasterState, formData: FormData): Promis
 export async function updateProduct(_p: MasterState, formData: FormData): Promise<MasterState> {
   const id = String(formData.get('id'));
   const raw: Record<string, unknown> = {};
-  for (const field of ['name', 'summary', 'description', 'chargesSummary', 'eligibility', 'riskNote'] as const) {
+  for (const field of [
+    'name',
+    'summary',
+    'description',
+    'chargesSummary',
+    'eligibility',
+    'riskNote',
+  ] as const) {
     if (formData.has(field)) raw[field] = formData.get(field) || null;
   }
   if (formData.has('keyBenefits')) {
@@ -122,6 +133,7 @@ export async function updateProduct(_p: MasterState, formData: FormData): Promis
   try {
     await apiFetch(`/masters/products/${id}`, { method: 'PATCH', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The product could not be updated.');
   }
   refresh();

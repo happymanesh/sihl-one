@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { offboardUserSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -26,6 +27,7 @@ export async function markNoticePeriod(
   try {
     await apiFetch(`/users/${userId}/notice-period`, { method: 'POST', body: {} });
   } catch (error) {
+    rethrowControlFlow(error);
     return {
       status: 'error',
       message:
@@ -79,6 +81,7 @@ export async function offboardUser(
       result,
     };
   } catch (error) {
+    rethrowControlFlow(error);
     return {
       status: 'error',
       message:

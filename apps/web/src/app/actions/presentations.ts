@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { createPresentationSlotSchema, updatePresentationSlotSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -8,6 +9,9 @@ import { istInstantFrom } from '@/lib/time';
 import type { ActionState } from '@/app/actions/leads';
 
 function toErrorState(error: unknown, fallback: string): ActionState {
+  // A redirect thrown by `apiFetch` on a 401 must not be mistaken for a
+  // failure and reported as one. See `rethrowControlFlow`.
+  rethrowControlFlow(error);
   if (error instanceof ApiError) {
     return {
       status: 'error',
@@ -247,7 +251,8 @@ export async function bookPresentationSlots(
           ? `${data.booked.length} booked. ${data.skipped} were no longer available.`
           : undefined,
     };
-  } catch {
+  } catch (error) {
+    rethrowControlFlow(error);
     return { status: 'error', message: 'Your seat could not be held. Please ask at the desk.' };
   }
 }

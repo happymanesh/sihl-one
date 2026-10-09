@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { redirect } from 'next/navigation';
 import type { Route } from 'next';
 import { changeEventStatusSchema, createEventSchema } from '@sihl-one/contracts';
@@ -15,6 +16,9 @@ export interface EventFormState {
 }
 
 function toErrorState(error: unknown, fallback: string): EventFormState {
+  // A redirect thrown by `apiFetch` on a 401 must not be mistaken for a
+  // failure and reported as one. See `rethrowControlFlow`.
+  rethrowControlFlow(error);
   if (error instanceof ApiError) {
     // A taken code names the event that holds it, which matters because the
     // code cannot be changed after the QR is printed.

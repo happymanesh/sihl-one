@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { changePasswordSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -41,6 +42,7 @@ export async function changePassword(
   try {
     await apiFetch<void>('/auth/change-password', { method: 'POST', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     if (error instanceof ApiError) {
       return {
         status: 'error',

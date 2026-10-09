@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { createOrgUnitSchema, moveOrgUnitSchema, updateOrgUnitSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -38,6 +39,7 @@ export async function createOrgUnit(_p: OrgState, formData: FormData): Promise<O
   try {
     await apiFetch('/org-units', { method: 'POST', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The unit could not be created.');
   }
   refresh();
@@ -56,6 +58,7 @@ export async function updateOrgUnit(_p: OrgState, formData: FormData): Promise<O
   try {
     await apiFetch(`/org-units/${id}`, { method: 'PATCH', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The unit could not be updated.');
   }
   refresh();
@@ -77,6 +80,7 @@ export async function moveOrgUnit(_p: OrgState, formData: FormData): Promise<Org
   try {
     await apiFetch(`/org-units/${id}/move`, { method: 'PATCH', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The unit could not be moved.');
   }
   refresh();
@@ -94,10 +98,7 @@ export async function moveOrgUnit(_p: OrgState, formData: FormData): Promise<Org
  * Shaped to the same `UserFormState` the switch component expects, so one
  * control serves both this screen and the hierarchy-level one.
  */
-export async function toggleOrgUnitEvents(
-  _p: OrgState,
-  formData: FormData,
-): Promise<OrgState> {
+export async function toggleOrgUnitEvents(_p: OrgState, formData: FormData): Promise<OrgState> {
   const id = String(formData.get('id'));
   const canAccessEvents = formData.get('canAccessEvents') === 'true';
 
@@ -107,6 +108,7 @@ export async function toggleOrgUnitEvents(
   try {
     await apiFetch(`/org-units/${id}`, { method: 'PATCH', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'Event access could not be changed.');
   }
   refresh();

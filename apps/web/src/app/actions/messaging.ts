@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { createTemplateSchema, sendMessageSchema, updateTemplateSchema } from '@sihl-one/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -38,6 +39,7 @@ export async function createTemplate(
   try {
     await apiFetch('/messaging/templates', { method: 'POST', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The template could not be created.');
   }
   revalidatePath('/messaging');
@@ -59,6 +61,7 @@ export async function updateTemplate(
   try {
     await apiFetch(`/messaging/templates/${id}`, { method: 'PATCH', body: parsed.data });
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The template could not be updated.');
   }
   revalidatePath('/messaging');
@@ -72,10 +75,7 @@ export async function updateTemplate(
  * distinct state so the screen can say *why* rather than showing a red banner
  * that reads like a fault.
  */
-export async function sendMessage(
-  _p: MessagingState,
-  formData: FormData,
-): Promise<MessagingState> {
+export async function sendMessage(_p: MessagingState, formData: FormData): Promise<MessagingState> {
   const variables: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
     if (key.startsWith('var:') && typeof value === 'string') {
@@ -109,6 +109,7 @@ export async function sendMessage(
     }
     return { status: 'success', message: 'Sent.' };
   } catch (error) {
+    rethrowControlFlow(error);
     return toState(error, 'The message could not be sent.');
   }
 }

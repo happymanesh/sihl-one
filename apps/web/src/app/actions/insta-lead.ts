@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { rethrowControlFlow } from '@/lib/rethrow';
 import { revalidatePath } from 'next/cache';
 import { instaLeadSchema, type InstaLeadResult } from '@sihl-one/contracts';
 
@@ -53,6 +54,7 @@ export async function submitInstaLead(
       body: parsed.data,
     });
   } catch (error) {
+    rethrowControlFlow(error);
     if (error instanceof ApiError) {
       return { status: 'error', message: error.message, errors: error.fieldErrors };
     }
