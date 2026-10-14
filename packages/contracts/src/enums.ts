@@ -126,6 +126,20 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 export const ACTIVITY_DIRECTIONS = ['INBOUND', 'OUTBOUND', 'INTERNAL'] as const;
 export type ActivityDirection = (typeof ACTIVITY_DIRECTIONS)[number];
 
+/**
+ * A lead that is finished, whichever way it ended.
+ *
+ * Defined once here because three places had their own copy — the lead
+ * service, the reports service, and now the screens — and a fourth reading of
+ * "closed" is how a lead starts counting as open in one place and shut in
+ * another.
+ */
+export const CLOSED_LEAD_STATUSES: ReadonlySet<string> = new Set([
+  'CONVERTED',
+  'LOST',
+  'DISQUALIFIED',
+]);
+
 export const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
@@ -155,13 +169,25 @@ export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
 export const CUSTOMER_STATUSES = ['PROSPECT', 'ONBOARDING', 'ACTIVE', 'DORMANT', 'CLOSED'] as const;
 export type CustomerStatus = (typeof CUSTOMER_STATUSES)[number];
 
-export const PARTNER_TYPES = ['AUTHORISED_PERSON', 'REMISIER', 'REFERRAL', 'IFA', 'CORPORATE'] as const;
+export const PARTNER_TYPES = [
+  'AUTHORISED_PERSON',
+  'REMISIER',
+  'REFERRAL',
+  'IFA',
+  'CORPORATE',
+] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number];
 
 export const PARTNER_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'TERMINATED'] as const;
 export type PartnerStatus = (typeof PARTNER_STATUSES)[number];
 
-export const VISIT_STATUSES = ['PLANNED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'MISSED'] as const;
+export const VISIT_STATUSES = [
+  'PLANNED',
+  'CHECKED_IN',
+  'COMPLETED',
+  'CANCELLED',
+  'MISSED',
+] as const;
 export type VisitStatus = (typeof VISIT_STATUSES)[number];
 
 export const AUDIT_ACTIONS = [

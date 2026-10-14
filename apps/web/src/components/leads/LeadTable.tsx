@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { LeadListItem } from '@sihl-one/contracts';
+import { CLOSED_LEAD_STATUSES, type LeadListItem } from '@sihl-one/contracts';
 
 import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
 import { LeadCheckbox, LeadSelectAllCheckbox } from '@/components/leads/LeadSelection';
@@ -166,7 +166,13 @@ export function LeadTable({
                         {lead.isOverdue ? ' · overdue' : ''}
                       </span>
                     ) : (
-                      <span className="text-[var(--color-text-subtle)]">Not scheduled</span>
+                      /* "Not scheduled" on a converted or lost lead reads as
+                         an omission somebody should fix. There is nothing to
+                         schedule — the work is finished, and the column should
+                         say so. */
+                      <span className="text-[var(--color-text-subtle)]">
+                        {CLOSED_LEAD_STATUSES.has(lead.status) ? 'Closed' : 'Not scheduled'}
+                      </span>
                     )}
                   </td>
                 </tr>

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import {
+  CLOSED_LEAD_STATUSES,
   canTransferLeads,
   ownsLeadProduct,
   type LeadProductView,
@@ -460,7 +461,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <Detail label="PAN" value={lead.panMasked || '—'} />
               <Detail
                 label="Next follow-up"
-                value={lead.nextFollowUpAt ? formatDateTime(lead.nextFollowUpAt) : 'Not scheduled'}
+                /* Nothing left to chase on a closed lead, so the field says
+                   so rather than reading as an unset date. */
+                value={
+                  lead.nextFollowUpAt
+                    ? formatDateTime(lead.nextFollowUpAt)
+                    : CLOSED_LEAD_STATUSES.has(lead.status)
+                      ? 'Closed'
+                      : 'Not scheduled'
+                }
               />
               <Detail
                 label="Last contact"
