@@ -95,6 +95,7 @@ export class DailyActivityService {
 
     const header = [
       'Date',
+      'Row type',
       'Employee code',
       'Name',
       'Branch',
@@ -112,9 +113,19 @@ export class DailyActivityService {
       'Total',
     ];
 
-    const body = report.groups.flatMap((group) =>
-      group.rows.map((row) => [
+    /*
+      Each group's people, then that group's subtotal.
+
+      The screen shows subtotals and the file did not, so the two disagreed the
+      moment anybody checked one against the other. A `Row type` column keeps
+      them apart, because a spreadsheet that sums a column containing both
+      people and their subtotals double-counts everything — filter to PERSON
+      and the file behaves like a flat list again.
+    */
+    const body = report.groups.flatMap((group) => [
+      ...group.rows.map((row) => [
         report.date,
+        'PERSON',
         row.employeeCode ?? '',
         row.fullName,
         row.branch ?? '',
@@ -131,9 +142,51 @@ export class DailyActivityService {
         String(row.lost),
         String(row.total),
       ]),
-    );
+      [
+        report.date,
+        'SUBTOTAL',
+        '',
+        `${group.name} — subtotal`,
+        group.name,
+        '',
+        '',
+        String(group.subtotal.openLeads),
+        String(group.subtotal.leadsAssigned),
+        String(group.subtotal.leadsCreated),
+        String(group.subtotal.mobilesVerified),
+        String(group.subtotal.leadsUpdated),
+        String(group.subtotal.visitsDone),
+        String(group.subtotal.joinedVisits),
+        String(group.subtotal.converted),
+        String(group.subtotal.lost),
+        String(group.subtotal.total),
+      ],
+    ]);
 
-    return { csv: toCsv(header, body), rows: body.length, day: report.date };
+    // Everyone in scope, once — the number a national head came for, and the
+    // one that is not the sum of the subtotals if a person sits in two trees.
+    body.push([
+      report.date,
+      'TOTAL',
+      '',
+      'All — total',
+      '',
+      '',
+      '',
+      String(report.overall.openLeads),
+      String(report.overall.leadsAssigned),
+      String(report.overall.leadsCreated),
+      String(report.overall.mobilesVerified),
+      String(report.overall.leadsUpdated),
+      String(report.overall.visitsDone),
+      String(report.overall.joinedVisits),
+      String(report.overall.converted),
+      String(report.overall.lost),
+      String(report.overall.total),
+    ]);
+
+    const people = report.groups.reduce((n, group) => n + group.rows.length, 0);
+    return { csv: toCsv(header, body), rows: people, day: report.date };
   }
 
   /**

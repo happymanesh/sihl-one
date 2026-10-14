@@ -113,7 +113,10 @@ export function AttendeePicker({
       </summary>
 
       <div
-        className="absolute left-0 z-30 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card"
+        /* The width of the control, not a fixed panel. A name, its employee
+           code and its branch do not fit in 18rem, so the branch — the thing
+           that tells two Priya Shahs apart — was the part that got cut. */
+        className="absolute left-0 right-0 z-30 mt-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card"
         role="group"
         aria-label="Colleagues joining this visit"
       >
@@ -138,7 +141,25 @@ export function AttendeePicker({
                 wrong one puts a colleague's name against a client meeting they
                 never attended.
               */}
-              <span className="truncate">{label(person)}</span>
+              {/*
+                Two lines, not one truncated one.
+
+                Name, code and branch do not fit on a single line at the width
+                of the field, so truncating cut exactly the part that was asked
+                for — the branch. Stacked, it is always readable whatever the
+                width.
+              */}
+              <span className="min-w-0">
+                <span className="block truncate">
+                  {person.fullName}
+                  {person.employeeCode ? ` [${person.employeeCode}]` : ''}
+                </span>
+                {person.orgUnit ? (
+                  <span className="block truncate text-xs text-[var(--color-text-subtle)]">
+                    {person.orgUnit}
+                  </span>
+                ) : null}
+              </span>
             </label>
           ))}
         </div>

@@ -68,6 +68,21 @@ export function LeadProductsPanel({
     it never have existed.
   */
   const statusOf = new Map(leadProducts.map((row) => [row.productCode, row.status]));
+
+  /*
+    The catalogue by desk, in the order the master defines.
+
+    A product with no group collects under "Other" rather than vanishing: an
+    unfiled product is a gap in the master, not a reason to hide something a
+    client can be interested in.
+  */
+  const grouped: Array<{ name: string; items: ProductItem[] }> = [];
+  for (const product of products) {
+    const name = product.groupName ?? 'Other';
+    const existing = grouped.find((group) => group.name === name);
+    if (existing) existing.items.push(product);
+    else grouped.push({ name, items: [product] });
+  }
   const isLocked = (code: string) => {
     const status = statusOf.get(code);
     return Boolean(status && status !== 'NEW');
@@ -127,46 +142,64 @@ export function LeadProductsPanel({
         </p>
       ) : null}
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {products.map((product) => {
-          const locked = isLocked(product.code);
-          return (
-            <label
-              key={product.code}
-              // Still checked, still readable, simply not changeable — and the
-              // cursor says so before the click rather than after.
-              title={
-                locked
-                  ? `${humanise(statusOf.get(product.code) ?? '')} — mark it lost to close it, it cannot be removed`
-                  : undefined
-              }
-              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                locked
-                  ? 'cursor-not-allowed border-teal-500/40 bg-teal-500/40 text-white'
-                  : 'cursor-pointer border-[var(--color-border-strong)] has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white'
-              }`}
-            >
-              <input
-                type="checkbox"
-                name="productInterest"
-                value={product.code}
-                checked={picked.includes(product.code)}
-                disabled={locked}
-                onChange={(event) =>
-                  setPicked((current) =>
-                    event.target.checked
-                      ? [...current, product.code]
-                      : current.filter((code) => code !== product.code),
-                  )
-                }
-                aria-label={product.name}
-                className="sr-only"
-              />
-              {product.name}
-              {locked ? <span aria-hidden> 🔒</span> : null}
-            </label>
-          );
-        })}
+      {/*
+        Grouped by desk, one row each — the same reading as everywhere else a
+        product is shown. This view kept its own flat chip list when the shared
+        picker was grouped, so the lead screen disagreed with the new-lead form
+        about how the catalogue is organised.
+
+        A grid rather than indented text, so a desk whose products wrap
+        continues under the products and not under its own label.
+      */}
+      <div className="mt-2 grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-2">
+        {grouped.map((group) => (
+          <div key={group.name} className="col-span-2 grid grid-cols-subgrid items-baseline">
+            <span className="whitespace-nowrap text-xs font-bold text-[var(--color-text-muted)]">
+              {group.name} :
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {group.items.map((product) => {
+                const locked = isLocked(product.code);
+                return (
+                  <label
+                    key={product.code}
+                    // Still checked, still readable, simply not changeable — and the
+                    // cursor says so before the click rather than after.
+                    title={
+                      locked
+                        ? `${humanise(statusOf.get(product.code) ?? '')} — mark it lost to close it, it cannot be removed`
+                        : undefined
+                    }
+                    className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      locked
+                        ? 'cursor-not-allowed border-teal-500/40 bg-teal-500/40 text-white'
+                        : 'cursor-pointer border-[var(--color-border-strong)] has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500 has-[:checked]:text-white'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="productInterest"
+                      value={product.code}
+                      checked={picked.includes(product.code)}
+                      disabled={locked}
+                      onChange={(event) =>
+                        setPicked((current) =>
+                          event.target.checked
+                            ? [...current, product.code]
+                            : current.filter((code) => code !== product.code),
+                        )
+                      }
+                      aria-label={product.name}
+                      className="sr-only"
+                    />
+                    {product.name}
+                    {locked ? <span aria-hidden> 🔒</span> : null}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {state.status === 'error' && state.message ? (
