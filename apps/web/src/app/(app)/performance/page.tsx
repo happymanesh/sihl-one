@@ -108,19 +108,24 @@ export default async function PerformancePage({
   const designationId = params.designationId ?? '';
   const userId = params.userId ?? '';
   const orgUnitId = params.orgUnitId ?? '';
+  const verticalHeadId = params.verticalHeadId ?? '';
 
   const query = new URLSearchParams({ scope, period });
   if (designationId) query.set('designationId', designationId);
   if (userId) query.set('userId', userId);
   if (orgUnitId) query.set('orgUnitId', orgUnitId);
+  if (verticalHeadId) query.set('verticalHeadId', verticalHeadId);
 
-  const [report, designations, orgUnits] = await Promise.all([
+  const [report, designations, orgUnits, verticals] = await Promise.all([
     apiFetch<PerformanceReport>(`/performance/report?${query.toString()}`),
     // Empty lists narrow the filters rather than failing the page: a report
     // that will not load because a dropdown could not be filled is worse than
     // one with fewer ways to slice it.
     apiFetch<Array<{ id: string; name: string }>>('/admin/designations').catch(() => []),
     apiFetch<Array<{ id: string; name: string; type: string }>>('/org-units').catch(() => []),
+    apiFetch<Array<{ id: string; fullName: string; email: string; people: number }>>(
+      '/performance/verticals',
+    ).catch(() => []),
   ]);
 
   const emailBody = asEmailBody(report);
@@ -145,8 +150,10 @@ export default async function PerformancePage({
         designationId={designationId}
         userId={userId}
         orgUnitId={orgUnitId}
+        verticalHeadId={verticalHeadId}
         designations={designations}
         orgUnits={orgUnits}
+        verticals={verticals}
         people={report.rows.map((row) => ({ userId: row.userId, fullName: row.fullName }))}
       />
 
@@ -309,12 +316,12 @@ export default async function PerformancePage({
         obvious recipient list — a team is a set of people, so the report is
         already addressed to somebody.
       */}
-      {scope === 'TEAM' && report.rows.length > 0 ? (
+      {report.suggestedRecipients.length > 0 && report.rows.length > 0 ? (
         <div className="flex justify-end">
           <EmailReportDialog
             subject={subject}
             body={emailBody}
-            recipients={report.rows.map((row) => ({ fullName: row.fullName, email: row.email }))}
+            recipients={report.suggestedRecipients}
           />
         </div>
       ) : null}

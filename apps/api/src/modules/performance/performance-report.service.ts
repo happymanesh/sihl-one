@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   computeRating,
   rate,
+  verticalHeadOf,
   type PerformanceProgress,
   type PerformanceReport,
   type PerformanceReportQuery,
@@ -230,6 +231,27 @@ export class PerformanceReportService {
       return { where: { ...base, ...reach }, label: 'My team' };
     }
 
+    /*
+      A vertical is a reporting line, not a place.
+
+      Everyone whose chain of managers reaches this National Head, found by
+      walking the whole directory once in memory — a query per hop up each of
+      several hundred chains is the alternative, and it is not one.
+    */
+    if (query.scope === 'VERTICAL') {
+      if (!query.verticalHeadId) {
+        return { where: { ...base, ...reach }, label: 'All verticals' };
+      }
+      const directory = await this.directory();
+      const members = [...directory.lines.keys()].filter(
+        (id) => verticalHeadOf(id, directory.lines) === query.verticalHeadId,
+      );
+      return {
+        where: { ...base, ...reach, id: { in: members } },
+        label: `${directory.names.get(query.verticalHeadId) ?? 'Vertical'}'s vertical`,
+      };
+    }
+
     if (query.orgUnitId) {
       const unit = await this.prisma.orgUnit.findUnique({
         where: { id: query.orgUnitId },
@@ -249,6 +271,72 @@ export class PerformanceReportService {
       where: { ...base, ...reach },
       label: query.scope === 'REGION' ? 'All regions' : 'All branches',
     };
+  }
+
+  /** Every reporting line at once, for resolving verticals in memory. */
+  private async directory(): Promise<{
+    lines: Map<
+      string,
+      { managerId: string | null; designationCode: string | null; employeeCode: string | null }
+    >;
+    names: Map<string, string>;
+    emails: Map<string, string>;
+  }> {
+    const everyone = await this.prisma.user.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        managerId: true,
+        employeeCode: true,
+        designation: { select: { code: true } },
+      },
+    });
+
+    return {
+      lines: new Map(
+        everyone.map((row) => [
+          row.id,
+          {
+            managerId: row.managerId,
+            designationCode: row.designation?.code ?? null,
+            employeeCode: row.employeeCode,
+          },
+        ]),
+      ),
+      names: new Map(everyone.map((row) => [row.id, `${row.firstName} ${row.lastName}`.trim()])),
+      emails: new Map(everyone.map((row) => [row.id, row.email])),
+    };
+  }
+
+  /**
+   * The heads who own a vertical, with how many people roll up to each.
+   *
+   * Only those with somebody under them: a National Head nobody reports to
+   * owns no vertical, and offering them in the picker gives an empty report
+   * and a puzzled reader.
+   */
+  async verticals(): Promise<
+    Array<{ id: string; fullName: string; email: string; people: number }>
+  > {
+    const directory = await this.directory();
+    const counts = new Map<string, number>();
+
+    for (const id of directory.lines.keys()) {
+      const head = verticalHeadOf(id, directory.lines);
+      if (head) counts.set(head, (counts.get(head) ?? 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .map(([id, people]) => ({
+        id,
+        fullName: directory.names.get(id) ?? 'Unknown',
+        email: directory.emails.get(id) ?? '',
+        people,
+      }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }
 
   async report(
@@ -433,6 +521,31 @@ export class PerformanceReportService {
       progress,
       rows,
       summary: this.explain(totals, progress),
+      /*
+        Who the report is addressed to, which is not the same as who it is
+        about.
+
+        A team report goes to the team — it is their own work. A vertical
+        report goes to the head who owns it: it is about those reps, written
+        for that person, and mailing it to all of them would publish a
+        judgement of each to the others. A region or a branch is a place and
+        has no obvious recipient, so nothing is suggested and the send button
+        stays hidden.
+      */
+      suggestedRecipients:
+        query.scope === 'TEAM'
+          ? rows.map((row) => ({ fullName: row.fullName, email: row.email }))
+          : query.scope === 'VERTICAL' && query.verticalHeadId
+            ? await (async () => {
+                const head = await this.prisma.user.findUnique({
+                  where: { id: query.verticalHeadId },
+                  select: { firstName: true, lastName: true, email: true },
+                });
+                return head
+                  ? [{ fullName: `${head.firstName} ${head.lastName}`.trim(), email: head.email }]
+                  : [];
+              })()
+            : [],
     };
   }
 

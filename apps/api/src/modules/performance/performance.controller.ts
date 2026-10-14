@@ -34,6 +34,18 @@ export class PerformanceController {
    * are deliberately not a leaderboard. This is the manager's view of a group
    * they are accountable for, and it is scoped to what they can already see.
    */
+  @Get('verticals')
+  @RequirePermissions('analytics:sales:read')
+  @ApiOperation({
+    summary: 'The National Heads who own a vertical, with how many roll up to each',
+    description:
+      'Only heads with somebody reporting into them: one nobody reports to owns no vertical, ' +
+      'and offering them gives an empty report and a puzzled reader.',
+  })
+  verticals() {
+    return this.report.verticals();
+  }
+
   @Get('report')
   @RequirePermissions('analytics:sales:read')
   @ApiOperation({ summary: 'Performance across a team, region or branch' })

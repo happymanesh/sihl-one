@@ -13,6 +13,7 @@ const SCOPE_LABEL: Record<PerformanceScope, string> = {
   TEAM: 'Team wise',
   REGION: 'Region wise',
   BRANCH: 'Branch wise',
+  VERTICAL: 'Vertical wise',
 };
 
 const PERIOD_LABEL: Record<PerformancePeriodKind, string> = {
@@ -38,8 +39,10 @@ export function PerformanceFilters({
   designationId,
   userId,
   orgUnitId,
+  verticalHeadId,
   designations,
   orgUnits,
+  verticals,
   people,
 }: {
   scope: PerformanceScope;
@@ -47,8 +50,11 @@ export function PerformanceFilters({
   designationId: string;
   userId: string;
   orgUnitId: string;
+  verticalHeadId: string;
   designations: Array<{ id: string; name: string }>;
   orgUnits: Array<{ id: string; name: string; type: string }>;
+  /** The National Heads who own a vertical, with their headcount. */
+  verticals: Array<{ id: string; fullName: string; people: number }>;
   /** Drawn from the report itself, so the list can only offer people in it. */
   people: Array<{ userId: string; fullName: string }>;
 }) {
@@ -83,7 +89,13 @@ export function PerformanceFilters({
              leaving it in the URL makes the next report silently narrower
              than it says it is. */
           onChange={(event) =>
-            go({ scope: event.target.value, designationId: '', userId: '', orgUnitId: '' })
+            go({
+              scope: event.target.value,
+              designationId: '',
+              userId: '',
+              orgUnitId: '',
+              verticalHeadId: '',
+            })
           }
         >
           {PERFORMANCE_SCOPES.map((value) => (
@@ -140,6 +152,25 @@ export function PerformanceFilters({
             </div>
           ) : null}
         </>
+      ) : scope === 'VERTICAL' ? (
+        <div>
+          <label className="label" htmlFor="perf-vertical">
+            Vertical head
+          </label>
+          <select
+            id="perf-vertical"
+            className="input h-9 w-auto text-sm"
+            value={verticalHeadId}
+            onChange={(event) => go({ verticalHeadId: event.target.value })}
+          >
+            <option value="">All verticals</option>
+            {verticals.map((head) => (
+              <option key={head.id} value={head.id}>
+                {head.fullName} ({head.people})
+              </option>
+            ))}
+          </select>
+        </div>
       ) : (
         <div>
           <label className="label" htmlFor="perf-unit">

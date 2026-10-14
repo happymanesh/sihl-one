@@ -445,7 +445,7 @@ export interface Scorecard {
  * "region, then branch, then designation". Only TEAM narrows further, because
  * only a team is a set of people rather than a place.
  */
-export const PERFORMANCE_SCOPES = ['TEAM', 'REGION', 'BRANCH'] as const;
+export const PERFORMANCE_SCOPES = ['TEAM', 'REGION', 'BRANCH', 'VERTICAL'] as const;
 export type PerformanceScope = (typeof PERFORMANCE_SCOPES)[number];
 
 /**
@@ -465,6 +465,13 @@ export const performanceReportQuerySchema = z.object({
   userId: idSchema.optional(),
   /** Org unit id, when scope is REGION or BRANCH. */
   orgUnitId: idSchema.optional(),
+  /**
+   * The National Head who owns the vertical, when scope is VERTICAL.
+   *
+   * A vertical is a reporting line, not a place — everyone whose chain reaches
+   * this head — so it cannot be expressed as an org unit.
+   */
+  verticalHeadId: idSchema.optional(),
   period: z.enum(PERFORMANCE_PERIODS).default('AS_ON_DATE'),
   /** Anchor day, `YYYY-MM-DD` in IST. The period is derived from it. */
   date: z
@@ -551,6 +558,18 @@ export interface PerformanceReport {
   rows: PerformanceResourceRow[];
   /** How the group as a whole is doing, in plain language. */
   summary: string[];
+  /**
+   * Who this report is addressed to, pre-filled into the send dialog.
+   *
+   * It differs by scope because the audience does. A team report goes to the
+   * team — it is about their own work. A vertical report goes to the head who
+   * owns it: it is about those reps, written for that person, and mailing it
+   * to all of them would publish a judgement of each to the others.
+   *
+   * Empty for a region or a branch, which are places rather than people and
+   * have no obvious recipient.
+   */
+  suggestedRecipients: Array<{ fullName: string; email: string }>;
 }
 
 /**
