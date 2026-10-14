@@ -427,6 +427,18 @@ model Product {
   /// Object key for a brochure in the document store.
   brochureKey    String?  @db.VarChar(300)
 
+  /// Whether a client can take this product more than once.
+  ///
+  /// A demat account is opened once; a fixed deposit or a mutual fund is taken
+  /// again and again. Recurring by default, because that is the harmless
+  /// reading: it warns about nothing rather than warning about everything the
+  /// day this ships.
+  ///
+  /// It warns, it does not block. The rep in front of the client knows things
+  /// the database does not — a second account for a spouse, a reopened folio —
+  /// and refusing them outright teaches people to work around the system.
+  isRecurring Boolean @default(true)
+
   isActive  Boolean @default(true)
   isSystem  Boolean @default(false)
   sortOrder Int     @default(100)

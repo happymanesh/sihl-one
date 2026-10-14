@@ -414,6 +414,16 @@ function ProductsTab({
           </select>
         </Field>
 
+        <Field
+          label="Taken more than once?"
+          hint="Clear it for something a client takes once — a demat account, not a fixed deposit. One-time products warn when a client already has one; they are never blocked."
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="isRecurring" defaultChecked className="h-4 w-4" />
+            <span>A client can take this repeatedly</span>
+          </label>
+        </Field>
+
         <Field label="Summary" hint="One line, shown on the chip and the card.">
           <input name="summary" maxLength={300} className="input" />
         </Field>
@@ -469,6 +479,7 @@ function ProductRow({ product, groups }: { product: ProductItem; groups: Product
             ) : (
               <Badge tone="amber">No group</Badge>
             )}
+            {!product.isRecurring ? <Badge tone="amber">One-time</Badge> : null}
             {product.isSystem ? <Badge tone="neutral">Built in</Badge> : null}
             {!product.isActive ? <Badge tone="amber">Off</Badge> : null}
             {!product.description ? <Badge tone="amber">No details yet</Badge> : null}
@@ -533,6 +544,16 @@ function ProductRow({ product, groups }: { product: ProductItem; groups: Product
               ))}
             </select>
           </div>
+          <label className="flex items-center gap-2 pb-1.5 text-xs">
+            <input type="hidden" name="recurringTouched" value="1" />
+            <input
+              type="checkbox"
+              name="isRecurring"
+              defaultChecked={product.isRecurring}
+              className="h-4 w-4"
+            />
+            <span>Repeatable</span>
+          </label>
           <Submit label="Save" pendingLabel="Saving…" small />
         </form>
       ) : null}

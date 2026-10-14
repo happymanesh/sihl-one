@@ -64,6 +64,10 @@ export async function updateSource(_p: MasterState, formData: FormData): Promise
   if (formData.get('label')) raw.label = formData.get('label');
   if (formData.get('scoringWeight')) raw.scoringWeight = Number(formData.get('scoringWeight'));
   if (formData.has('isActive')) raw.isActive = formData.get('isActive') === 'true';
+  // A checkbox posts nothing when cleared, so the edit form carries a marker
+  // alongside it — without that, unticking "recurring" would read as "the form
+  // said nothing about it" and silently keep the old value.
+  if (formData.has('recurringTouched')) raw.isRecurring = formData.get('isRecurring') === 'on';
 
   const parsed = updateLeadSourceSchema.safeParse(raw);
   if (!parsed.success) {
@@ -133,6 +137,7 @@ export async function createProduct(_p: MasterState, formData: FormData): Promis
     // sub-products can be chosen as a parent; the API enforces that.
     parentId: formData.get('parentId') || undefined,
     groupId: formData.get('groupId') || undefined,
+    isRecurring: formData.get('isRecurring') === 'on',
     summary: formData.get('summary') || undefined,
     description: formData.get('description') || undefined,
     keyBenefits: String(formData.get('keyBenefits') ?? '')

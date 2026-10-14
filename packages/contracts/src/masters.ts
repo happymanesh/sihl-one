@@ -84,6 +84,8 @@ export const createProductSchema = z.object({
    * dropdowns and the group-inheritance rule when it is added to a lead.
    */
   groupId: idSchema.optional(),
+  /** False for something a client takes once — a demat account, not an FD. */
+  isRecurring: z.boolean().default(true),
   summary: z.string().trim().max(300).optional(),
   description: z.string().trim().max(8000).optional(),
   keyBenefits: z.array(z.string().trim().min(2).max(200)).max(12).default([]),
@@ -98,6 +100,7 @@ export const updateProductSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   /** Null moves it out of every group; omitted leaves it where it is. */
   groupId: idSchema.nullable().optional(),
+  isRecurring: z.boolean().optional(),
   summary: z.string().trim().max(300).nullable().optional(),
   description: z.string().trim().max(8000).nullable().optional(),
   keyBenefits: z.array(z.string().trim().min(2).max(200)).max(12).optional(),
@@ -120,6 +123,13 @@ export interface ProductItem {
   parentName: string | null;
   /** Codes of this product's sub-products, for filters that resolve a parent. */
   childCodes: string[];
+  /**
+   * Whether a client can take it more than once.
+   *
+   * Warns rather than blocks: the rep in front of the client knows things the
+   * database does not, and refusing them teaches people to work around it.
+   */
+  isRecurring: boolean;
   /** The desk this product belongs to. Null until an administrator files it. */
   groupId: string | null;
   groupCode: string | null;

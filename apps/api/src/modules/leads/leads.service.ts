@@ -3949,7 +3949,7 @@ export class LeadsService {
     const rows = await this.prisma.leadProduct.findMany({
       where: { leadId: id },
       include: {
-        product: { select: { name: true } },
+        product: { select: { name: true, isRecurring: true } },
         owner: {
           select: {
             id: true,
@@ -3962,6 +3962,29 @@ export class LeadsService {
       },
       orderBy: [{ createdAt: 'asc' }],
     });
+
+    /*
+      What this client already holds, where there is a client at all.
+
+      A lead with no customer link has no history to check, so the set is
+      empty and nothing warns — which is right: the warning is about a person
+      taking the same one-time product twice, and before conversion there is
+      no person on record yet.
+    */
+    const lead = await this.prisma.lead.findUnique({
+      where: { id },
+      select: { customerId: true },
+    });
+    const held = new Set(
+      lead?.customerId
+        ? (
+            await this.prisma.customerProduct.findMany({
+              where: { customerId: lead.customerId },
+              select: { product: true },
+            })
+          ).map((row) => row.product)
+        : [],
+    );
 
     /*
       Approvals for these products, in one query.
@@ -4003,6 +4026,8 @@ export class LeadsService {
 
     return rows.map((row) => ({
       approval: approvals.get(row.productCode) ?? null,
+      isRecurring: row.product?.isRecurring ?? true,
+      clientAlreadyHolds: held.has(row.productCode),
       productCode: row.productCode,
       productName: row.product?.name ?? null,
       status: row.status as LeadProductStatus,

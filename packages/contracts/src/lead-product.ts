@@ -147,6 +147,23 @@ export interface LeadProductView {
   assignedAt: string | null;
 
   /**
+   * Whether a client can take this product more than once, from the master.
+   *
+   * Carried on the row so the screen can warn without a second lookup.
+   */
+  isRecurring: boolean;
+  /**
+   * This client already holds this product, from the customer record.
+   *
+   * Only meaningful once the lead is linked to a customer — before that there
+   * is no client to have a history. Paired with `isRecurring` it is the whole
+   * of the one-time warning, and it warns: a second account for a spouse or a
+   * reopened folio are real, and the rep in front of the client knows which
+   * this is.
+   */
+  clientAlreadyHolds: boolean;
+
+  /**
    * Sign-off on what was committed, when one has been asked for.
    *
    * Visible to everybody who can see the lead — "pending approval" is a thing

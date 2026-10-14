@@ -158,6 +158,13 @@ export function LeadProductOutcomes({
                 <p className="truncate text-sm font-semibold">
                   {row.productName ?? row.productCode}
                 </p>
+                {/* Said on the row, not only at the moment of converting, so
+                    it is known before the work rather than after it. */}
+                {!row.isRecurring && row.clientAlreadyHolds ? (
+                  <p className="text-xs font-semibold text-[var(--color-warn-strong)]">
+                    One-time — this client already holds it
+                  </p>
+                ) : null}
                 {row.lostReason ? (
                   <p className="text-xs text-[var(--color-text-muted)]">
                     {humanise(row.lostReason)}
@@ -275,6 +282,26 @@ export function LeadProductOutcomes({
                     row.approval?.status === 'REJECTED' &&
                     !window.confirm(
                       `The commitments recorded for ${row.productName ?? row.productCode} were not approved, and will not be honoured for this client. Convert anyway?`,
+                    )
+                  ) {
+                    event.preventDefault();
+                    return;
+                  }
+
+                  /*
+                    A one-time product this client already holds.
+
+                    Warns rather than refuses, as asked: a second account for a
+                    spouse or a reopened folio are real, and the rep in front of
+                    the client knows which this is. What it stops is the quiet
+                    double-count nobody notices until the numbers are queried.
+                  */
+                  if (
+                    status === 'CONVERTED' &&
+                    !row.isRecurring &&
+                    row.clientAlreadyHolds &&
+                    !window.confirm(
+                      `${row.productName ?? row.productCode} is a one-time product and this client already holds it. Converting it again will count it twice. Continue?`,
                     )
                   ) {
                     event.preventDefault();
