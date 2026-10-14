@@ -82,8 +82,7 @@ export interface BehaviourMetric {
   target: string;
 }
 
-const clamp = (value: number, min = 0, max = 100): number =>
-  Math.max(min, Math.min(max, value));
+const clamp = (value: number, min = 0, max = 100): number => Math.max(min, Math.min(max, value));
 
 /**
  * Scores the habits a salesperson can actually change.
@@ -220,8 +219,7 @@ export function computeRating(input: RatingInput): Rating {
   // Empirical-Bayes style shrinkage toward parity. With no leads at all the
   // index is exactly 1.0 — "no evidence" must read as average, never as bad.
   const priorWeight = SHRINKAGE_PSEUDO_LEADS * 0.15;
-  const outcomeIndex =
-    (actualConversions + priorWeight) / (expectedConversions + priorWeight || 1);
+  const outcomeIndex = (actualConversions + priorWeight) / (expectedConversions + priorWeight || 1);
 
   const behaviour = scoreBehaviour(input.behaviour);
 
@@ -237,7 +235,13 @@ export function computeRating(input: RatingInput): Rating {
     leadsAssessed >= 40 ? 'HIGH' : leadsAssessed >= 15 ? 'MEDIUM' : 'LOW';
 
   const band: RatingBand =
-    overall >= 80 ? 'EXCEPTIONAL' : overall >= 62 ? 'STRONG' : overall >= 45 ? 'ON_TRACK' : 'DEVELOPING';
+    overall >= 80
+      ? 'EXCEPTIONAL'
+      : overall >= 62
+        ? 'STRONG'
+        : overall >= 45
+          ? 'ON_TRACK'
+          : 'DEVELOPING';
 
   const targetAttainment =
     input.targetValue && input.targetValue > 0
@@ -272,7 +276,9 @@ export function computeRating(input: RatingInput): Rating {
 
   const weakest = [...behaviour.metrics].sort((a, b) => a.score - b.score)[0];
   if (weakest && weakest.score < 70) {
-    explanation.push(`Biggest controllable gap: ${weakest.label.toLowerCase()} (${weakest.value}).`);
+    explanation.push(
+      `Biggest controllable gap: ${weakest.label.toLowerCase()} (${weakest.value}).`,
+    );
   }
 
   return {
@@ -426,3 +432,140 @@ export interface Scorecard {
     peersAssessed: number;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Performance report — a team, a region or a branch over a period
+// ---------------------------------------------------------------------------
+
+/**
+ * Which population the report covers.
+ *
+ * Three independent choices rather than a drill-down: a sales head thinks
+ * "show me the Vadodara branch" or "show me equity desk team leaders", not
+ * "region, then branch, then designation". Only TEAM narrows further, because
+ * only a team is a set of people rather than a place.
+ */
+export const PERFORMANCE_SCOPES = ['TEAM', 'REGION', 'BRANCH'] as const;
+export type PerformanceScope = (typeof PERFORMANCE_SCOPES)[number];
+
+/**
+ * How the period is expressed.
+ *
+ * AS_ON_DATE is cumulative to a day — "where do we stand right now" — while the
+ * other two are closed windows a reader can compare against the one before.
+ */
+export const PERFORMANCE_PERIODS = ['AS_ON_DATE', 'MONTH', 'QUARTER'] as const;
+export type PerformancePeriodKind = (typeof PERFORMANCE_PERIODS)[number];
+
+export const performanceReportQuerySchema = z.object({
+  scope: z.enum(PERFORMANCE_SCOPES).default('TEAM'),
+  /** Designation code, when scope is TEAM. */
+  designationId: idSchema.optional(),
+  /** One person within that designation, when scope is TEAM. */
+  userId: idSchema.optional(),
+  /** Org unit id, when scope is REGION or BRANCH. */
+  orgUnitId: idSchema.optional(),
+  period: z.enum(PERFORMANCE_PERIODS).default('AS_ON_DATE'),
+  /** Anchor day, `YYYY-MM-DD` in IST. The period is derived from it. */
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+export type PerformanceReportQuery = z.infer<typeof performanceReportQuerySchema>;
+
+/** One person's line in the report. */
+export interface PerformanceResourceRow {
+  userId: string;
+  fullName: string;
+  email: string;
+  employeeCode: string | null;
+  branch: string | null;
+  designation: string | null;
+  reportingTo: string | null;
+
+  totalLeads: number;
+  openLeads: number;
+  converted: number;
+  lost: number;
+  /** Never had a single interaction since the lead was created. */
+  unattendedEver: number;
+  /** No interaction in the last two days. The daily-slippage number. */
+  unattendedTwoDays: number;
+  /** Percentage, one decimal. Null when nothing was assigned — not zero. */
+  conversionRate: number | null;
+
+  /**
+   * The quality-adjusted rating, where there is enough to judge.
+   *
+   * Null rather than zero for somebody with too few leads: a rating computed
+   * from three leads is noise, and publishing it as a number invites it to be
+   * read as a verdict.
+   */
+  overallScore: number | null;
+  scoreBand: RatingBand | null;
+  /** Plain language, so a score nobody can interrogate is not just asserted. */
+  scoreExplanation: string[];
+}
+
+/** The same shape as a resource row, added up — plus what only a group has. */
+export interface PerformanceTotals {
+  totalLeads: number;
+  openLeads: number;
+  converted: number;
+  lost: number;
+  unattendedEver: number;
+  unattendedTwoDays: number;
+  conversionRate: number | null;
+  /** People in the population with no leads at all. The actionable list. */
+  resourcesWithoutLeads: number;
+  resourceCount: number;
+}
+
+/**
+ * Movement against the period before this one, of equal length.
+ *
+ * Like-for-like: a month against the month before, a quarter against the
+ * quarter before, and a cumulative view against the same number of days
+ * immediately preceding it. Comparing unequal spans is how a report starts
+ * reporting growth that is really just a longer window.
+ */
+export interface PerformanceProgress {
+  previousLabel: string;
+  totalLeads: number;
+  converted: number;
+  conversionRate: number | null;
+  /** Percentage points, not percent: a rate moving 10% → 12% is +2.0 here. */
+  conversionRateDelta: number | null;
+  /** Percent change in leads, for direction of travel. */
+  totalLeadsDeltaPercent: number | null;
+}
+
+export interface PerformanceReport {
+  scope: PerformanceScope;
+  /** What was actually selected, for the heading and the email subject. */
+  scopeLabel: string;
+  period: { kind: PerformancePeriodKind; label: string; from: string; to: string };
+  totals: PerformanceTotals;
+  progress: PerformanceProgress | null;
+  rows: PerformanceResourceRow[];
+  /** How the group as a whole is doing, in plain language. */
+  summary: string[];
+}
+
+/**
+ * Sending a performance report to the people in it.
+ *
+ * Recipients are sent explicitly rather than derived on the server from the
+ * same query. The screen shows exactly who it is about to mail and lets that
+ * be edited, so the list that was on screen must be the list that goes — a
+ * server that re-derived it could mail somebody the sender never saw.
+ */
+export const sendPerformanceReportSchema = z.object({
+  to: z.array(z.string().trim().email()).min(1, 'Add at least one recipient').max(100),
+  cc: z.array(z.string().trim().email()).max(50).default([]),
+  subject: z.string().trim().min(3).max(200),
+  /** The rendered report, as the sender previewed it. */
+  body: z.string().trim().min(1).max(100_000),
+});
+export type SendPerformanceReportInput = z.infer<typeof sendPerformanceReportSchema>;

@@ -50,7 +50,7 @@ export const NAV_ITEMS: NavItem[] = [
   // not where anyone looked for it.
   { label: 'Visits', href: '/visits', icon: 'pin', permissions: ['visit:read'], section: 'work' },
 
-  { label: 'My performance', href: '/performance', icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
+  { label: 'Performance', href: '/performance', icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
 
   // Same permission as the dashboard, because the separation here is by data
   // scope rather than by rank: a rep opens this and sees one row — their own.

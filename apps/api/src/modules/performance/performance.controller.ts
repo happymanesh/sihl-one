@@ -1,11 +1,19 @@
 import { Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { upsertTargetSchema, type UpsertTargetInput } from '@sihl-one/contracts';
+import {
+  performanceReportQuerySchema,
+  sendPerformanceReportSchema,
+  upsertTargetSchema,
+  type PerformanceReportQuery,
+  type SendPerformanceReportInput,
+  type UpsertTargetInput,
+} from '@sihl-one/contracts';
 import { z } from 'zod';
 
 import { CurrentUser, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
 import { ApiZodBody, IdParamPipe, ZodBody, ZodValidationPipe } from '../../common/zod';
+import { PerformanceReportService } from './performance-report.service';
 import { PerformanceService } from './performance.service';
 
 const daysSchema = z.coerce.number().int().min(30).max(365).default(90);
@@ -14,7 +22,27 @@ const daysSchema = z.coerce.number().int().min(30).max(365).default(90);
 @ApiBearerAuth()
 @Controller('performance')
 export class PerformanceController {
-  constructor(private readonly performance: PerformanceService) {}
+  constructor(
+    private readonly performance: PerformanceService,
+    private readonly report: PerformanceReportService,
+  ) {}
+
+  /**
+   * How a team, a region or a branch is doing.
+   *
+   * Separate from `me` and `users/:id`, which are one person's scorecard and
+   * are deliberately not a leaderboard. This is the manager's view of a group
+   * they are accountable for, and it is scoped to what they can already see.
+   */
+  @Get('report')
+  @RequirePermissions('analytics:sales:read')
+  @ApiOperation({ summary: 'Performance across a team, region or branch' })
+  reportFor(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query(new ZodValidationPipe(performanceReportQuerySchema)) query: PerformanceReportQuery,
+  ) {
+    return this.report.report(user, query);
+  }
 
   @Get('me')
   @RequirePermissions('analytics:sales:read')
@@ -47,6 +75,28 @@ export class PerformanceController {
     @Query('days', new ZodValidationPipe(daysSchema)) days: number,
   ) {
     return this.performance.scorecard(user, id, days);
+  }
+
+  /**
+   * Mail a report to the people in it.
+   *
+   * The body is what the sender previewed, not something rebuilt here: a
+   * server that re-rendered it could send something other than what was
+   * approved on screen, which is the one thing a preview must rule out.
+   *
+   * Audited as an EXPORT. A team's performance leaving the system by email is
+   * the same event as it leaving by download, and the notice-period alert
+   * watches for exactly that.
+   */
+  @Post('report/send')
+  @RequirePermissions('analytics:sales:read')
+  @ApiOperation({ summary: 'Email a performance report that has been previewed' })
+  @ApiZodBody(sendPerformanceReportSchema)
+  sendReport(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @ZodBody(sendPerformanceReportSchema) body: SendPerformanceReportInput,
+  ) {
+    return this.report.send(user, body);
   }
 
   @Post('targets')

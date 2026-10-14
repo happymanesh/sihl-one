@@ -20,7 +20,16 @@ import { passwordResetEmail } from './password-reset.template';
  */
 
 export interface OutboundEmail {
+  /** One address, or several separated by commas. */
   to: string;
+  /**
+   * Copied in, visible to everyone on the message.
+   *
+   * Deliberately cc and not bcc: a performance report going to a team and
+   * their head is a conversation all of them are in, and hiding who else
+   * received it would be the surprising behaviour.
+   */
+  cc?: string;
   subject: string;
   text: string;
   html: string;
@@ -92,6 +101,14 @@ export abstract class Mailer {
 }
 
 /** Masked for logs: enough to identify a recipient, not enough to be a mailing list. */
+/** A comma-separated list as its individual addresses, blanks dropped. */
+function addresses(list: string): string[] {
+  return list
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 export function maskEmail(address: string): string {
   const [local = '', domain = ''] = address.split('@');
   return `${local.slice(0, 2)}***@${domain}`;
@@ -109,9 +126,7 @@ export class NoopMailer extends Mailer {
   private readonly logger = new Logger('Mailer');
 
   send(email: OutboundEmail): Promise<EmailResult> {
-    this.logger.log(
-      `[not sent — MAIL_DRIVER=noop] to ${maskEmail(email.to)}: ${email.subject}`,
-    );
+    this.logger.log(`[not sent — MAIL_DRIVER=noop] to ${maskEmail(email.to)}: ${email.subject}`);
     // Reports failure, not success. Claiming an email was accepted when none
     // left the building would tell an administrator "Emailed to the user" while
     // the person waits for something that is never coming — and if a deploy
@@ -161,7 +176,16 @@ export class SendGridMailer extends Mailer {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          personalizations: [{ to: [{ email: email.to }] }],
+          personalizations: [
+            {
+              // Split because the field accepts a comma-separated list from
+              // callers, while SendGrid wants one object per address.
+              to: addresses(email.to).map((address) => ({ email: address })),
+              ...(email.cc && addresses(email.cc).length > 0
+                ? { cc: addresses(email.cc).map((address) => ({ email: address })) }
+                : {}),
+            },
+          ],
           from: { email: from, name: fromName },
           reply_to: { email: from },
           subject: email.subject,
