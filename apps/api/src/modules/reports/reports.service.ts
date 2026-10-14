@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
   DEFAULT_REPORT_DAYS,
+  NO_VERTICAL_HEAD,
   rate,
+  verticalHeadOf,
   type BranchReportRow,
   type OwnerReportRow,
   type ProductReportRow,
@@ -66,6 +68,29 @@ export class ReportsService {
     return { deletedAt: null, AND: [this.scope.leadScope(user)] };
   }
 
+  /**
+   * The people a resource-wise report should have a row for.
+   *
+   * Deliberately the org subtree and not `assignableUserScope`: that one now
+   * answers "who may receive work", which the assign switch widened to the
+   * whole firm. A report is about the people you are accountable for, which is
+   * still the branch, region or zone beneath you.
+   *
+   * Partners are excluded. A partner's staff are not SIHL resources and would
+   * arrive as a block of empty rows on every branch report.
+   */
+  private reportableUsers(user: AuthenticatedPrincipal): Record<string, unknown> {
+    const base = { deletedAt: null, userType: 'INTERNAL' as const, status: 'ACTIVE' as const };
+
+    if (user.dataScope === 'ALL') return base;
+    if (user.dataScope === 'SELF' || !user.orgUnitPath) return { ...base, id: user.id };
+
+    return {
+      ...base,
+      OR: [{ id: user.id }, { orgUnit: { path: { startsWith: user.orgUnitPath } } }],
+    };
+  }
+
   async summary(user: AuthenticatedPrincipal, range: ReportRange): Promise<ReportSummary> {
     const { from, to, view } = this.period(range);
     const base = this.scoped(user);
@@ -79,7 +104,9 @@ export class ReportsService {
         this.prisma.lead.count({ where: { ...base, convertedAt: created } }),
         this.prisma.lead.count({ where: { ...base, status: 'LOST', updatedAt: created } }),
         this.prisma.lead.count({ where: { ...base, status: { notIn: [...CLOSED] } } }),
-        this.prisma.lead.count({ where: { ...base, ownerId: null, status: { notIn: [...CLOSED] } } }),
+        this.prisma.lead.count({
+          where: { ...base, ownerId: null, status: { notIn: [...CLOSED] } },
+        }),
         this.prisma.lead.count({
           where: { ...base, status: { notIn: [...CLOSED] }, nextFollowUpAt: { lt: new Date() } },
         }),
@@ -136,8 +163,16 @@ export class ReportsService {
     const created = { gte: from, lte: to };
 
     const [assigned, converted, lost, open, value] = await Promise.all([
-      this.prisma.lead.groupBy({ by: ['ownerId'], where: { ...base, createdAt: created }, _count: true }),
-      this.prisma.lead.groupBy({ by: ['ownerId'], where: { ...base, convertedAt: created }, _count: true }),
+      this.prisma.lead.groupBy({
+        by: ['ownerId'],
+        where: { ...base, createdAt: created },
+        _count: true,
+      }),
+      this.prisma.lead.groupBy({
+        by: ['ownerId'],
+        where: { ...base, convertedAt: created },
+        _count: true,
+      }),
       this.prisma.lead.groupBy({
         by: ['ownerId'],
         where: { ...base, status: 'LOST', updatedAt: created },
@@ -165,24 +200,61 @@ export class ReportsService {
       _count: true,
     });
 
-    const ownerIds = [
-      ...new Set(
-        [...assigned, ...converted, ...lost, ...open]
-          .map((r) => r.ownerId)
-          .filter((id): id is string => id !== null),
-      ),
-    ];
+    /*
+      The roster, not the people who happen to have leads.
+
+      This used to collect owner ids out of the groupBy results, so a rep with
+      nothing assigned in the period simply was not in the report — which is
+      exactly the row a sales head is looking for. Somebody with no leads is a
+      finding, not an absence. Built from the directory instead, so every
+      resource appears and the counts fall to zero.
+    */
     const people = await this.prisma.user.findMany({
-      where: { id: { in: ownerIds } },
+      where: this.reportableUsers(user),
       select: {
         id: true,
         firstName: true,
         lastName: true,
         employeeCode: true,
+        managerId: true,
         orgUnit: { select: { name: true } },
+        designation: { select: { code: true } },
       },
     });
     const byId = new Map(people.map((p) => [p.id, p]));
+    const ownerIds = people.map((p) => p.id);
+
+    /*
+      Reporting line and vertical owner, resolved against the whole directory
+      rather than the scoped list: a rep's chain runs up through people the
+      viewer may not themselves appear alongside, and stopping at the edge of
+      the scope would report "no vertical head" for somebody who plainly has
+      one.
+    */
+    const everyone = await this.prisma.user.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        managerId: true,
+        employeeCode: true,
+        designation: { select: { code: true } },
+      },
+    });
+    const directory = new Map(
+      everyone.map((row) => [
+        row.id,
+        {
+          managerId: row.managerId,
+          designationCode: row.designation?.code ?? null,
+          employeeCode: row.employeeCode,
+        },
+      ]),
+    );
+    const nameById = new Map(
+      everyone.map((row) => [row.id, `${row.firstName} ${row.lastName}`.trim()]),
+    );
 
     const activityByOwner = await this.activityCountsByOwner(user, from, to);
     const visitByOwner = await this.visitCountsByOwner(user, from, to);
@@ -204,6 +276,13 @@ export class ReportsService {
           ownerName: person ? `${person.firstName} ${person.lastName}` : 'Unassigned',
           employeeCode: person?.employeeCode ?? null,
           branch: person?.orgUnit?.name ?? null,
+          reportingTo: person?.managerId ? (nameById.get(person.managerId) ?? null) : null,
+          verticalHead: id
+            ? (() => {
+                const headId = verticalHeadOf(id, directory);
+                return headId ? (nameById.get(headId) ?? NO_VERTICAL_HEAD) : NO_VERTICAL_HEAD;
+              })()
+            : null,
           assigned: assignedCount,
           open: count(open, id),
           converted: convertedCount,
@@ -213,9 +292,7 @@ export class ReportsService {
           visits: id ? (visitByOwner.get(id) ?? 0) : 0,
           joinedOthers: id ? (joinedByOwner.get(id) ?? 0) : 0,
           overdueFollowUps: count(overdue, id),
-          pipelineValue: (
-            value.find((r) => r.ownerId === id)?._sum.estimatedValue ?? 0
-          ).toString(),
+          pipelineValue: (value.find((r) => r.ownerId === id)?._sum.estimatedValue ?? 0).toString(),
         };
       })
       .sort((a, b) => b.converted - a.converted || b.assigned - a.assigned);
@@ -269,8 +346,16 @@ export class ReportsService {
     const created = { gte: from, lte: to };
 
     const [leads, converted, lost, value] = await Promise.all([
-      this.prisma.lead.groupBy({ by: ['source'], where: { ...base, createdAt: created }, _count: true }),
-      this.prisma.lead.groupBy({ by: ['source'], where: { ...base, convertedAt: created }, _count: true }),
+      this.prisma.lead.groupBy({
+        by: ['source'],
+        where: { ...base, createdAt: created },
+        _count: true,
+      }),
+      this.prisma.lead.groupBy({
+        by: ['source'],
+        where: { ...base, convertedAt: created },
+        _count: true,
+      }),
       this.prisma.lead.groupBy({
         by: ['source'],
         where: { ...base, status: 'LOST', updatedAt: created },
@@ -324,8 +409,16 @@ export class ReportsService {
     const created = { gte: from, lte: to };
 
     const [leads, converted, value] = await Promise.all([
-      this.prisma.lead.groupBy({ by: ['orgUnitId'], where: { ...base, createdAt: created }, _count: true }),
-      this.prisma.lead.groupBy({ by: ['orgUnitId'], where: { ...base, convertedAt: created }, _count: true }),
+      this.prisma.lead.groupBy({
+        by: ['orgUnitId'],
+        where: { ...base, createdAt: created },
+        _count: true,
+      }),
+      this.prisma.lead.groupBy({
+        by: ['orgUnitId'],
+        where: { ...base, convertedAt: created },
+        _count: true,
+      }),
       this.prisma.lead.groupBy({
         by: ['orgUnitId'],
         where: { ...base, status: { notIn: [...CLOSED] } },
@@ -335,7 +428,10 @@ export class ReportsService {
 
     const unitIds = leads.map((r) => r.orgUnitId).filter((id): id is string => id !== null);
     const [units, headcount] = await Promise.all([
-      this.prisma.orgUnit.findMany({ where: { id: { in: unitIds } }, select: { id: true, name: true } }),
+      this.prisma.orgUnit.findMany({
+        where: { id: { in: unitIds } },
+        select: { id: true, name: true },
+      }),
       this.prisma.user.groupBy({
         by: ['orgUnitId'],
         where: { orgUnitId: { in: unitIds }, status: 'ACTIVE' },

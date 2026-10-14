@@ -63,7 +63,22 @@ export default async function DailyActivityPage({
               </span>
             </p>
           </div>
-          <DayPicker date={report.date} today={istToday()} />
+          <div className="flex flex-wrap items-end gap-2">
+            {/*
+              A plain link, not a button with a fetch behind it: the browser
+              downloads it, the proxy attaches the cookie, and nothing has to
+              hold a file in memory. `download` so a CSV the browser would
+              rather display is saved instead.
+            */}
+            <a
+              href={`/api/reports/daily-export?date=${encodeURIComponent(report.date)}`}
+              download
+              className="btn btn-outline h-9 text-xs"
+            >
+              Download CSV
+            </a>
+            <DayPicker date={report.date} today={istToday()} />
+          </div>
         </div>
       </header>
 

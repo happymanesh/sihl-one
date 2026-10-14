@@ -58,9 +58,7 @@ function Table({
         {note ? <p className="mt-0.5 text-xs text-[var(--color-text-subtle)]">{note}</p> : null}
       </div>
       {rows.length === 0 ? (
-        <p className="px-5 py-6 text-sm text-[var(--color-text-muted)]">
-          Nothing in this period.
-        </p>
+        <p className="px-5 py-6 text-sm text-[var(--color-text-muted)]">Nothing in this period.</p>
       ) : (
         // Wide tables scroll inside their own box; the page itself never
         // scrolls sideways, which matters because this is read on phones.
@@ -145,7 +143,9 @@ export default async function ReportsPage({
         <Stat
           label="Converted"
           value={formatNumber(summary.leadsConverted)}
-          hint={summary.conversionRate === null ? undefined : `${summary.conversionRate}% of created`}
+          hint={
+            summary.conversionRate === null ? undefined : `${summary.conversionRate}% of created`
+          }
         />
         {/*
           These last two are point-in-time, not period figures: the open book as
@@ -170,6 +170,8 @@ export default async function ReportsPage({
         note="Converted counts conversions that happened in this window, whoever created the lead."
         headers={[
           'Name',
+          'Reporting to',
+          'Vertical head',
           'Assigned',
           'Open',
           'Converted',
@@ -190,6 +192,20 @@ export default async function ReportsPage({
                 {row.branch}
               </span>
             ) : null}
+          </span>,
+          row.reportingTo ?? '—',
+          /* The vertical this row rolls up into. Greyed when there is none, so
+             an unmapped reporting line reads as a gap to fix rather than as a
+             vertical called "No vertical head". */
+          <span
+            key="v"
+            className={
+              row.verticalHead && row.verticalHead !== 'No vertical head'
+                ? undefined
+                : 'text-[var(--color-text-subtle)]'
+            }
+          >
+            {row.verticalHead ?? '—'}
           </span>,
           formatNumber(row.assigned),
           formatNumber(row.open),
@@ -265,8 +281,8 @@ export default async function ReportsPage({
       </div>
 
       <p className="text-xs text-[var(--color-text-subtle)]">
-        Value figures are estimates entered by the team, not booked brokerage — this system
-        records engagement, and the back office remains the record of account.
+        Value figures are estimates entered by the team, not booked brokerage — this system records
+        engagement, and the back office remains the record of account.
         {canExportLeads
           ? ' Your export includes a sheet of individual leads.'
           : ' Your export covers these totals; individual client rows need the lead export permission.'}

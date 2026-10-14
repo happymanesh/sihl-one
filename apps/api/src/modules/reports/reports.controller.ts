@@ -75,6 +75,48 @@ export class ReportsController {
     return this.dailyActivity.report(user, query);
   }
 
+  /**
+   * The daily report as a file.
+   *
+   * The screen groups by branch with subtotals, which is right for reading and
+   * wrong for working with: the first thing anybody does with this is pivot it
+   * by vertical or filter to the empty rows. A flat row per person, with the
+   * branch and reporting line on each one, is the shape a spreadsheet wants.
+   *
+   * Audited like every other export. A day's activity for the whole book
+   * leaving the system is the event the notice-period alert watches for.
+   */
+  @Get('daily/export')
+  @RequirePermissions('analytics:sales:read')
+  @ApiQuery({ name: 'date', required: false, description: 'YYYY-MM-DD in IST.' })
+  @ApiOperation({ summary: 'Download the daily activity report as CSV' })
+  async dailyExport(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query(new ZodValidationPipe(dailyActivityQuerySchema)) query: DailyActivityQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { csv, rows, day } = await this.dailyActivity.exportCsv(user, query);
+
+    await this.audit.record({
+      action: 'EXPORT',
+      resource: 'report.daily',
+      reason: `Daily activity for ${day}, ${rows} people`,
+      changes: { date: day, rows, scope: user.dataScope },
+    });
+
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="sihl-daily-activity-${day}.csv"`,
+    );
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    // Never cached: the contents depend on who asked, and a shared cache
+    // serving one person's scoped rows to another is a data-protection
+    // incident.
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.end(csv);
+  }
+
   @Get('daily/detail')
   @RequirePermissions('analytics:sales:read')
   @ApiOperation({

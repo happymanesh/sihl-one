@@ -32,10 +32,10 @@ export const reportRangeSchema = z
     message: 'The start of the range must not be after its end',
     path: ['from'],
   })
-  .refine(
-    (r) => !r.from || !r.to || (r.to.getTime() - r.from.getTime()) / 86_400_000 <= 366,
-    { message: 'A report may cover at most 366 days', path: ['to'] },
-  );
+  .refine((r) => !r.from || !r.to || (r.to.getTime() - r.from.getTime()) / 86_400_000 <= 366, {
+    message: 'A report may cover at most 366 days',
+    path: ['to'],
+  });
 export type ReportRange = z.infer<typeof reportRangeSchema>;
 
 /** Default window when the caller names none: the last full 30 days. */
@@ -59,6 +59,13 @@ export interface OwnerReportRow {
   ownerName: string;
   employeeCode: string | null;
   branch: string | null;
+  /** Their manager's name. Null for somebody with no reporting line mapped. */
+  reportingTo: string | null;
+  /**
+   * The National Head who owns their vertical, found by walking the reporting
+   * line up. "No vertical head" when the line never reaches one.
+   */
+  verticalHead: string | null;
   assigned: number;
   open: number;
   converted: number;

@@ -12,12 +12,15 @@ import {
   type DailyActivityQuery,
   type DailyActivityReport,
   type DailyActivityRow,
+  NO_VERTICAL_HEAD,
+  verticalHeadOf,
 } from '@sihl-one/contracts';
 
 import { LEAD_LIST_SELECT, toLeadListItem, type LeadRow } from '../leads/lead.mapper';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { istDayKey } from '../../common/ist-day';
+import { toCsv } from '../../common/csv';
 import type { AuthenticatedPrincipal } from '../../common/types';
 
 /** A row with every count at zero, which is the row that matters most here. */
@@ -65,6 +68,114 @@ function sumRows(rows: readonly DailyActivityRow[]): ActivityTotals {
 @Injectable()
 export class DailyActivityService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * The same report, flattened into a file.
+   *
+   * Built on `report` rather than beside it, so the file and the screen can
+   * never disagree about what somebody did — a second set of queries is how an
+   * export starts quietly reporting different numbers from the page it was
+   * downloaded from.
+   *
+   * Flat: branch and reporting line repeat on every row instead of being
+   * carried by a grouping header, because the first thing done with this is a
+   * pivot, and a pivot cannot read a header row.
+   */
+  async exportCsv(
+    user: AuthenticatedPrincipal,
+    query: DailyActivityQuery,
+  ): Promise<{ csv: string; rows: number; day: string }> {
+    const report = await this.report(user, query);
+
+    const directory = await this.directoryForVerticals();
+    const headOf = (userId: string) => {
+      const headId = verticalHeadOf(userId, directory.lines);
+      return headId ? (directory.names.get(headId) ?? NO_VERTICAL_HEAD) : NO_VERTICAL_HEAD;
+    };
+
+    const header = [
+      'Date',
+      'Employee code',
+      'Name',
+      'Branch',
+      'Reporting to',
+      'Vertical head',
+      'Open leads',
+      'Leads assigned',
+      'Leads created',
+      'Mobiles verified',
+      'Leads updated',
+      'Visits done',
+      'Joined visits',
+      'Converted',
+      'Lost',
+      'Total',
+    ];
+
+    const body = report.groups.flatMap((group) =>
+      group.rows.map((row) => [
+        report.date,
+        row.employeeCode ?? '',
+        row.fullName,
+        row.branch ?? '',
+        row.manager ?? '',
+        headOf(row.userId),
+        String(row.openLeads),
+        String(row.leadsAssigned),
+        String(row.leadsCreated),
+        String(row.mobilesVerified),
+        String(row.leadsUpdated),
+        String(row.visitsDone),
+        String(row.joinedVisits),
+        String(row.converted),
+        String(row.lost),
+        String(row.total),
+      ]),
+    );
+
+    return { csv: toCsv(header, body), rows: body.length, day: report.date };
+  }
+
+  /**
+   * Every reporting line at once, for resolving vertical owners in memory.
+   *
+   * One query for the whole directory rather than a walk per person: a report
+   * covering two hundred people would otherwise issue a query per hop up each
+   * of two hundred chains.
+   */
+  private async directoryForVerticals(): Promise<{
+    lines: Map<
+      string,
+      { managerId: string | null; designationCode: string | null; employeeCode: string | null }
+    >;
+    names: Map<string, string>;
+  }> {
+    const everyone = await this.prisma.user.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        managerId: true,
+        employeeCode: true,
+        designation: { select: { code: true } },
+      },
+    });
+
+    return {
+      lines: new Map(
+        everyone.map((row) => [
+          row.id,
+          {
+            managerId: row.managerId,
+            designationCode: row.designation?.code ?? null,
+            employeeCode: row.employeeCode,
+          },
+        ]),
+      ),
+      names: new Map(everyone.map((row) => [row.id, `${row.firstName} ${row.lastName}`.trim()])),
+    };
+  }
 
   async report(
     user: AuthenticatedPrincipal,

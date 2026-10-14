@@ -48,6 +48,11 @@ export class WorkbookService {
         { header: 'Employee code', key: 'employeeCode', width: 16 },
         { header: 'Name', key: 'ownerName', width: 26 },
         { header: 'Branch', key: 'branch', width: 20 },
+        // Beside the person rather than at the end: the first thing done with
+        // this sheet is a pivot by vertical, and a column you have to scroll
+        // to is one people re-type by hand.
+        { header: 'Reporting to', key: 'reportingTo', width: 24 },
+        { header: 'Vertical head', key: 'verticalHead', width: 24 },
         { header: 'Assigned', key: 'assigned', width: 11 },
         { header: 'Open', key: 'open', width: 9 },
         { header: 'Converted', key: 'converted', width: 12 },

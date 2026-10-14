@@ -149,6 +149,63 @@ export function formatStaffCode(sequence: number): string {
 }
 
 /**
+ * The one National Head who is not a vertical owner.
+ *
+ * Every rep reports to somebody, who reports to somebody, up to a National
+ * Head — and that head is the vertical's owner. One person sits above all of
+ * them, so counting them would make every rep in the firm share a single
+ * "vertical" and the grouping would say nothing. They are skipped on the way
+ * up, and the National Head below them is the answer.
+ *
+ * Held as a code rather than an id so it reads the same in every environment,
+ * and compared through `normaliseStaffCode`, so SIHL-044 and SIHL-0044 are the
+ * same person however it was typed.
+ */
+export const NON_VERTICAL_NATIONAL_HEAD_CODE = 'SIHL-0044';
+
+/** Shown for anybody whose reporting line never reaches a vertical owner. */
+export const NO_VERTICAL_HEAD = 'No vertical head';
+
+/**
+ * Walks a reporting line up to the National Head who owns that vertical.
+ *
+ * Pure, and fed the whole directory at once: a report covering two hundred
+ * people would otherwise walk the tree two hundred times, a query per hop.
+ *
+ * Returns null when the line runs out without reaching a qualifying head —
+ * which is the honest answer for somebody with no manager mapped, and is what
+ * `NO_VERTICAL_HEAD` is for.
+ */
+export function verticalHeadOf(
+  userId: string,
+  directory: ReadonlyMap<
+    string,
+    { managerId: string | null; designationCode: string | null; employeeCode: string | null }
+  >,
+): string | null {
+  const seen = new Set<string>();
+  let currentId: string | null = userId;
+
+  // Capped, because a reporting line that loops would otherwise spin for ever —
+  // and a cycle is a data error somebody can make in the admin screen.
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const current = directory.get(currentId);
+    if (!current) return null;
+
+    if (
+      current.designationCode === 'NATIONAL_HEAD' &&
+      normaliseStaffCode(current.employeeCode ?? '') !== NON_VERTICAL_NATIONAL_HEAD_CODE
+    ) {
+      return currentId;
+    }
+    currentId = current.managerId;
+  }
+
+  return null;
+}
+
+/**
  * A staff code as somebody types it, turned into the one shape we store.
  *
  * People type the number and nothing else — 23, or 123456 — because that is
