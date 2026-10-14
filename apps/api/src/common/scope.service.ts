@@ -228,9 +228,30 @@ export class ScopeService {
    * A partner is decided before scope: they hand work inside their own firm,
    * whatever scope their login carries. Their staff sit outside SIHL's org tree,
    * so a subtree match would return nobody at all.
+   *
+   * And the scopes below now only decide the list for somebody who does *not*
+   * hold `lead:assign` — see the note on the early return.
    */
   assignableUserScope(user: AuthenticatedPrincipal): Record<string, unknown> {
+    // A partner first, and unconditionally. "Anyone" below means anyone inside
+    // SIHL; a partner handing a client to a SIHL employee, or to another
+    // partner's staff, is a different decision nobody has taken.
     if (user.partnerId) return { partnerId: user.partnerId };
+
+    /*
+      The per-user switch is the whole gate, so it decides the list too.
+
+      "May assign leads to other people" grants `lead:assign` regardless of
+      role. Leaving the list on data scope meant a sales executive — scope SELF
+      — was given the Assign tab and found only their own name in it: the right
+      to hand work on, and nobody to hand it to. The switch has to answer both
+      halves of the question or it answers neither.
+
+      What this does not widen: you may still only hand on a product you are
+      working yourself, and only on a lead you can see. This decides who may
+      receive it, not what you may give away.
+    */
+    if (user.permissions.includes('lead:assign')) return {};
 
     switch (user.dataScope) {
       case 'ALL':
