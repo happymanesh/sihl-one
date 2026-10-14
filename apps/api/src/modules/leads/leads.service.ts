@@ -2836,6 +2836,60 @@ export class LeadsService {
         changedById: actorId ?? null,
       },
     });
+
+    if (closing) await this.standDownOpenWork(tx, leadId);
+  }
+
+  /**
+   * Nothing left to chase, so stop asking people to chase it.
+   *
+   * Clearing `nextFollowUpAt` took the lead out of the follow-up report, but
+   * the task list and the visit plan are built from their own rows and knew
+   * nothing about it. So a lead whose every product was converted or lost kept
+   * generating work: a task still due on a client there is nothing left to
+   * discuss, and a visit still planned to go and see them. Reps were chasing
+   * closed business because the screens told them to.
+   *
+   * Cancelled rather than deleted — the task existed, somebody planned it, and
+   * a cancelled row with a reason is the honest record. Re-opening one is a
+   * click if the lead comes back.
+   *
+   * Only work that has not started. A visit already checked into happened, and
+   * a task already marked done stays done; rewriting either would be editing
+   * history to tidy a list.
+   */
+  private async standDownOpenWork(tx: Prisma.TransactionClient, leadId: string): Promise<void> {
+    const openCodes = (
+      await tx.taskStatusMaster.findMany({
+        where: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
+        select: { code: true },
+      })
+    ).map((row) => row.code);
+
+    if (openCodes.length > 0) {
+      await tx.task.updateMany({
+        where: { entityType: 'LEAD', entityId: leadId, status: { in: openCodes } },
+        data: { status: 'CANCELLED' },
+      });
+    }
+
+    await tx.visit.updateMany({
+      where: { entityType: 'LEAD', entityId: leadId, status: 'PLANNED' },
+      data: { status: 'CANCELLED' },
+    });
+
+    /*
+      And the visit's own follow-up date, wherever it sits.
+
+      A visit carries `nextFollowUpAt` of its own, set when the rep wrote up
+      what happened. It is a second source of "chase this" that survives the
+      lead being closed — including on visits that are completed, which is why
+      this is not limited to the ones just cancelled.
+    */
+    await tx.visit.updateMany({
+      where: { entityType: 'LEAD', entityId: leadId, nextFollowUpAt: { not: null } },
+      data: { nextFollowUpAt: null },
+    });
   }
 
   /**

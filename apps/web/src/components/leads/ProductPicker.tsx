@@ -70,28 +70,64 @@ export function ProductPicker({
     </label>
   );
 
-  return (
-    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
-      {topLevel.map((parent) => {
-        const children = childrenOf(parent.id);
-        if (children.length === 0) return chip(parent);
+  /*
+    One row per desk, in the order the master defines.
 
-        return (
-          <span
-            key={parent.id}
-            // Wraps inside the group as well: a parent with five sub-products
-            // would otherwise run off the side of a phone. The tinted
-            // background keeps them read as one unit even across two lines.
-            className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[var(--color-surface-muted)] px-1.5 py-1"
-          >
-            {chip(parent)}
-            <span aria-hidden className="text-xs text-[var(--color-text-subtle)]">
-              &rsaquo;
-            </span>
-            {children.map((child) => chip(child, true))}
+    Fourteen chips in a single wrapping run read as one undifferentiated list:
+    Mutual funds sat next to Currency with nothing to say they are two different
+    businesses, and which desk a product belonged to could not be seen at all.
+    Grouping is the information a rep is actually using when they tick these.
+
+    A product with no group collects under "Other" rather than being dropped —
+    an unfiled product is a gap in the master, not a reason to hide something a
+    client asked about.
+  */
+  const groups: Array<{ name: string; parents: ProductItem[] }> = [];
+  for (const parent of topLevel) {
+    const name = parent.groupName ?? 'Other';
+    const existing = groups.find((group) => group.name === name);
+    if (existing) existing.parents.push(parent);
+    else groups.push({ name, parents: [parent] });
+  }
+
+  return (
+    /*
+      A grid, not indented text: the chips column starts at the same x on every
+      row, so a desk whose products wrap continues under the products rather
+      than under the label — and a long desk name cannot shunt the first row
+      out of line with the rest.
+    */
+    <div className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-2">
+      {groups.map((group) => (
+        <div key={group.name} className="col-span-2 grid grid-cols-subgrid items-baseline">
+          <span className="whitespace-nowrap text-xs font-bold text-[var(--color-text-muted)]">
+            {group.name} :
           </span>
-        );
-      })}
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
+            {group.parents.map((parent) => {
+              const children = childrenOf(parent.id);
+              if (children.length === 0) return chip(parent);
+
+              return (
+                <span
+                  key={parent.id}
+                  // Wraps inside the group as well: a parent with five
+                  // sub-products would otherwise run off the side of a phone.
+                  // The tinted background keeps them read as one unit even
+                  // across two lines.
+                  className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[var(--color-surface-muted)] px-1.5 py-1"
+                >
+                  {chip(parent)}
+                  <span aria-hidden className="text-xs text-[var(--color-text-subtle)]">
+                    &rsaquo;
+                  </span>
+                  {children.map((child) => chip(child, true))}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

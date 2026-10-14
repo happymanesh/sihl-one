@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import { AttendeePicker } from '@/components/visits/AttendeePicker';
 import { useFormStatus } from 'react-dom';
 import { DEFAULT_VISIT_MODE, visitEvidenceRules, type MeetingModeItem } from '@sihl-one/contracts';
 
@@ -36,7 +37,12 @@ export function PlanVisitForm({
   presetEntityType?: string;
   presetEntityId?: string;
   /** People the rep may bring, from `/users/assignable`. */
-  colleagues?: Array<{ id: string; fullName: string; employeeCode?: string | null }>;
+  colleagues?: Array<{
+    id: string;
+    fullName: string;
+    employeeCode?: string | null;
+    orgUnit?: string | null;
+  }>;
 }) {
   const [state, action] = useActionState(planVisit, INITIAL);
   const [bringing, setBringing] = useState<string[]>([]);
@@ -175,31 +181,15 @@ export function PlanVisitForm({
 
       {colleagues.length > 0 ? (
         <div>
-          <label className="label" htmlFor="attendees">
+          {/* A span, not a label with `htmlFor`: the control below is a
+              disclosure rather than a single input, so there is no one field
+              for a label to point at. It names itself to assistive technology. */}
+          <span className="label block">
             Bringing anyone?{' '}
             <span className="font-normal text-[var(--color-text-subtle)]">Optional</span>
-          </label>
-          <select
-            id="attendees"
-            multiple
-            value={bringing}
-            onChange={(event) =>
-              setBringing(Array.from(event.target.selectedOptions, (option) => option.value))
-            }
-            className="input min-h-[5.5rem]"
-          >
-            {/*
-              The employee code in brackets is not decoration. Two people called
-              Priya Shah is ordinary at this size, and picking the wrong one puts
-              a colleague's name against a client meeting they never attended.
-            */}
-            {colleagues.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.fullName}
-                {person.employeeCode ? ` [${person.employeeCode}]` : ''}
-              </option>
-            ))}
-          </select>
+          </span>
+          <AttendeePicker colleagues={colleagues} selected={bringing} onChange={setBringing} />
+
           {/*
             Posted as repeated hidden fields, which the action reads with
             getAll. A multiple <select> does not post reliably across mobile
@@ -211,7 +201,7 @@ export function PlanVisitForm({
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             {bringing.length === 0
               ? 'The visit stays yours either way — this only records who supported it.'
-              : `${bringing.length} colleague${bringing.length === 1 ? '' : 's'} joining. You can change this later.`}
+              : `${bringing.length} colleague${bringing.length === 1 ? '' : 's'} joining. Open the list again to change it.`}
           </p>
         </div>
       ) : null}

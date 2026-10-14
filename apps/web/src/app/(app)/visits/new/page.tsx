@@ -63,7 +63,9 @@ export default async function PlanVisitPage({
     // An empty list hides the selector rather than blocking the form: planning
     // a visit must not fail because a master could not be read.
     apiFetch<MeetingModeItem[]>('/masters/meeting-modes').catch(() => [] as MeetingModeItem[]),
-    apiFetch<Array<{ id: string; fullName: string; employeeCode?: string | null }>>(
+    apiFetch<
+      Array<{ id: string; fullName: string; employeeCode?: string | null; orgUnit?: string | null }>
+    >(
       // The attendee picker has its own endpoint and its own rule. It is not
       // the owner picker: who you may *bring* is a wider and much lighter
       // question than who you may hand a client to.
