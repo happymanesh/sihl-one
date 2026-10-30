@@ -37,7 +37,19 @@ export class TasksService {
     query: TaskQuery,
   ): Promise<PaginatedResult<Record<string, unknown>>> {
     const and: Record<string, unknown>[] = [this.scope.taskScope(user)];
-    if (query.status) and.push({ status: query.status });
+    /*
+      Matched on the status master's category, not on the stored code.
+
+      `status` on the query is a `TaskStatus` — OPEN, IN_PROGRESS, DONE,
+      CANCELLED — which are the master's *categories*. The column it used to
+      be compared against holds a *code*, and the master is
+      administrator-editable: a status coded COMPLETED, CLOSED or anything a
+      branch chose to call it never equalled 'DONE', so the Completed tab
+      returned nothing at all. Cancelled was broken the same way.
+
+      `overdueOnly` below already filtered on the category. The two now agree.
+    */
+    if (query.status) and.push({ statusMaster: { category: query.status } });
     if (query.assigneeId) and.push({ assigneeId: query.assigneeId });
     if (query.entityType) and.push({ entityType: query.entityType });
     if (query.entityId) and.push({ entityId: query.entityId });
@@ -47,6 +59,58 @@ export class TasksService {
         dueAt: { lt: new Date() },
         statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
       });
+    }
+
+    // --- grid column filters ------------------------------------------------
+
+    if (query.title) and.push({ title: { contains: query.title, mode: 'insensitive' } });
+    if (query.reference) {
+      and.push({ reference: { contains: query.reference, mode: 'insensitive' } });
+    }
+    if (query.priority) and.push({ priority: query.priority });
+    if (query.dueFrom) and.push({ dueAt: { gte: query.dueFrom } });
+    if (query.dueTo) and.push({ dueAt: { lte: query.dueTo } });
+
+    /*
+      Filtering by the client the task is about.
+
+      Two steps, because `entityType` + `entityId` is a loose pointer and not
+      a relation — there is nothing for the database to join on. The subjects
+      are matched first and their ids used to narrow the tasks.
+
+      An empty result is pushed as an impossible id rather than skipped: a
+      search that matches nobody must return nothing, not everything.
+    */
+    if (query.client) {
+      const needle = { contains: query.client, mode: 'insensitive' as const };
+      const [leads, customers] = await Promise.all([
+        this.prisma.lead.findMany({
+          where: {
+            deletedAt: null,
+            OR: [
+              { firstName: needle },
+              { lastName: needle },
+              { mobile: needle },
+              { reference: needle },
+            ],
+          },
+          select: { id: true },
+        }),
+        this.prisma.customer.findMany({
+          where: {
+            OR: [
+              { firstName: needle },
+              { lastName: needle },
+              { mobile: needle },
+              { reference: needle },
+            ],
+          },
+          select: { id: true },
+        }),
+      ]);
+
+      const subjectIds = [...leads, ...customers].map((row) => row.id);
+      and.push({ entityId: { in: subjectIds.length > 0 ? subjectIds : ['__none__'] } });
     }
 
     const where = { deletedAt: null, AND: and };
@@ -67,21 +131,36 @@ export class TasksService {
       this.prisma.task.count({ where }),
     ]);
 
-    // Who each task is about, fetched once for the page rather than per row. A
-    // rep triaging a list needs the client's name and number without opening
-    // anything — a row reading only "Follow up: collect document" says nothing
-    // about who to call.
-    const leadIds = rows
-      .filter((task) => task.entityType === 'LEAD' && task.entityId)
-      .map((task) => task.entityId as string);
+    /*
+      Who each task is about, fetched once for the page rather than per row. A
+      rep triaging a list needs the client's name and number without opening
+      anything — a row reading only "Follow up: collect document" says nothing
+      about who to call.
 
-    const leadById = new Map<
+      Customers as well as leads. A visit can be planned against either, and
+      completing one with a follow-up date copies the visit's entity onto the
+      task — so a customer visit produces a CUSTOMER task. Resolving leads
+      alone left those rows blank, which read as a task with no client at all;
+      eight of them were deleted from production as orphans before anyone
+      realised they were perfectly good customer follow-ups.
+    */
+    const idsOf = (type: 'LEAD' | 'CUSTOMER') => [
+      ...new Set(
+        rows
+          .filter((task) => task.entityType === type && task.entityId)
+          .map((task) => task.entityId as string),
+      ),
+    ];
+
+    const aboutById = new Map<
       string,
       { name: string; mobileMasked: string; reference: string; productInterest: string[] }
     >();
+
+    const leadIds = idsOf('LEAD');
     if (leadIds.length) {
       const leads = await this.prisma.lead.findMany({
-        where: { id: { in: [...new Set(leadIds)] } },
+        where: { id: { in: leadIds } },
         select: {
           id: true,
           reference: true,
@@ -92,13 +171,31 @@ export class TasksService {
         },
       });
       for (const lead of leads) {
-        leadById.set(lead.id, {
+        aboutById.set(lead.id, {
           name: [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim(),
           // Masked, as on every other list surface. The full number is on the
           // lead itself, one tap away, for whoever's scope allows it.
           mobileMasked: maskMobile(lead.mobile),
           reference: lead.reference,
           productInterest: lead.productInterest,
+        });
+      }
+    }
+
+    const customerIds = idsOf('CUSTOMER');
+    if (customerIds.length) {
+      const customers = await this.prisma.customer.findMany({
+        where: { id: { in: customerIds } },
+        select: { id: true, reference: true, firstName: true, lastName: true, mobile: true },
+      });
+      for (const customer of customers) {
+        aboutById.set(customer.id, {
+          name: [customer.firstName, customer.lastName].filter(Boolean).join(' ').trim(),
+          mobileMasked: maskMobile(customer.mobile),
+          reference: customer.reference,
+          // A customer holds products as accounts rather than as interest, so
+          // the chip row stays empty rather than guessing at one.
+          productInterest: [],
         });
       }
     }
@@ -121,12 +218,12 @@ export class TasksService {
         entityId: task.entityId,
         productInterest:
           task.entityType === 'LEAD' && task.entityId
-            ? (leadById.get(task.entityId)?.productInterest ?? [])
+            ? (aboutById.get(task.entityId)?.productInterest ?? [])
             : [],
-        // Null when the task hangs off something else, or off a lead the caller
-        // cannot see — the task list is already scoped, but a task can outlive
-        // a lead being reassigned out of scope.
-        about: task.entityId ? (leadById.get(task.entityId) ?? null) : null,
+        // Null when the task hangs off something else again, or off a record
+        // the caller cannot see — the task list is already scoped, but a task
+        // can outlive its lead being reassigned out of scope.
+        about: task.entityId ? (aboutById.get(task.entityId) ?? null) : null,
         assignee: task.assignee
           ? {
               id: task.assignee.id,
@@ -220,19 +317,28 @@ export class TasksService {
     // Both sides resolved to categories, so a custom status behaves like the
     // class it belongs to rather than like its name.
     const currentCategory = task.statusMaster?.category ?? 'OPEN';
-    const nextCategory = input.status
-      ? ((
-          await this.prisma.taskStatusMaster.findUnique({
-            where: { code: input.status },
-            select: { category: true, isActive: true },
-          })
-        )?.category ?? null)
+    const nextStatus = input.status
+      ? await this.prisma.taskStatusMaster.findUnique({
+          where: { code: input.status },
+          select: { category: true, isActive: true },
+        })
       : null;
+    const nextCategory = nextStatus?.category ?? null;
 
-    if (input.status && nextCategory === null) {
+    if (input.status && !nextStatus) {
       throw new BadRequestException({
         title: 'Unknown status',
         detail: 'That status does not exist.',
+      });
+    }
+
+    // `isActive` was being selected and then ignored, so a status an
+    // administrator had switched off could still be set on a task — and the
+    // task would then sit on a status the master screen no longer offers.
+    if (nextStatus && !nextStatus.isActive) {
+      throw new BadRequestException({
+        title: 'That status is switched off',
+        detail: 'Pick one of the statuses currently in use.',
       });
     }
 

@@ -139,17 +139,64 @@ export const updateTaskSchema = z.object({
   assigneeId: idSchema.optional(),
   dueAt: z.coerce.date().optional(),
   priority: z.enum(PRIORITIES).optional(),
-  status: z.enum(TASK_STATUSES).optional(),
+  /*
+    A status *code* from the task status master, not one of the four
+    categories.
+
+    It was `z.enum(TASK_STATUSES)` — the categories — which meant an
+    administrator could create a status in the master and then find that
+    nothing could ever be set to it: the schema rejected the code before the
+    service, which resolves codes against the master, ever saw it. The whole
+    master screen was inert as a result.
+
+    Validated against the master rather than here: this package cannot know
+    what an administrator has configured, and a second list would be a second
+    thing to keep in step.
+  */
+  status: z.string().trim().min(1).max(40).optional(),
   completionNote: z.string().trim().max(1000).optional(),
 });
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 
 export const taskQuerySchema = paginationQuerySchema.extend({
+  /*
+    A *category* here, deliberately unlike the update schema above.
+
+    Filtering is "show me everything that is done", whatever an administrator
+    named the statuses that mean done. Setting is "put it on this exact
+    status". Asking for a code here would make the Completed tab depend on
+    which codes happen to exist.
+  */
   status: z.enum(TASK_STATUSES).optional(),
   assigneeId: idSchema.optional(),
   entityType: z.enum(ENTITY_TYPES).optional(),
   entityId: idSchema.optional(),
   dueBefore: z.coerce.date().optional(),
   overdueOnly: z.coerce.boolean().optional(),
+
+  /*
+    Per-column filters for the task grid.
+
+    One parameter per column rather than a single search box, because that is
+    how the grid is actually used: a manager narrows to one person's overdue
+    calls on one product, and a single box cannot express that. They AND
+    together, so each one narrows what the last left.
+  */
+  /** Matches the task's own title. */
+  title: z.string().trim().max(160).optional(),
+  /** Matches the task reference, e.g. TK-2026-000014. */
+  reference: z.string().trim().max(24).optional(),
+  /**
+   * Matches the client the task is about — their name, their mobile, or
+   * their lead/customer reference.
+   *
+   * Resolved in two steps rather than joined: a task points at its subject
+   * through `entityType` + `entityId`, which is a loose pointer and not a
+   * relation, so there is nothing for the database to join on.
+   */
+  client: z.string().trim().max(120).optional(),
+  priority: z.enum(PRIORITIES).optional(),
+  dueFrom: z.coerce.date().optional(),
+  dueTo: z.coerce.date().optional(),
 });
 export type TaskQuery = z.infer<typeof taskQuerySchema>;
