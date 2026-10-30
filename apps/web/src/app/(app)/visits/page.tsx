@@ -1,10 +1,13 @@
 import Link from 'next/link';
+import type { Route } from 'next';
 import type { VisitListItem } from '@sihl-one/contracts';
 
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/shell/Icon';
 import { StatTile } from '@/components/ui/StatTile';
+import { ReviewVisitButton } from '@/components/visits/ReviewVisitButton';
+import { VisitSearch } from '@/components/visits/VisitSearch';
 import { apiFetch, toQuery } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatDateTime, formatRelative, humanise } from '@/lib/format';
@@ -15,7 +18,18 @@ interface TodayView {
   inProgress: VisitListItem | null;
   planned: VisitListItem[];
   completedToday: number;
+  /** Planned visits whose time has passed, across the whole book. */
+  overdue: number;
+  /** Everything still to do: planned plus in progress. */
+  openTotal: number;
 }
+
+/** The three slices of the book the buttons offer. */
+const VIEWS = [
+  { value: 'OPEN', label: 'Open items' },
+  { value: 'OVERDUE', label: 'Overdue' },
+  { value: 'COMPLETED_7D', label: 'Completed in last 7 days' },
+] as const;
 
 const STATUS_TONE: Record<string, 'blue' | 'amber' | 'green' | 'neutral' | 'red'> = {
   PLANNED: 'blue',
@@ -46,6 +60,9 @@ export default async function VisitsPage({
       `/visits${toQuery({
         status: params.status,
         needsReview: params.needsReview,
+        // Open by default: this screen is a worklist, not an archive.
+        view: params.view ?? 'OPEN',
+        q: params.q,
         pageSize: '25',
       })}`,
     ),
@@ -91,14 +108,68 @@ export default async function VisitsPage({
         </section>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <StatTile label="Planned today" value={today.planned.length} />
-        <StatTile label="Completed today" value={today.completedToday} />
+      {/*
+        Every tile is a filter.
+
+        They were counts you could read and not act on, so a rep who saw
+        "3 overdue" still had to go and find them. Each now links to the list
+        it is counting.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile label="Open items" value={today.openTotal} href="/visits?view=OPEN" />
+        <StatTile
+          label="Overdue"
+          value={today.overdue}
+          tone={today.overdue > 0 ? 'danger' : 'default'}
+          href="/visits?view=OVERDUE"
+        />
         <StatTile
           label="In progress"
           value={today.inProgress ? 1 : 0}
           tone={today.inProgress ? 'warning' : 'default'}
+          href="/visits?view=OPEN&status=CHECKED_IN"
         />
+        <StatTile
+          label="Completed today"
+          value={today.completedToday}
+          href="/visits?view=COMPLETED_7D"
+        />
+      </div>
+
+      {/* The same three slices as buttons, plus the search, so the list can be
+          narrowed without going back up to a tile. */}
+      <div className="card flex flex-wrap items-center gap-3 p-3">
+        <div className="flex flex-wrap gap-1">
+          {VIEWS.map((option) => {
+            const active = (params.view ?? 'OPEN') === option.value && !params.needsReview;
+            return (
+              <Link
+                key={option.value}
+                href={`/visits?view=${option.value}` as Route}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+                  active
+                    ? 'bg-teal-600 text-white'
+                    : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)]'
+                }`}
+              >
+                {option.label}
+              </Link>
+            );
+          })}
+          <Link
+            href={'/visits?needsReview=true' as Route}
+            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+              params.needsReview === 'true'
+                ? 'bg-amber-600 text-white'
+                : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)]'
+            }`}
+          >
+            Needs review
+          </Link>
+        </div>
+        <div className="flex-1 sm:text-right">
+          <VisitSearch />
+        </div>
       </div>
 
       <section>
@@ -148,13 +219,15 @@ export default async function VisitsPage({
 
       <section>
         <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="font-bold">Recent visits</h2>
-          <Link
-            href="/visits?needsReview=true"
-            className="text-xs font-semibold text-teal-600 hover:underline dark:text-teal-300"
-          >
-            Needs review
-          </Link>
+          <h2 className="font-bold">
+            {params.needsReview === 'true'
+              ? 'Needs review'
+              : (VIEWS.find((option) => option.value === (params.view ?? 'OPEN'))?.label ??
+                'Visits')}
+          </h2>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            {history.total} {history.total === 1 ? 'visit' : 'visits'}
+          </p>
         </div>
 
         {history.items.length === 0 ? (
@@ -163,19 +236,37 @@ export default async function VisitsPage({
           </div>
         ) : (
           <ul className="space-y-2">
-            {history.items.map((visit) => (
-              <li key={visit.id}>
-                <Link href={`/visits/${visit.id}`} className="card block p-4">
+            {history.items.map((visit, index) => (
+              <li key={visit.id} className="card p-4">
+                <Link href={`/visits/${visit.id}`} className="block">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold">{visit.entityName ?? 'Visit'}</p>
-                      <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
-                        {visit.reference}
-                        {visit.user ? ` · ${visit.user.fullName}` : ''}
-                      </p>
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      {/* Numbered, so a visit can be referred to by position
+                          in a conversation about the list. */}
+                      <span className="tnum mt-0.5 text-xs text-[var(--color-text-subtle)]">
+                        {index + 1}.
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{visit.entityName ?? 'Visit'}</p>
+                        <p className="mt-0.5 font-mono text-xs text-[var(--color-text-subtle)]">
+                          {visit.reference}
+                          {visit.user ? ` · ${visit.user.fullName}` : ''}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {visit.requiresReview ? <Badge tone="amber">Needs review</Badge> : null}
+                      {visit.requiresReview ? (
+                        visit.reviewedAt ? (
+                          // Still flagged — the geometry has not changed —
+                          // but somebody has accepted it, so it reads as
+                          // settled rather than outstanding.
+                          <Badge tone="neutral">
+                            Reviewed{visit.reviewedBy ? ` · ${visit.reviewedBy}` : ''}
+                          </Badge>
+                        ) : (
+                          <Badge tone="amber">Needs review</Badge>
+                        )
+                      ) : null}
                       <Badge tone={STATUS_TONE[visit.status] ?? 'neutral'}>
                         {humanise(visit.status)}
                       </Badge>
@@ -203,6 +294,35 @@ export default async function VisitsPage({
                     {visit.outcome ? <span>{visit.outcome}</span> : null}
                   </div>
                 </Link>
+
+                {/*
+                  Through to the client, outside the card's own link so the
+                  two do not nest. A visit always knows its subject, but the
+                  row offered no way to reach it — a rep reading "overdue"
+                  had to go and search for the lead by hand.
+                */}
+                {/* Outstanding reviews get the control that clears them. */}
+                {visit.requiresReview && !visit.reviewedAt ? (
+                  <div className="mt-2.5 border-t border-[var(--color-border)] pt-2.5">
+                    <ReviewVisitButton visitId={visit.id} />
+                  </div>
+                ) : null}
+
+                {visit.entityId &&
+                (visit.entityType === 'LEAD' || visit.entityType === 'CUSTOMER') ? (
+                  <div className="mt-2.5 border-t border-[var(--color-border)] pt-2.5">
+                    <Link
+                      href={
+                        (visit.entityType === 'LEAD'
+                          ? `/leads/${visit.entityId}`
+                          : `/customers/${visit.entityId}`) as Route
+                      }
+                      className="btn btn-outline h-8 text-xs"
+                    >
+                      {visit.entityType === 'LEAD' ? 'Open lead' : 'Open customer'}
+                    </Link>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
