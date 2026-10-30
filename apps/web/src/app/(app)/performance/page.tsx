@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import type { Route } from 'next';
 import type {
   PerformancePeriodKind,
   PerformanceReport,
@@ -8,6 +10,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmailReportDialog } from '@/components/performance/EmailReportDialog';
 import { PerformanceFilters } from '@/components/performance/PerformanceFilters';
 import { apiFetch } from '@/lib/api';
+import { asEmailBody, asEmailSubject } from '@/lib/performance-email';
 import { requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 
@@ -32,14 +35,17 @@ function Stat({
   value,
   note,
   tone,
+  href,
 }: {
   label: string;
   value: string;
   note?: string;
   tone?: 'warn';
+  /** Where the number opens. Omitted for figures with nothing behind them. */
+  href?: Route;
 }) {
-  return (
-    <div className="card p-4">
+  const body = (
+    <>
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
         {label}
       </p>
@@ -51,48 +57,67 @@ function Stat({
         {value}
       </p>
       {note ? <p className="mt-0.5 text-xs text-[var(--color-text-subtle)]">{note}</p> : null}
-    </div>
+    </>
+  );
+
+  // A tile with nothing behind it stays a plain card rather than becoming a
+  // link that goes nowhere — a dead control is worse than none.
+  if (!href) return <div className="card p-4">{body}</div>;
+
+  return (
+    <Link
+      href={href}
+      className="card block p-4 transition-colors hover:bg-[var(--color-surface-muted)]"
+    >
+      {body}
+    </Link>
   );
 }
 
 /**
- * The report as plain text, for the email body.
+ * A number in the table that opens the leads behind it.
  *
- * Built on the server from the same object the page renders, so the message
- * cannot drift from the screen it was sent off. Plain text rather than a
- * rendered table: it has to survive a phone mail client and a forward, and a
- * report nobody can read on a phone is one nobody reads.
+ * Zero is deliberately not a link: an empty list reached by clicking a zero
+ * tells the reader nothing they did not already know, and makes every row
+ * look clickable when most of it is not.
  */
-function asEmailBody(report: PerformanceReport): string {
-  const lines: string[] = [
-    `${report.scopeLabel} — ${report.period.label}`,
-    '',
-    ...report.summary,
-    '',
-    'Totals',
-    `  Leads            ${report.totals.totalLeads}`,
-    `  Open             ${report.totals.openLeads}`,
-    `  Converted        ${report.totals.converted}`,
-    `  Lost             ${report.totals.lost}`,
-    `  Conversion       ${report.totals.conversionRate ?? 0}%`,
-    `  Never contacted  ${report.totals.unattendedEver}`,
-    `  No contact 2d+   ${report.totals.unattendedTwoDays}`,
-    `  Holding nothing  ${report.totals.resourcesWithoutLeads} of ${report.totals.resourceCount}`,
-    '',
-    'By person',
-  ];
+function Drill({ value, href }: { value: number; href: Route }) {
+  if (value === 0) return <span className="text-[var(--color-text-subtle)]">0</span>;
+  return (
+    <Link href={href} className="font-semibold hover:underline">
+      {formatNumber(value)}
+    </Link>
+  );
+}
 
-  for (const row of report.rows) {
-    lines.push(
-      `  ${row.fullName}${row.employeeCode ? ` (${row.employeeCode})` : ''} — ` +
-        `${row.totalLeads} leads, ${row.converted} converted, ${row.conversionRate ?? 0}%` +
-        `${row.unattendedEver > 0 ? `, ${row.unattendedEver} never contacted` : ''}` +
-        `${row.overallScore !== null ? `, score ${row.overallScore}` : ''}`,
-    );
+/**
+ * A link from a number to the leads behind it.
+ *
+ * Every figure on this page is a count of leads, and until now none could be
+ * opened — a manager reading "7 never contacted" had to rebuild that filter
+ * by hand in the leads list. The drill-down applies the same filter the
+ * number was computed from, so the list cannot disagree with the figure that
+ * led to it.
+ *
+ * `ownerId` is left out for the totals row, which spans everybody in scope.
+ */
+function drillHref(filters: Record<string, string | undefined>): Route {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.append(key, value);
   }
+  const query = params.toString();
+  return (query ? `/leads?${query}` : '/leads') as Route;
+}
 
-  lines.push('', 'Generated from SIHL ONE.');
-  return lines.join('\n');
+/** Open statuses, as repeated query parameters. */
+const OPEN_STATUSES = ['NEW', 'CONTACTED', 'QUALIFIED', 'PROPOSAL'];
+
+function openHref(ownerId?: string): Route {
+  const params = new URLSearchParams();
+  if (ownerId) params.set('ownerId', ownerId);
+  for (const status of OPEN_STATUSES) params.append('status', status);
+  return `/leads?${params.toString()}` as Route;
 }
 
 export default async function PerformancePage({
@@ -129,7 +154,7 @@ export default async function PerformancePage({
   ]);
 
   const emailBody = asEmailBody(report);
-  const subject = `Performance — ${report.scopeLabel}, ${report.period.label}`;
+  const subject = asEmailSubject(report);
 
   return (
     <div className="space-y-5">
@@ -142,6 +167,11 @@ export default async function PerformancePage({
             {report.totals.resourceCount === 1 ? 'person' : 'people'}
           </p>
         </div>
+        {/* The daily round, for whoever sends it. One email per vertical head,
+            each previewed on its own rather than fired as a batch. */}
+        <Link href="/performance/verticals" className="btn btn-outline">
+          Vertical head reports
+        </Link>
       </header>
 
       <PerformanceFilters
@@ -171,8 +201,12 @@ export default async function PerformancePage({
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Total leads" value={formatNumber(report.totals.totalLeads)} />
-        <Stat label="Open" value={formatNumber(report.totals.openLeads)} />
+        <Stat
+          label="Total leads"
+          value={formatNumber(report.totals.totalLeads)}
+          href={drillHref({})}
+        />
+        <Stat label="Open" value={formatNumber(report.totals.openLeads)} href={openHref()} />
         <Stat
           label="Conversion"
           value={`${report.totals.conversionRate ?? 0}%`}
@@ -182,16 +216,22 @@ export default async function PerformancePage({
               : undefined
           }
         />
-        <Stat label="Converted" value={formatNumber(report.totals.converted)} />
+        <Stat
+          label="Converted"
+          value={formatNumber(report.totals.converted)}
+          href={drillHref({ status: 'CONVERTED' })}
+        />
         <Stat
           label="Never contacted"
           value={formatNumber(report.totals.unattendedEver)}
+          href={drillHref({ contact: 'never' })}
           note="No interaction since the lead was created"
           tone="warn"
         />
         <Stat
           label="No contact 2 days+"
           value={formatNumber(report.totals.unattendedTwoDays)}
+          href={drillHref({ contact: 'stale' })}
           note="Slipping, not yet lost"
           tone="warn"
         />
@@ -217,6 +257,7 @@ export default async function PerformancePage({
             <thead>
               <tr className="border-b border-[var(--color-border)]">
                 {[
+                  '#',
                   'Person',
                   'Leads',
                   'Open',
@@ -237,20 +278,32 @@ export default async function PerformancePage({
               </tr>
             </thead>
             <tbody>
-              {report.rows.map((row) => (
+              {report.rows.map((row, index) => (
                 <tr
                   key={row.userId}
                   className="border-b border-[var(--color-border)] last:border-0"
                 >
+                  <td className="tnum px-3 py-2.5 align-top text-xs text-[var(--color-text-subtle)]">
+                    {index + 1}
+                  </td>
                   <td className="px-3 py-2.5 align-top">
                     <span className="font-semibold">{row.fullName}</span>
                     <span className="block text-xs text-[var(--color-text-subtle)]">
                       {[row.employeeCode, row.designation, row.branch].filter(Boolean).join(' · ')}
                     </span>
                   </td>
-                  <td className="px-3 py-2.5 align-top tnum">{formatNumber(row.totalLeads)}</td>
-                  <td className="px-3 py-2.5 align-top tnum">{formatNumber(row.openLeads)}</td>
-                  <td className="px-3 py-2.5 align-top tnum">{formatNumber(row.converted)}</td>
+                  <td className="px-3 py-2.5 align-top tnum">
+                    <Drill value={row.totalLeads} href={drillHref({ ownerId: row.userId })} />
+                  </td>
+                  <td className="px-3 py-2.5 align-top tnum">
+                    <Drill value={row.openLeads} href={openHref(row.userId)} />
+                  </td>
+                  <td className="px-3 py-2.5 align-top tnum">
+                    <Drill
+                      value={row.converted}
+                      href={drillHref({ ownerId: row.userId, status: 'CONVERTED' })}
+                    />
+                  </td>
                   <td className="px-3 py-2.5 align-top tnum">
                     {row.conversionRate === null ? '—' : `${row.conversionRate}%`}
                   </td>
@@ -259,10 +312,16 @@ export default async function PerformancePage({
                       row.unattendedEver > 0 ? 'font-semibold text-[var(--color-warn-strong)]' : ''
                     }`}
                   >
-                    {formatNumber(row.unattendedEver)}
+                    <Drill
+                      value={row.unattendedEver}
+                      href={drillHref({ ownerId: row.userId, contact: 'never' })}
+                    />
                   </td>
                   <td className="px-3 py-2.5 align-top tnum">
-                    {formatNumber(row.unattendedTwoDays)}
+                    <Drill
+                      value={row.unattendedTwoDays}
+                      href={drillHref({ ownerId: row.userId, contact: 'stale' })}
+                    />
                   </td>
                   <td className="px-3 py-2.5 align-top">
                     {/* No score rather than a low one where there is too

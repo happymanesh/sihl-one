@@ -185,7 +185,6 @@ export class PerformanceService {
     const openLeads = leads.filter(
       (lead) => !['CONVERTED', 'LOST', 'DISQUALIFIED'].includes(lead.status),
     );
-    const lostLeads = leads.filter((lead) => lead.status === 'LOST');
 
     // First human interaction per lead. System-generated rows are excluded —
     // a status change is not a response to a customer.
@@ -222,6 +221,25 @@ export class PerformanceService {
         ? responseHours[Math.floor(responseHours.length / 2)]!
         : null;
 
+    /*
+      Lost reasons, counted per product rather than per lead.
+
+      The lead's own `lostReason` is a roll-up that always resolves to
+      something — it falls back to OTHER rather than let a lead fail to
+      close — so measured there every rep scored 100% and the metric was five
+      free points. `LeadProduct.lostReason` is genuinely nullable, so it
+      measures whether anybody actually wrote down why.
+    */
+    const lostProducts = await this.prisma.leadProduct.findMany({
+      where: { leadId: { in: leadIds.length ? leadIds : ['none'] }, status: 'LOST' },
+      select: { lostReason: true },
+    });
+    const lostProductCoverage =
+      lostProducts.length === 0
+        ? 1
+        : lostProducts.filter((row) => row.lostReason !== null && row.lostReason !== '').length /
+          lostProducts.length;
+
     const now = new Date();
     const behaviour: BehaviourInputs = {
       medianFirstResponseHours,
@@ -235,10 +253,16 @@ export class PerformanceService {
           : openLeads.filter((lead) => lead.nextFollowUpAt && lead.nextFollowUpAt < now).length /
             openLeads.length,
       activitiesPerLead: leads.length === 0 ? 0 : firstContacts.length / leads.length,
-      lostReasonCoverage:
-        lostLeads.length === 0
-          ? 1
-          : lostLeads.filter((lead) => lead.lostReason !== null).length / lostLeads.length,
+      /*
+        Leads ever spoken to, over leads held.
+
+        `firstByLead` is already the deduplicated set — one entry per lead
+        with any human interaction against it — so this needs no further
+        query. A lead contacted and later disqualified still counts: the rep
+        did the work.
+      */
+      contactCoverage: leads.length === 0 ? 1 : firstByLead.size / leads.length,
+      lostReasonCoverage: lostProductCoverage,
     };
 
     const achieved = await this.prisma.lead.aggregate({
