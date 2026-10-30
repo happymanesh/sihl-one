@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  SLIPPING_DAYS,
   computeRating,
   rate,
   verticalHeadOf,
@@ -20,7 +21,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { istDayKey } from '../../common/ist-day';
 
 /** No interaction in this many days is "slipping". Asked for explicitly. */
-const SLIPPING_DAYS = 2;
 
 /**
  * Below this many leads a rating is noise, so none is published.
@@ -197,15 +197,36 @@ export class PerformanceReportService {
       status: 'ACTIVE',
     };
 
-    // Never wider than what the caller may already see. A manager asking for a
-    // branch they do not cover gets their own slice of it, not a refusal —
-    // the scope is the answer, not an error.
-    const reach =
-      user.dataScope === 'ALL'
-        ? {}
-        : user.orgUnitPath
-          ? { orgUnit: { path: { startsWith: user.orgUnitPath } } }
-          : { id: user.id };
+    /*
+      Never wider than what the caller may already see. A manager asking for a
+      branch they do not cover gets their own slice of it, not a refusal — the
+      scope is the answer, not an error.
+
+      Driven by `dataScope`, not by whether the person happens to have an org
+      unit. The earlier version fell back to the org subtree whenever
+      `orgUnitPath` was set, which it is for everybody — so a Sales Executive
+      on SELF scope saw every colleague in their branch, by name and score,
+      and the `{ id: user.id }` branch only ever fired for somebody filed
+      nowhere at all.
+    */
+    const reach = ((): Record<string, unknown> => {
+      switch (user.dataScope) {
+        case 'ALL':
+          return {};
+        case 'SELF':
+          return { id: user.id };
+        case 'TEAM':
+          // Their own reports, and themselves. `teamUserIds` is the reporting
+          // line the principal already carries for every other scoped query.
+          return { id: { in: [user.id, ...user.teamUserIds] } };
+        default:
+          // ZONE, REGION and BRANCH are all "my subtree", which is exactly
+          // what the materialised path expresses.
+          return user.orgUnitPath
+            ? { orgUnit: { path: { startsWith: user.orgUnitPath } } }
+            : { id: user.id };
+      }
+    })();
 
     if (query.scope === 'TEAM') {
       if (query.userId) {
@@ -339,6 +360,60 @@ export class PerformanceReportService {
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }
 
+  /**
+   * One report per vertical head, for the daily round of emails.
+   *
+   * The same report the screen builds for a single vertical, run across every
+   * head who owns one. Built here rather than by the browser firing N requests
+   * so that every report in the batch shares one anchor date — a set of emails
+   * where some say Tuesday and some say Wednesday, because the clock rolled
+   * over mid-loop, is the kind of thing nobody notices until a head queries a
+   * number.
+   *
+   * Sequential rather than parallel: each report is several wide queries over
+   * the lead table, and ten at once is how a report screen takes the database
+   * down at nine in the morning. A handful of verticals makes this quick
+   * enough.
+   *
+   * Sends nothing. It returns what would be sent, because mailing a judgement
+   * of people's work to those people is not something to discover you have
+   * done — the preview is the moment to notice a vertical is wrong.
+   */
+  async reportPerVertical(
+    user: AuthenticatedPrincipal,
+    query: PerformanceReportQuery,
+  ): Promise<
+    Array<{
+      head: { id: string; fullName: string; email: string };
+      report: PerformanceReport;
+    }>
+  > {
+    const heads = await this.verticals();
+
+    // One anchor for the whole batch, so every email agrees on "as on".
+    const date = query.date ?? istDayKey(new Date());
+
+    const out: Array<{
+      head: { id: string; fullName: string; email: string };
+      report: PerformanceReport;
+    }> = [];
+
+    for (const head of heads) {
+      const report = await this.report(user, {
+        ...query,
+        scope: 'VERTICAL',
+        verticalHeadId: head.id,
+        date,
+      });
+      out.push({
+        head: { id: head.id, fullName: head.fullName, email: head.email },
+        report,
+      });
+    }
+
+    return out;
+  }
+
   async report(
     user: AuthenticatedPrincipal,
     query: PerformanceReportQuery,
@@ -459,6 +534,28 @@ export class PerformanceReportService {
                   mine.filter((l) => l.lastActivityAt).length,
                   openRows.length,
                 ),
+                /*
+                  Leads ever spoken to, over leads held.
+
+                  Approximated here from `lastActivityAt` rather than from
+                  the activity table: this report covers a whole vertical in
+                  one pass, and a per-lead interaction query across several
+                  hundred people is the thing that turns a report into a
+                  table scan. A lead with any activity has been touched,
+                  which is the question being asked.
+                */
+                contactCoverage: share(mine.filter((l) => l.lastActivityAt).length, mine.length),
+                /*
+                  Lost reasons per lead here, not per product.
+
+                  The single-person scorecard counts lost *products*, which
+                  is the truer measure. This report does not load products —
+                  deliberately, for the same cost reason — so it uses the
+                  lead roll-up and will read slightly higher. It carries five
+                  per cent of the behaviour score, and loading every
+                  product for every person in a vertical to sharpen it is a
+                  poor trade.
+                */
                 lostReasonCoverage: share(
                   lostRows.filter((l) => l.lostReason).length,
                   lostRows.length,
