@@ -59,13 +59,16 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Daily activity', href: '/reports/daily' as Route, icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
 
   {
-    // The partner's own portal. Gated on the partner analytics permission,
-    // which only the PARTNER role holds — staff see the Partners directory
-    // below instead.
+    // The partner's own portal, and super admin's window onto it.
+    //
+    // Gated on `partner:portal` rather than the partner analytics grant,
+    // which Management also holds: they saw this entry and the page bounced
+    // them straight back to the Dashboard, which is why it looked like a
+    // duplicate of it.
     label: 'My business',
     href: '/partner',
     icon: 'handshake',
-    permissions: ['analytics:partner:read'],
+    permissions: ['partner:portal'],
     section: 'work',
   },
   // Below My business, on the business's instruction. It is reference

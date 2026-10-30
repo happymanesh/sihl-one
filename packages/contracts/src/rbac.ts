@@ -120,6 +120,19 @@ export const PERMISSIONS = [
     anybody who knew the URL.
   */
   'messaging:manage',
+  /*
+    Seeing the partner portal.
+
+    Split from `analytics:partner:read`, which Management also holds — so
+    Management saw a "My business" menu entry that could only ever bounce
+    them to the Dashboard, because the page requires the PARTNER role. The
+    menu said one thing and the page another.
+
+    Granted to PARTNER, whose portal it is, and to super admin through
+    ALL_PERMISSIONS, who uses it to see what a given partner sees. Nobody
+    else.
+  */
+  'partner:portal',
 
   // Training & Test
   //
@@ -309,6 +322,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'activity:create',
     'partner:payout:read',
     'analytics:partner:read',
+    'partner:portal',
   ],
 
   CUSTOMER: ['customer:read', 'activity:read', 'task:read'],
