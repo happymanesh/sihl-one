@@ -1,13 +1,15 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { PRIORITIES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
 import { DuplicateMobileNotice } from '@/components/leads/DuplicateMobileNotice';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 import { LeadProfileFields } from '@/components/leads/LeadProfileFields';
+import { LEAD_ENTITY_TYPES, LEAD_ENTITY_TYPE_LABELS } from '@sihl-one/contracts';
 import { createLead, type ActionState } from '@/app/actions/leads';
+import { useSelectResync } from '@/lib/use-select-resync';
 import { humanise } from '@/lib/format';
 
 const INITIAL: ActionState = { status: 'idle' };
@@ -119,6 +121,7 @@ export function NewLeadForm({
     the wrong input.
   */
   const [values, setValues] = useState({
+    entityType: 'INDIVIDUAL',
     firstName: '',
     lastName: '',
     mobile: '',
@@ -139,8 +142,23 @@ export function NewLeadForm({
     onChange: (event: { target: { value: string } }) => set(field)(event.target.value),
   });
 
+  /*
+    The three selects, put back after the action returns.
+
+    The controlled-value fix above covers the text inputs but not these: a
+    select reset to its first option looks unchanged to React, so it is never
+    patched back, and the field would read "Inbound call" while the state
+    still held whatever was actually picked.
+  */
+  const form = useRef<HTMLFormElement>(null);
+  useSelectResync(form, {
+    source: values.source,
+    priority: values.priority,
+    ownerId: values.ownerId,
+  });
+
   return (
-    <form action={action} className="space-y-5" noValidate>
+    <form ref={form} action={action} className="space-y-5" noValidate>
       {state.status === 'error' && state.message ? (
         <div
           className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2.5 text-sm text-danger-600 dark:bg-danger-500/15"
@@ -152,6 +170,32 @@ export function NewLeadForm({
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-bold">Who is it?</legend>
+
+        {/*
+          First, because it changes what the rest of the form means — an HUF
+          is a different legal entity from its karta, with its own PAN and its
+          own account, and frequently the same mobile number. It is also what
+          decides whether a duplicate on that number is a real duplicate.
+        */}
+        <div>
+          <label className="label" htmlFor="entityType">
+            Account type <span className="text-danger-500">*</span>
+          </label>
+          <select
+            id="entityType"
+            name="entityType"
+            className="input sm:max-w-xs"
+            aria-invalid={Boolean(state.errors?.entityType)}
+            {...bind('entityType')}
+          >
+            {LEAD_ENTITY_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {LEAD_ENTITY_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </select>
+          <FieldError errors={state.errors?.entityType} />
+        </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
