@@ -23,7 +23,7 @@ export class MessagingController {
   constructor(private readonly messaging: MessagingService) {}
 
   @Get('templates')
-  @RequirePermissions('campaign:read')
+  @RequirePermissions('messaging:manage')
   @ApiOperation({ summary: 'Message templates' })
   @ApiZodQuery(templateQuerySchema)
   listTemplates(@ZodQuery(templateQuerySchema) query: TemplateQuery) {
@@ -31,7 +31,7 @@ export class MessagingController {
   }
 
   @Post('templates')
-  @RequirePermissions('campaign:create')
+  @RequirePermissions('messaging:manage')
   @ApiOperation({
     summary: 'Create a template',
     description:
@@ -47,7 +47,7 @@ export class MessagingController {
   }
 
   @Patch('templates/:id')
-  @RequirePermissions('campaign:update')
+  @RequirePermissions('messaging:manage')
   @ApiParam({ name: 'id' })
   @ApiOperation({ summary: 'Edit the copy, or switch a template off' })
   @ApiZodBody(updateTemplateSchema)
@@ -60,7 +60,7 @@ export class MessagingController {
   }
 
   @Post('send')
-  @RequirePermissions('activity:create')
+  @RequirePermissions('messaging:manage')
   @ApiOperation({
     summary: 'Send a templated message to a lead or a customer',
     description:
@@ -76,7 +76,7 @@ export class MessagingController {
   }
 
   @Get('log')
-  @RequirePermissions('campaign:read')
+  @RequirePermissions('messaging:manage')
   @ApiOperation({ summary: 'Recent outbound messages, including suppressed ones' })
   log(@Query('limit') limit?: string) {
     return this.messaging.listLog(Math.min(Number(limit) || 50, 200));

@@ -40,6 +40,8 @@ import { OrgUnitsModule } from './modules/org-units/org-units.module';
 import { ImportsModule } from './modules/imports/imports.module';
 import { OffboardingModule } from './modules/offboarding/offboarding.module';
 import { PerformanceModule } from './modules/performance/performance.module';
+import { TrainingModule } from './modules/training/training.module';
+import { QuestionsModule } from './modules/questions/questions.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { MailModule } from './modules/mail/mail.module';
 
@@ -82,6 +84,8 @@ import { MailModule } from './modules/mail/mail.module';
     ImportsModule,
     OffboardingModule,
     PerformanceModule,
+    TrainingModule,
+    QuestionsModule,
     ReportsModule,
     MailModule,
     NotificationsModule,

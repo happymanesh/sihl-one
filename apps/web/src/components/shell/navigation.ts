@@ -15,7 +15,7 @@ export interface NavItem {
    * that 404s. A dead menu item is worse than an absent one.
    */
   available?: boolean;
-  section: 'work' | 'grow' | 'admin';
+  section: 'work' | 'grow' | 'learn' | 'admin';
 }
 
 /**
@@ -42,7 +42,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Pipeline', href: '/pipeline', icon: 'columns', permissions: ['lead:read'], section: 'work' },
   { label: 'Duplicates', href: '/leads/duplicates', icon: 'search', permissions: ['lead:update'], section: 'work' },
   { label: 'Customers', href: '/customers', icon: 'users', permissions: ['customer:read'], section: 'work' },
-  { label: 'Products', href: '/products', icon: 'grid', permissions: ['lead:read'], section: 'work' },
   { label: 'Tasks', href: '/tasks', icon: 'check', permissions: ['task:read'], section: 'work' },
   // Directly under Tasks, and in Work rather than Grow: a field visit is a
   // rep's daily work alongside their task list, not a growth activity like a
@@ -69,8 +68,13 @@ export const NAV_ITEMS: NavItem[] = [
     permissions: ['analytics:partner:read'],
     section: 'work',
   },
+  // Below My business, on the business's instruction. It is reference
+  // material rather than a worklist — what a rep opens to check a charge
+  // or an eligibility rule mid-call — so it reads better at the end of
+  // Work than above the screens they live in all day.
+  { label: 'Products', href: '/products', icon: 'grid', permissions: ['lead:read'], section: 'work' },
   { label: 'Campaigns', href: '/campaigns', icon: 'megaphone', permissions: ['campaign:read'], section: 'grow' },
-  { label: 'Messaging', href: '/messaging', icon: 'bell', permissions: ['campaign:read'], section: 'grow' },
+  { label: 'Messaging', href: '/messaging', icon: 'bell', permissions: ['messaging:manage'], section: 'grow' },
   /*
     No permission listed, deliberately.
 
@@ -84,6 +88,26 @@ export const NAV_ITEMS: NavItem[] = [
 
   { label: 'Users', href: '/admin/users' as Route, icon: 'shield', permissions: ['user:read'], section: 'admin' },
   { label: 'Branches & regions', href: '/admin/org-units', icon: 'columns', permissions: ['system:configure'], section: 'admin' },
+  /*
+    Its own section rather than loose in Grow.
+
+    Training and Test are independent of each other — a branch runs training
+    nobody is examined on, and sets exams on material nobody was trained for —
+    but they are one thing to the person looking for them, and Grow is about
+    winning business rather than developing staff.
+
+    Training has no permission: a session is announced to the branches it is
+    for, and hiding it from the people expected to attend would defeat it.
+    Scheduling is gated by `training:manage` on the API.
+  */
+  { label: 'Training', href: '/training', icon: 'users', section: 'learn' },
+  /*
+    The bank is gated where training is not, and for the opposite reason: a
+    question carries its own answer, so an open bank is an open answer key.
+  */
+  { label: 'Question bank', href: '/test/questions', icon: 'file', permissions: ['test:manage'], section: 'learn' },
+  { label: 'Test', href: '/test', icon: 'check', section: 'learn' },
+
   { label: 'Sources & products', href: '/admin/masters', icon: 'grid', permissions: ['system:configure'], section: 'admin' },
   { label: 'Audit trail', href: '/admin/audit', icon: 'file', permissions: ['audit:read'], section: 'admin' },
 ];
@@ -91,6 +115,7 @@ export const NAV_ITEMS: NavItem[] = [
 export const SECTION_LABELS: Record<NavItem['section'], string> = {
   work: 'Work',
   grow: 'Grow',
+  learn: 'Training & Test',
   admin: 'Administration',
 };
 
