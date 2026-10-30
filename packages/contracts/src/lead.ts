@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { leadProfileSchema } from './lead-profile';
 import {
+  LEAD_ENTITY_TYPES,
   LEAD_LOST_REASONS,
   LEAD_STATUSES,
   PRIORITIES,
@@ -53,6 +54,12 @@ export const leadCaptureSchema = z.object({
 export type LeadCaptureInput = z.infer<typeof leadCaptureSchema>;
 
 export const createLeadSchema = z.object({
+  /*
+    Defaults to INDIVIDUAL so nothing that already posts a lead has to change
+    — the import, the public capture form, the event QR. A rep opening an HUF
+    picks it on the form; everything else carries on meaning what it meant.
+  */
+  entityType: z.enum(LEAD_ENTITY_TYPES).default('INDIVIDUAL'),
   firstName: z.string().trim().min(1).max(60),
   lastName: z.string().trim().max(60).optional(),
   mobile: indianMobileSchema,
@@ -354,6 +361,18 @@ export const leadQuerySchema = paginationQuerySchema.extend({
   returningAtEventId: idSchema.optional(),
   /** `true` restricts to leads whose follow-up date has passed. */
   overdueOnly: z.coerce.boolean().optional(),
+  /*
+    How long since anybody spoke to the lead.
+
+    `never` is no logged interaction at all; `stale` is none within the
+    slipping window. Both read `lastActivityAt`, the same field the
+    performance report counts, so a number on that screen and the list it
+    drills into cannot disagree.
+
+    Separate from `overdueOnly`, which asks whether a *promised* follow-up
+    date has passed. A lead nobody ever rang has no promise to break.
+  */
+  contact: z.enum(['never', 'stale']).optional(),
   createdFrom: z.coerce.date().optional(),
   createdTo: z.coerce.date().optional(),
   minScore: z.coerce.number().int().min(0).max(100).optional(),

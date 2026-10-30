@@ -86,6 +86,31 @@ export const LEAD_LOST_REASONS = [
 ] as const;
 export type LeadLostReason = (typeof LEAD_LOST_REASONS)[number];
 
+/**
+ * What kind of entity the lead is.
+ *
+ * A broking account is opened in the name of a legal entity, and an HUF is a
+ * different entity from the individual who is its karta — different PAN,
+ * different account, frequently the same mobile number. Without this the
+ * duplicate check saw one person and refused the second account outright,
+ * with no way round it while the first lead was still open.
+ *
+ * Deliberately a closed list rather than a master: these are defined in law,
+ * not by SIHL, and an administrator inventing a sixth would be inventing a
+ * kind of account that cannot be opened. Partnership and sole proprietor are
+ * not here because they were not asked for; adding either is a migration.
+ */
+export const LEAD_ENTITY_TYPES = ['INDIVIDUAL', 'HUF', 'CORPORATE', 'NRI', 'TRUST'] as const;
+export type LeadEntityType = (typeof LEAD_ENTITY_TYPES)[number];
+
+export const LEAD_ENTITY_TYPE_LABELS: Record<LeadEntityType, string> = {
+  INDIVIDUAL: 'Individual',
+  HUF: 'HUF',
+  CORPORATE: 'Corporate',
+  NRI: 'NRI',
+  TRUST: 'Trust',
+};
+
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 export type Priority = (typeof PRIORITIES)[number];
 

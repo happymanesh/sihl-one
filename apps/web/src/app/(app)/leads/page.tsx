@@ -8,6 +8,7 @@ import { Icon } from '@/components/shell/Icon';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { LeadSelectionProvider } from '@/components/leads/LeadSelection';
 import { LeadTable } from '@/components/leads/LeadTable';
+import { BackLink } from '@/components/ui/BackLink';
 import { Pagination } from '@/components/ui/Pagination';
 import type { LeadOwnerFilterOptions, LeadSourceItem, ProductItem } from '@sihl-one/contracts';
 import { apiFetch, toQuery } from '@/lib/api';
@@ -45,6 +46,15 @@ export default async function LeadsPage({
   const user = await requireUser();
   const params = await searchParams;
 
+  /*
+    Whether this list was reached by clicking a number elsewhere.
+
+    `ownerId` and `contact` are not offered by the filter bar on this page —
+    they only arrive from a drill-down — so their presence is a reliable
+    signal without threading a flag through the URL.
+  */
+  const isDrillDown = Boolean(params.ownerId || params.contact);
+
   const first = (key: string): string | undefined => {
     const value = params[key];
     return Array.isArray(value) ? value[0] : value;
@@ -81,6 +91,10 @@ export default async function LeadsPage({
     campaignId: first('campaignId'),
     partnerId: first('partnerId'),
     overdueOnly: first('overdueOnly'),
+    // The performance drill-downs: "never contacted" and "no contact 2d+".
+    // Exactly the case the note above describes — without this the reader
+    // clicks 54 and lands on all 60.
+    contact: first('contact'),
     minScore: first('minScore'),
     sortBy: first('sortBy') ?? 'createdAt',
     sortDir: first('sortDir') ?? 'desc',
@@ -194,6 +208,16 @@ export default async function LeadsPage({
       <div className="space-y-4">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
+            {/*
+              Back, but only when the list was reached as a drill-down.
+
+              Opened from the menu this is a top-level screen with nothing to
+              go back to, so the control would be noise. Arriving from a
+              number on Performance, it is the way back to the figure that
+              raised the question — and the only thing that preserves the
+              scope and period that number was computed under.
+            */}
+            {isDrillDown ? <BackLink fallback="/performance" label="Back to report" /> : null}
             <h1 className="text-2xl font-bold">Leads</h1>
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
               {formatNumber(data.total)} {data.total === 1 ? 'lead' : 'leads'} in your scope

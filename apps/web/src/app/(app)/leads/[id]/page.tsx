@@ -25,6 +25,7 @@ import { MissingProductsPrompt } from '@/components/leads/MissingProductsPrompt'
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
 import { apiFetch } from '@/lib/api';
+import { BackLink } from '@/components/ui/BackLink';
 import { can, requireUser } from '@/lib/auth';
 import { formatCurrency, formatDate, formatDateTime, formatRelative, humanise } from '@/lib/format';
 
@@ -194,15 +195,25 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-5">
-      <nav className="text-xs text-[var(--color-text-muted)]">
-        <Link href="/leads" className="hover:underline">
-          Leads
-        </Link>
-        <span className="mx-1.5" aria-hidden>
-          /
-        </span>
-        <span className="font-mono">{lead.reference}</span>
-      </nav>
+      {/*
+        Back and the breadcrumb together, because they answer different
+        questions. The breadcrumb says where this record lives; Back says
+        where the reader was. A lead is opened from Tasks, Pipeline, Visits,
+        Duplicates and search, and sending all of them to the full leads list
+        loses both their place and their filters.
+      */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <BackLink fallback="/leads" />
+        <nav className="text-xs text-[var(--color-text-muted)]">
+          <Link href="/leads" className="hover:underline">
+            Leads
+          </Link>
+          <span className="mx-1.5" aria-hidden>
+            /
+          </span>
+          <span className="font-mono">{lead.reference}</span>
+        </nav>
+      </div>
 
       <header className="card p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -476,7 +487,21 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 value={lead.lastActivityAt ? formatRelative(lead.lastActivityAt) : 'Never'}
               />
               <Detail label="Created" value={formatDate(lead.createdAt)} />
-              {lead.lostReason ? (
+              {/*
+                Only when the lead carries no products.
+
+                With products, this field is a roll-up of the most recently
+                lost one, so it repeats what the Products panel already shows
+                per product — which is what the business reported as a
+                leftover from the days of one status per lead.
+
+                It is not removed outright, because a lead with no products
+                has nowhere else to record why it was lost, and the database
+                refuses a LOST lead without a reason
+                (`lead_lost_requires_reason`). Same condition as the capture
+                in LeadActions, so the two always agree.
+              */}
+              {lead.lostReason && productOutcomes.length === 0 ? (
                 <Detail label="Lost reason" value={humanise(lead.lostReason)} />
               ) : null}
             </dl>
