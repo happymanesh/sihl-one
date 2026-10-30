@@ -118,6 +118,8 @@ export default async function ReportsPage({
   const report = await apiFetch<SalesReport>(`/reports${suffix}`);
   const { summary } = report;
   const canExportLeads = user.permissions.includes('lead:export');
+  // Back office only — super admin, management and operations.
+  const canSeeMis = user.permissions.includes('report:mis');
 
   return (
     <div className="space-y-5">
@@ -133,6 +135,32 @@ export default async function ReportsPage({
         </div>
         <RangePicker from={from} to={to} exportHref={`/api/reports/export${suffix}`} />
       </header>
+
+      {/*
+        MIS Summary, offered beside the range rather than inside it.
+
+        It is a different report from the one this page shows: three sheets in
+        the layout the business already circulates, and anchored on a single
+        day rather than the range above. Putting it under the range picker
+        would imply the dates applied to it, which they do not.
+      */}
+      {canSeeMis ? (
+        <section className="card flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <h2 className="text-sm font-bold">MIS Summary</h2>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Position per person, the activity behind it, and the lead rows underneath — as on
+              yesterday.{' '}
+              {canExportLeads
+                ? 'Your copy includes the lead details sheet.'
+                : 'The lead details sheet needs the lead export permission.'}
+            </p>
+          </div>
+          <a href="/api/reports/mis-summary" className="btn btn-outline" download>
+            Download MIS Summary
+          </a>
+        </section>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat

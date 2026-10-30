@@ -209,8 +209,35 @@ export const visitQuerySchema = paginationQuerySchema.extend({
   to: z.coerce.date().optional(),
   /** Restricts to visits whose location evidence needs a manager's eye. */
   needsReview: z.coerce.boolean().optional(),
+
+  /*
+    Which slice of the book to show.
+
+    `OPEN` is the default because this screen is a worklist, not an archive:
+    what a rep opens it for is what still has to be done. Showing every visit
+    ever made meant the three that mattered today were somewhere below a
+    year's history.
+  */
+  view: z.enum(['OPEN', 'OVERDUE', 'COMPLETED_7D', 'ALL']).default('OPEN'),
+
+  /**
+   * Free text across the row — the client, the reference, the purpose or
+   * whose visit it is.
+   *
+   * The client is matched in a second step rather than joined: a visit points
+   * at its subject through `entityType` + `entityId`, which is a loose
+   * pointer, so there is nothing for the database to join on.
+   */
+  q: z.string().trim().max(120).optional(),
 });
 export type VisitQuery = z.infer<typeof visitQuerySchema>;
+
+/** Marking a flagged visit as checked by a manager. */
+export const reviewVisitSchema = z.object({
+  /** Optional: what the manager concluded. Kept short on purpose. */
+  note: z.string().trim().max(300).optional(),
+});
+export type ReviewVisitInput = z.infer<typeof reviewVisitSchema>;
 
 /**
  * Allowed visit transitions. As with leads, the table is shared so the UI
@@ -255,6 +282,16 @@ export interface VisitListItem {
   outcome: string | null;
   locationQuality: string;
   requiresReview: boolean;
+  /**
+   * Who accepted the flagged evidence, and when. Null while it still awaits
+   * an eye.
+   *
+   * `requiresReview` stays true after a review — the geometry does not become
+   * better because somebody looked at it. What changes is that the visit is
+   * no longer outstanding, which is what the queue filters on.
+   */
+  reviewedBy: string | null;
+  reviewedAt: string | null;
   isOverdue: boolean;
 }
 

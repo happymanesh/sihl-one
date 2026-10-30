@@ -20,7 +20,9 @@ interface TemplateRow {
 
 export default async function MessagingPage() {
   const user = await requireUser();
-  if (!can(user, 'campaign:read')) redirect('/dashboard');
+  // Super admin only. The API refuses every messaging route on the same
+  // grant, so this is the courtesy redirect rather than the control.
+  if (!can(user, 'messaging:manage')) redirect('/dashboard');
 
   const [templates, log] = await Promise.all([
     apiFetch<TemplateRow[]>('/messaging/templates'),
@@ -37,11 +39,7 @@ export default async function MessagingPage() {
         </p>
       </header>
 
-      <MessagingManager
-        templates={templates}
-        log={log}
-        canCreate={can(user, 'campaign:create')}
-      />
+      <MessagingManager templates={templates} log={log} canCreate={can(user, 'messaging:manage')} />
     </div>
   );
 }

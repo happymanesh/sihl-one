@@ -98,6 +98,7 @@ model OrgUnit {
   partners        Partner[]
   assignmentRules AssignmentRule[]
   events          Event[]
+  trainings       TrainingBranch[]
 
   @@index([parentId])
   @@index([path])
@@ -204,9 +205,15 @@ model User {
   canAssignLeads Boolean @default(true)
 
   /// Products on leads this person is working, one row per product.
-  leadProducts       LeadProduct[]         @relation("LeadProductOwner")
-  approvalsRequested LeadProductApproval[] @relation("ApprovalRequestedBy")
-  approvalsToDecide  LeadProductApproval[] @relation("ApprovalApprover")
+  leadProducts         LeadProduct[]         @relation("LeadProductOwner")
+  approvalsRequested   LeadProductApproval[] @relation("ApprovalRequestedBy")
+  trainingsPresented   Training[]            @relation("TrainingPresenter")
+  trainingsCreated     Training[]            @relation("TrainingCreatedBy")
+  questionsCreated     Question[]            @relation("QuestionCreatedBy")
+  questionSetsCreated  QuestionSet[]         @relation("QuestionSetCreatedBy")
+  translationsApproved QuestionTranslation[] @relation("TranslationApprovedBy")
+  trainingMaterials    TrainingMaterial[]    @relation("TrainingMaterialUploadedBy")
+  approvalsToDecide    LeadProductApproval[] @relation("ApprovalApprover")
 
   /// Which product groups this person sells.
   ///
@@ -266,6 +273,7 @@ model User {
   assignedTasks       Task[]               @relation("TaskAssignee")
   createdTasks        Task[]               @relation("TaskCreator")
   visits              Visit[]
+  visitsReviewed      Visit[]               @relation("VisitReviewedBy")
   auditLogs           AuditLog[]
   importBatches       LeadImportBatch[]
   salesTargets        SalesTarget[]
@@ -409,6 +417,10 @@ model Product {
 
   /// Lead interest in this product, one row per lead, each with its own outcome.
   leadInterest LeadProduct[]
+
+  /// What a rep is examined on for this product.
+  questions    Question[]
+  questionSets QuestionSet[]
 
   /// One line, for the dropdown and the card.
   summary     String? @db.VarChar(300)
@@ -673,6 +685,17 @@ enum Priority {
 model Lead {
   id        String @id @default(cuid())
   reference String @unique @db.VarChar(24)
+
+  /// The legal entity the account would be opened for.
+  ///
+  /// An HUF is a different entity from the individual who is its karta —
+  /// different PAN, different account, routinely the same mobile number. The
+  /// duplicate check keys on mobile *and* this, so the second account can be
+  /// opened without the first having to be closed first.
+  ///
+  /// Defaults to INDIVIDUAL, which is what every lead was before this column
+  /// existed and what the overwhelming majority are.
+  entityType LeadEntityType @default(INDIVIDUAL)
 
   firstName String  @db.VarChar(60)
   lastName  String? @db.VarChar(60)
@@ -1055,6 +1078,93 @@ model LeadStatusHistory {
   @@index([leadId, changedAt])
   @@index([leadId, productCode])
   @@map("lead_status_history")
+}
+
+// ===========================================================================
+// Training & Test — staff development
+// ===========================================================================
+
+/// A training session, scheduled for one or more branches.
+///
+/// Deliberately independent of Test: a branch runs training nobody is examined
+/// on, and sets exams on material nobody was trained for. Tying them would
+/// make each need the other to be useful.
+///
+/// Editable until it has finished — `startsAt` plus `durationMinutes` — after
+/// which it is a record of something that happened and the screen shows it
+/// read-only. The uploaded material stays reachable either way: the commonest
+/// reason to open a past training is to re-read what was presented.
+model Training {
+  id    String @id @default(cuid())
+  topic String @db.VarChar(160)
+
+  startsAt        DateTime
+  durationMinutes Int      @default(30)
+
+  /// Who is giving it. Free text, because a trainer is often a guest who has
+  /// no login — and a record that cannot name an outside presenter is one
+  /// people work around by putting the name in the remarks.
+  presenterName String? @db.VarChar(120)
+  /// Set when the presenter is staff, for presenter-wise reporting.
+  presenterId   String?
+  presenter     User?   @relation("TrainingPresenter", fields: [presenterId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  remarks String? @db.VarChar(2000)
+
+  /// SCHEDULED, CANCELLED or RESCHEDULED. A cancelled session keeps its row:
+  /// "why did nobody attend" is a question about a training that existed.
+  status String @default("SCHEDULED") @db.VarChar(20)
+
+  branches TrainingBranch[]
+  material TrainingMaterial[]
+
+  createdById String
+  createdBy   User   @relation("TrainingCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([startsAt])
+  @@index([status, startsAt])
+  @@map("training")
+}
+
+/// Which branches a training is for. Many-to-many, as the form allows.
+model TrainingBranch {
+  trainingId String
+  training   Training @relation(fields: [trainingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  orgUnitId  String
+  orgUnit    OrgUnit  @relation(fields: [orgUnitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([trainingId, orgUnitId])
+  @@index([orgUnitId])
+  @@map("training_branch")
+}
+
+/// Presentation or handout attached to a training.
+///
+/// Its own table rather than a column: a session often has a deck and a
+/// handout, and the second one always arrives after somebody decided one
+/// column was enough.
+model TrainingMaterial {
+  id         String   @id @default(cuid())
+  trainingId String
+  training   Training @relation(fields: [trainingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  fileName   String @db.VarChar(255)
+  mimeType   String @db.VarChar(120)
+  sizeBytes  Int
+  /// Key into the same object store documents use, so downloads are signed the
+  /// same way and nothing is served straight off disk.
+  storageKey String @unique @db.VarChar(300)
+
+  uploadedById String
+  uploadedBy   User   @relation("TrainingMaterialUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([trainingId])
+  @@map("training_material")
 }
 
 // ===========================================================================
@@ -1671,6 +1781,16 @@ model ActivityProductValue {
 /// administrator can add "Awaiting client documents" and "Awaiting compliance"
 /// under IN_PROGRESS and no dashboard, filter or count needs changing. Renaming
 /// a label must never move a task between these.
+/// The legal entities a broking account can be opened for. Closed by design:
+/// these are defined in law, not by SIHL.
+enum LeadEntityType {
+  INDIVIDUAL
+  HUF
+  CORPORATE
+  NRI
+  TRUST
+}
+
 enum TaskStatusCategory {
   OPEN
   IN_PROGRESS
@@ -1921,6 +2041,17 @@ model Visit {
   meetingNotes    String?   @db.VarChar(4000)
   voiceNoteKey    String?   @db.VarChar(300)
   outcome         String?   @db.VarChar(200)
+
+  /// Who signed off a visit whose location evidence did not hold up, and when.
+  ///
+  /// `requiresReview` is derived from the geometry at read time — no fix at
+  /// check-in, a check-out too far from it, a visit under two minutes — and
+  /// stays true for ever, because the geometry never changes. These two
+  /// columns are the only record that somebody looked and accepted it.
+  /// Without them a flagged visit stayed flagged, and the queue only grew.
+  reviewedById String?
+  reviewedBy   User?     @relation("VisitReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  reviewedAt   DateTime?
   nextFollowUpAt  DateTime?
 
   deviceId   String? @db.VarChar(120)
@@ -2407,4 +2538,123 @@ model KnownClient {
   createdAt DateTime @default(now())
 
   @@map("known_client")
+}
+
+/// A named grouping of questions inside one product, such as "AML — basics".
+///
+/// Optional by design: a product with few questions needs no sets, and
+/// forcing one would make every bank start with a bookkeeping chore.
+model QuestionSet {
+  id          String  @id @default(cuid())
+  name        String  @db.VarChar(120)
+  description String? @db.VarChar(500)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  questions Question[]
+
+  isActive Boolean @default(true)
+
+  createdById String
+  createdBy   User   @relation("QuestionSetCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, name])
+  @@index([productId])
+  @@map("question_set")
+}
+
+/// One question in the bank, independent of the language it is asked in.
+///
+/// The answer key, the marks and the product live here; only the wording
+/// varies by language, in `QuestionTranslation`. A row per language was
+/// rejected because it makes the Hindi and the English strangers: correcting
+/// the answer on one silently leaves the other wrong, and no report can say
+/// how people did on "that question" across both.
+///
+/// Editable freely while unused. Once a published test has frozen a copy, an
+/// edit here reaches future tests only and deletion becomes retirement — the
+/// test carries its own text and answer key, so nothing done here can move a
+/// past result.
+model Question {
+  id String @id @default(cuid())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  questionSetId String?
+  questionSet   QuestionSet? @relation(fields: [questionSetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  /// The language it was written in, and the one translations are made from.
+  /// Authoritative if a translation and the source ever disagree.
+  sourceLanguage String @default("EN") @db.VarChar(5)
+
+  /// A, B, C or D — a position, not a copy of the option text, which would
+  /// drift the first time somebody fixed a typo in one and not the other.
+  /// The same position in every language, which is what lets one answer key
+  /// serve them all.
+  correctAnswer String @db.VarChar(1)
+
+  marks         Decimal @default(1) @db.Decimal(6, 2)
+  /// Held positive and subtracted when marking, so the number in the form
+  /// means what the person typing it expects.
+  negativeMarks Decimal @default(0) @db.Decimal(6, 2)
+
+  translations QuestionTranslation[]
+
+  isActive Boolean @default(true)
+
+  createdById String
+  createdBy   User   @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId, isActive])
+  @@index([questionSetId])
+  @@map("question")
+}
+
+/// One language's wording of a question.
+///
+/// `status` is the gate that makes automatic translation safe to offer: a
+/// machine rendering lands as DRAFT and is drawn by no test until a person
+/// has opened, read and saved it. The answer key was written against the
+/// source wording, and regulatory language — "may" against "must", a defined
+/// term like cooling-off period — is exactly where translation goes quietly
+/// wrong. Text typed by hand is APPROVED on save: its author is its reviewer.
+model QuestionTranslation {
+  id String @id @default(cuid())
+
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  language String @db.VarChar(5)
+
+  text    String @db.VarChar(2000)
+  optionA String @db.VarChar(500)
+  optionB String @db.VarChar(500)
+  optionC String @db.VarChar(500)
+  optionD String @db.VarChar(500)
+
+  explanation String? @db.VarChar(2000)
+
+  /// DRAFT or APPROVED.
+  status String @default("APPROVED") @db.VarChar(10)
+
+  approvedById String?
+  approvedBy   User?     @relation("TranslationApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One wording per language per question — the constraint that makes
+  /// "the Hindi of this question" a single, unambiguous thing.
+  @@unique([questionId, language])
+  @@index([language, status])
+  @@map("question_translation")
 }

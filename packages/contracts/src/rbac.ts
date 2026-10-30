@@ -96,6 +96,60 @@ export const PERMISSIONS = [
   'analytics:marketing:read',
   'analytics:partner:read',
   'analytics:management:read',
+  /*
+    The MIS Summary workbook.
+
+    Its own grant rather than riding on `analytics:sales:read`, which every
+    sales role holds. This workbook names every person in the caller's scope,
+    their mobile number and their whole book position in one file — a
+    back-office report, not something a desk should be able to pull about
+    their colleagues.
+  */
+  'report:mis',
+
+  /*
+    Templated outbound messaging.
+
+    Its own grant rather than `campaign:read` / `campaign:create`, which
+    Management and Marketing also hold. This sends messages to clients in
+    SIHL's name, under consent, DND and quiet-hours rules — a narrower act
+    than reading a campaign, and held by super admin alone on instruction.
+
+    The send route in particular sat on `activity:create`, which nearly every
+    role holds, so restricting the menu alone would have left it reachable by
+    anybody who knew the URL.
+  */
+  'messaging:manage',
+  /*
+    Seeing the partner portal.
+
+    Split from `analytics:partner:read`, which Management also holds — so
+    Management saw a "My business" menu entry that could only ever bounce
+    them to the Dashboard, because the page requires the PARTNER role. The
+    menu said one thing and the page another.
+
+    Granted to PARTNER, whose portal it is, and to super admin through
+    ALL_PERMISSIONS, who uses it to see what a given partner sees. Nobody
+    else.
+  */
+  'partner:portal',
+
+  // Training & Test
+  //
+  // Reading training needs no permission at all: a session is announced to the
+  // branches it is for, and hiding it from the people expected to attend would
+  // defeat the point. Only scheduling and editing are gated.
+  'training:manage',
+  /*
+    Writing questions, and putting a test live.
+
+    Deliberately not `training:manage`. Scheduling a branch session and
+    setting the exam that decides whether a rep may sell a product are
+    different kinds of authority: the first is a diary entry, the second
+    produces a pass/fail record SIHL may have to defend to a regulator.
+    Splitting them costs one line now and is awkward to unpick later.
+  */
+  'test:manage',
 
   // Administration
   'user:read',
@@ -122,6 +176,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
 
   MANAGEMENT: [
+    'training:manage',
+    'test:manage',
+    'report:mis',
     'lead:read',
     'lead:export',
     'lead:import',
@@ -147,6 +204,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   OPERATIONS: [
+    'training:manage',
+    'test:manage',
+    'report:mis',
     'lead:read',
     'lead:update',
     'lead:import',
@@ -262,6 +322,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'activity:create',
     'partner:payout:read',
     'analytics:partner:read',
+    'partner:portal',
   ],
 
   CUSTOMER: ['customer:read', 'activity:read', 'task:read'],

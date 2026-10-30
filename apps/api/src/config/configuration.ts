@@ -213,6 +213,16 @@ const envSchema = z
     SARVAM_STT_MODEL: z.string().min(1).default('saaras:v3'),
     SARVAM_STT_URL: z.string().url().default('https://api.sarvam.ai/speech-to-text-translate'),
     /**
+     * Text translation, for drafting a question in another language.
+     *
+     * Same vendor and same key as dictation, so there is nothing new to
+     * procure. `sarvam-translate:v1` carries a 2000-character limit, which is
+     * exactly the cap on a question's text, and covers Gujarati and Marathi
+     * where the older mayura model does not.
+     */
+    SARVAM_TRANSLATE_MODEL: z.string().min(1).default('sarvam-translate:v1'),
+    SARVAM_TRANSLATE_URL: z.string().url().default('https://api.sarvam.ai/translate'),
+    /**
      * Generous compared with geocoding: a rep has finished speaking and is
      * watching a spinner, so waiting is better than losing the note.
      */
@@ -450,7 +460,13 @@ export interface AppConfig {
   speech: {
     provider: Env['SPEECH_PROVIDER'];
     timeoutMs: number;
-    sarvam: { apiKey: string | undefined; model: string; endpoint: string };
+    sarvam: {
+      apiKey: string | undefined;
+      model: string;
+      endpoint: string;
+      translateModel: string;
+      translateEndpoint: string;
+    };
   };
   geocoding: {
     provider: Env['GEOCODER'];
@@ -542,6 +558,8 @@ export function buildAppConfig(env: Env): AppConfig {
         apiKey: env.SARVAM_API_KEY,
         model: env.SARVAM_STT_MODEL,
         endpoint: env.SARVAM_STT_URL,
+        translateModel: env.SARVAM_TRANSLATE_MODEL,
+        translateEndpoint: env.SARVAM_TRANSLATE_URL,
       },
     },
     geocoding: {

@@ -1,13 +1,15 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { PRIORITIES, type LeadSourceItem, type ProductItem } from '@sihl-one/contracts';
 
 import { DuplicateMobileNotice } from '@/components/leads/DuplicateMobileNotice';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 import { LeadProfileFields } from '@/components/leads/LeadProfileFields';
+import { LEAD_ENTITY_TYPES, LEAD_ENTITY_TYPE_LABELS } from '@sihl-one/contracts';
 import { createLead, type ActionState } from '@/app/actions/leads';
+import { useSelectResync } from '@/lib/use-select-resync';
 import { humanise } from '@/lib/format';
 
 const INITIAL: ActionState = { status: 'idle' };
@@ -42,9 +44,19 @@ function FieldError({ errors }: { errors?: string[] }) {
  * Opens automatically if the server rejected the value, so a validation error is
  * never hidden inside a collapsed section.
  */
-function PanField({ errors }: { errors?: string[] }) {
+function PanField({
+  errors,
+  value,
+  onChange,
+}: {
+  errors?: string[];
+  value: string;
+  onChange: (next: string) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const shown = open || Boolean(errors?.length);
+  // Also opened by a value that survived a refused save: a PAN the rep typed
+  // must not be hidden behind "+ Add PAN" when the form comes back.
+  const shown = open || Boolean(errors?.length) || value.length > 0;
 
   if (!shown) {
     return (
@@ -68,6 +80,8 @@ function PanField({ errors }: { errors?: string[] }) {
         maxLength={10}
         placeholder="ABCDE1234F"
         autoFocus={open}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         aria-describedby="pan-guidance"
         aria-invalid={Boolean(errors?.length)}
       />
@@ -94,8 +108,57 @@ export function NewLeadForm({
   const [state, action] = useActionState(createLead, INITIAL);
   const [pickedProducts, setPickedProducts] = useState<string[]>([]);
 
+  /*
+    Everything typed, held here.
+
+    A form action resets uncontrolled inputs once it returns, so a refused
+    save — a duplicate mobile, a bad PAN, anything the server rejects — handed
+    back an empty form and the whole lead had to be retyped to fix one field.
+    The same fault the user form had, and the same fix.
+
+    One object rather than a dozen `useState` calls: every field here is the
+    same kind of thing, and a dozen setters is a dozen chances to wire one to
+    the wrong input.
+  */
+  const [values, setValues] = useState({
+    entityType: 'INDIVIDUAL',
+    firstName: '',
+    lastName: '',
+    mobile: '',
+    email: '',
+    pan: '',
+    city: '',
+    state: 'Gujarat',
+    source: 'INBOUND_CALL',
+    priority: 'MEDIUM',
+    estimatedValue: '',
+    ownerId: '',
+    notes: '',
+  });
+  const set = (field: keyof typeof values) => (next: string) =>
+    setValues((current) => ({ ...current, [field]: next }));
+  const bind = (field: keyof typeof values) => ({
+    value: values[field],
+    onChange: (event: { target: { value: string } }) => set(field)(event.target.value),
+  });
+
+  /*
+    The three selects, put back after the action returns.
+
+    The controlled-value fix above covers the text inputs but not these: a
+    select reset to its first option looks unchanged to React, so it is never
+    patched back, and the field would read "Inbound call" while the state
+    still held whatever was actually picked.
+  */
+  const form = useRef<HTMLFormElement>(null);
+  useSelectResync(form, {
+    source: values.source,
+    priority: values.priority,
+    ownerId: values.ownerId,
+  });
+
   return (
-    <form action={action} className="space-y-5" noValidate>
+    <form ref={form} action={action} className="space-y-5" noValidate>
       {state.status === 'error' && state.message ? (
         <div
           className="rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2.5 text-sm text-danger-600 dark:bg-danger-500/15"
@@ -108,6 +171,32 @@ export function NewLeadForm({
       <fieldset className="space-y-3">
         <legend className="text-sm font-bold">Who is it?</legend>
 
+        {/*
+          First, because it changes what the rest of the form means — an HUF
+          is a different legal entity from its karta, with its own PAN and its
+          own account, and frequently the same mobile number. It is also what
+          decides whether a duplicate on that number is a real duplicate.
+        */}
+        <div>
+          <label className="label" htmlFor="entityType">
+            Account type <span className="text-danger-500">*</span>
+          </label>
+          <select
+            id="entityType"
+            name="entityType"
+            className="input sm:max-w-xs"
+            aria-invalid={Boolean(state.errors?.entityType)}
+            {...bind('entityType')}
+          >
+            {LEAD_ENTITY_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {LEAD_ENTITY_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </select>
+          <FieldError errors={state.errors?.entityType} />
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="firstName">
@@ -119,13 +208,14 @@ export function NewLeadForm({
               className="input"
               required
               autoFocus
+              {...bind('firstName')}
               aria-invalid={Boolean(state.errors?.firstName)}
             />
             <FieldError errors={state.errors?.firstName} />
           </div>
           <div>
             <label className="label" htmlFor="lastName">Last name</label>
-            <input id="lastName" name="lastName" className="input" />
+            <input id="lastName" name="lastName" className="input" {...bind('lastName')} />
           </div>
         </div>
 
@@ -142,6 +232,7 @@ export function NewLeadForm({
               inputMode="numeric"
               maxLength={13}
               placeholder="10-digit mobile"
+              {...bind('mobile')}
               aria-invalid={Boolean(state.errors?.mobile)}
             />
             <FieldError errors={state.errors?.mobile} />
@@ -154,22 +245,22 @@ export function NewLeadForm({
           </div>
           <div>
             <label className="label" htmlFor="email">Email</label>
-            <input id="email" name="email" type="email" className="input" aria-invalid={Boolean(state.errors?.email)} />
+            <input id="email" name="email" type="email" className="input" {...bind('email')} aria-invalid={Boolean(state.errors?.email)} />
             <FieldError errors={state.errors?.email} />
           </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
-            <PanField errors={state.errors?.pan} />
+            <PanField errors={state.errors?.pan} value={values.pan} onChange={set('pan')} />
           </div>
           <div>
             <label className="label" htmlFor="city">City</label>
-            <input id="city" name="city" className="input" />
+            <input id="city" name="city" className="input" {...bind('city')} />
           </div>
           <div>
             <label className="label" htmlFor="state">State</label>
-            <input id="state" name="state" className="input" defaultValue="Gujarat" />
+            <input id="state" name="state" className="input" {...bind('state')} />
           </div>
         </div>
       </fieldset>
@@ -182,7 +273,7 @@ export function NewLeadForm({
             <label className="label" htmlFor="source">
               Source <span className="text-danger-500">*</span>
             </label>
-            <select id="source" name="source" className="input" required defaultValue="INBOUND_CALL">
+            <select id="source" name="source" className="input" required {...bind('source')} aria-invalid={Boolean(state.errors?.source)}>
               {sources.map((source) => (
                 <option key={source.code} value={source.code}>
                   {source.label}
@@ -192,7 +283,7 @@ export function NewLeadForm({
           </div>
           <div>
             <label className="label" htmlFor="priority">Priority</label>
-            <select id="priority" name="priority" className="input" defaultValue="MEDIUM">
+            <select id="priority" name="priority" className="input" {...bind('priority')}>
               {PRIORITIES.map((priority) => (
                 <option key={priority} value={priority}>{humanise(priority)}</option>
               ))}
@@ -200,14 +291,14 @@ export function NewLeadForm({
           </div>
           <div>
             <label className="label" htmlFor="estimatedValue">Estimated value (₹)</label>
-            <input id="estimatedValue" name="estimatedValue" type="number" min={0} step={1000} className="input" />
+            <input id="estimatedValue" name="estimatedValue" type="number" min={0} step={1000} className="input" {...bind('estimatedValue')} />
           </div>
         </div>
 
         {canAssign && assignableUsers.length > 0 ? (
           <div>
             <label className="label" htmlFor="ownerId">Assign to</label>
-            <select id="ownerId" name="ownerId" className="input" defaultValue="">
+            <select id="ownerId" name="ownerId" className="input" {...bind('ownerId')}>
               <option value="">Assign to me</option>
               {assignableUsers.map((person) => (
                 <option key={person.id} value={person.id}>
@@ -250,6 +341,7 @@ export function NewLeadForm({
           rows={3}
           className="input resize-none"
           placeholder="What did they ask for? Anything the next person needs to know?"
+          {...bind('notes')}
         />
       </div>
 

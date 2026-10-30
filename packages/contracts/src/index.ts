@@ -25,6 +25,8 @@ export * from './import';
 export * from './assignment';
 export * from './hierarchy';
 export * from './performance';
+export * from './training';
+export * from './question';
 export * from './allocation';
 export * from './audit';
 export * from './campaign';

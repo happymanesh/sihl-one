@@ -17,6 +17,7 @@ import type { AuthenticatedPrincipal } from '../../common/types';
 import { ZodValidationPipe } from '../../common/zod';
 import { ReportsService } from './reports.service';
 import { DailyActivityService } from './daily-activity.service';
+import { MisService } from './mis.service';
 import { WorkbookService } from './workbook.service';
 
 /**
@@ -35,6 +36,7 @@ export class ReportsController {
     private readonly reports: ReportsService,
     private readonly workbook: WorkbookService,
     private readonly dailyActivity: DailyActivityService,
+    private readonly mis: MisService,
     private readonly audit: AuditService,
   ) {}
 
@@ -115,6 +117,54 @@ export class ReportsController {
     // incident.
     response.setHeader('Cache-Control', 'private, no-store');
     response.end(csv);
+  }
+
+  @Get('mis-summary')
+  @RequirePermissions('report:mis')
+  @ApiQuery({ name: 'date', required: false, description: 'YYYY-MM-DD in IST.' })
+  @ApiOperation({
+    summary: 'Download the MIS Summary workbook',
+    description:
+      'Three sheets, in the layout the business already circulates: position per person as on ' +
+      'the date, the activity behind it on that date, and the lead rows underneath. The lead ' +
+      'sheet is included only for callers holding lead:export, and is still cut to their scope.',
+  })
+  async misSummary(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query(new ZodValidationPipe(dailyActivityQuerySchema)) query: DailyActivityQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    /*
+      The lead sheet carries customer names, mobile numbers and email
+      addresses. The grant that governs taking lead data out of the system
+      governs it here too — everyone else gets the two summary sheets, which
+      is the part most readers of this file actually want.
+    */
+    const includeLeadRows = user.permissions.includes('lead:export');
+
+    const { buffer, day, people, leads } = await this.mis.build(user, query, { includeLeadRows });
+
+    await this.audit.record({
+      action: 'EXPORT',
+      resource: 'report.mis',
+      reason: `MIS Summary for ${day}, ${people} people, ${leads} leads`,
+      changes: { date: day, people, leads, includeLeadRows, scope: user.dataScope },
+    });
+
+    response.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="sihl-mis-summary-${day}.xlsx"`,
+    );
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    // Never cached: the contents depend on who asked, and a shared cache
+    // serving one person's scoped rows to another is a data-protection
+    // incident.
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.end(buffer);
   }
 
   @Get('daily/detail')

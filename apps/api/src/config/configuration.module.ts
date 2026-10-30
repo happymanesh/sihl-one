@@ -91,6 +91,8 @@ import { APP_CONFIG, buildAppConfig, validateEnv, type AppConfig, type Env } fro
           SARVAM_API_KEY: readOptional('SARVAM_API_KEY'),
           SARVAM_STT_MODEL: read('SARVAM_STT_MODEL'),
           SARVAM_STT_URL: read('SARVAM_STT_URL'),
+          SARVAM_TRANSLATE_MODEL: read('SARVAM_TRANSLATE_MODEL'),
+          SARVAM_TRANSLATE_URL: read('SARVAM_TRANSLATE_URL'),
           SPEECH_TIMEOUT_MS: read('SPEECH_TIMEOUT_MS'),
           OUTBOX_RELAY_ENABLED: read('OUTBOX_RELAY_ENABLED'),
           OUTBOX_RELAY_INTERVAL_MS: read('OUTBOX_RELAY_INTERVAL_MS'),

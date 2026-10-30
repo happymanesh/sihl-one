@@ -4,7 +4,9 @@ import type { Route } from 'next';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/shell/Icon';
 import { PriorityBadge } from '@/components/ui/Badge';
+import { Pagination } from '@/components/ui/Pagination';
 import { StatTile } from '@/components/ui/StatTile';
+import { TaskGridFilters } from '@/components/tasks/TaskGridFilters';
 import type { ProductItem } from '@sihl-one/contracts';
 
 import { ProductChips } from '@/components/ui/ProductChips';
@@ -13,6 +15,9 @@ import { requireUser } from '@/lib/auth';
 import { formatDateTime, formatRelative } from '@/lib/format';
 
 export const metadata = { title: 'Tasks' };
+
+/** Asked for by the business: 25 rows to a page. */
+const PAGE_SIZE = 25;
 
 interface TaskRow {
   id: string;
@@ -40,18 +45,30 @@ export default async function TasksPage({
   await requireUser();
   const params = await searchParams;
 
-  const [summary, data, products] = await Promise.all([
+  const [summary, data, products, colleagues] = await Promise.all([
     apiFetch<{ open: number; overdue: number; dueToday: number; completedThisWeek: number }>(
       '/tasks/summary',
     ),
-    apiFetch<{ items: TaskRow[]; total: number }>(
+    apiFetch<{ items: TaskRow[]; total: number; page: number; pageSize: number }>(
       `/tasks${toQuery({
         status: (params.status as string | undefined) ?? 'OPEN',
         overdueOnly: params.overdueOnly as string | undefined,
-        pageSize: '50',
+        // Every column filter travels through as-is; the API ANDs them.
+        reference: params.reference as string | undefined,
+        title: params.title as string | undefined,
+        client: params.client as string | undefined,
+        priority: params.priority as string | undefined,
+        assigneeId: params.assigneeId as string | undefined,
+        dueFrom: params.dueFrom as string | undefined,
+        dueTo: params.dueTo as string | undefined,
+        page: (params.page as string | undefined) ?? '1',
+        pageSize: String(PAGE_SIZE),
       })}`,
     ),
     apiFetch<ProductItem[]>('/masters/products').catch(() => [] as ProductItem[]),
+    // Optional: the filter row degrades to a text-free assignee column rather
+    // than failing the page if the directory cannot be read.
+    apiFetch<Array<{ id: string; fullName: string }>>('/users/colleagues').catch(() => []),
   ]);
 
   const productLabels = Object.fromEntries(products.map((product) => [product.code, product.name]));
@@ -92,95 +109,157 @@ export default async function TasksPage({
           />
         </div>
       ) : (
-        // Two groups rather than five siblings in one wrapping row. The title
-        // used to sit in a `flex-1 min-w-0` cell beside four items that never
-        // shrink, so on a phone it collapsed to a sliver and broke "Follow up
-        // with Parth Chauhan" one word per line. The title now owns the full
-        // width until there is room for more.
-        <ul className="space-y-2">
-          {data.items.map((task) => (
-            <li
-              key={task.id}
-              className="card flex flex-wrap items-center gap-x-3 gap-y-2 p-3.5"
-            >
-              <div className="flex w-full min-w-0 items-start gap-3 sm:w-auto sm:flex-1">
-                <span
-                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
-                    task.isOverdue
-                      ? 'bg-danger-500'
-                      : task.status === 'DONE'
-                        ? 'bg-teal-500'
-                        : 'bg-navy-300'
-                  }`}
-                  aria-hidden
-                />
+        <>
+          {/*
+            A grid rather than cards.
 
-                <div className="min-w-0 flex-1">
-                <p
-                  className={`font-semibold ${
-                    task.status === 'DONE' ? 'text-[var(--color-text-muted)] line-through' : ''
-                  }`}
-                >
-                  {task.title}
-                </p>
-                {/* Who to call, directly under the title. A follow-up reading
-                    only "Follow up: collect document" left the rep opening the
-                    task to find out who it was about. Number is masked, as on
-                    every list. */}
-                {task.about ? (
-                  <p className="mt-0.5 truncate text-sm">
-                    <span className="font-medium">{task.about.name}</span>
-                    <span className="text-[var(--color-text-muted)]">
-                      {' · '}
-                      <span className="font-mono tabular-nums">{task.about.mobileMasked}</span>
-                    </span>
-                  </p>
-                ) : null}
-                {task.description ? (
-                  <p className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
-                    {task.description}
-                  </p>
-                ) : null}
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-subtle)]">
-                  <span className="font-mono">{task.reference}</span>
-                  {task.assignee ? <span>· {task.assignee.fullName}</span> : null}
-                  {task.productInterest?.length ? (
-                    <ProductChips
-                      codes={task.productInterest}
-                      labels={productLabels}
-                      tone="outline"
-                    />
-                  ) : null}
-                </div>
-                </div>
-              </div>
+            The list was read one row at a time; this is scanned down a
+            column — all the overdue ones, everything for one client, one
+            person's week. The horizontal scroll is kept on its own container
+            so the page itself never scrolls sideways on a phone.
+          */}
+          <div className="card overflow-hidden p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] text-left">
+                  <tr>
+                    {['#', 'Task no.', 'Task', 'Client', 'Due', 'Priority', 'Assignee', ''].map(
+                      (heading, index) => (
+                        <th
+                          key={heading || `action-${index}`}
+                          scope="col"
+                          className="whitespace-nowrap px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]"
+                        >
+                          {heading}
+                        </th>
+                      ),
+                    )}
+                  </tr>
+                  <TaskGridFilters
+                    assignees={colleagues.map((person) => ({
+                      id: person.id,
+                      name: person.fullName,
+                    }))}
+                  />
+                </thead>
 
-              {/* Priority, due date and the action travel together: on a phone
-                  they wrap onto their own line instead of squeezing the title. */}
-              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-                <PriorityBadge priority={task.priority} />
+                <tbody className="divide-y divide-[var(--color-border)]">
+                  {data.items.map((task, index) => (
+                    <tr key={task.id} className="align-top hover:bg-[var(--color-surface-muted)]">
+                      {/* Continues across pages, so row 26 is the 26th task
+                          and not the first of page two over again. */}
+                      <td className="tnum px-3 py-2.5 text-xs text-[var(--color-text-subtle)]">
+                        {(data.page - 1) * data.pageSize + index + 1}
+                      </td>
 
-                <p
-                  className={`text-xs font-semibold sm:w-28 sm:text-right ${
-                    task.isOverdue ? 'text-danger-500' : 'text-[var(--color-text-muted)]'
-                  }`}
-                  title={formatDateTime(task.dueAt)}
-                >
-                  {formatRelative(task.dueAt)}
-                </p>
+                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-[var(--color-text-muted)]">
+                        {task.reference}
+                      </td>
 
-                {task.entityType === 'LEAD' && task.entityId ? (
-                  <Link
-                    href={`/leads/${task.entityId}`}
-                    className="btn btn-outline ml-auto h-8 shrink-0 text-xs sm:ml-0"
-                  >
-                    Open lead
-                  </Link>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
+                      <td className="min-w-[14rem] px-3 py-2.5">
+                        <span className="flex items-start gap-2">
+                          <span
+                            className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                              task.isOverdue
+                                ? 'bg-danger-500'
+                                : task.status === 'DONE'
+                                  ? 'bg-teal-500'
+                                  : 'bg-navy-300'
+                            }`}
+                            aria-hidden
+                          />
+                          <span className="min-w-0">
+                            <span
+                              className={`block font-semibold ${
+                                task.status === 'DONE'
+                                  ? 'text-[var(--color-text-muted)] line-through'
+                                  : ''
+                              }`}
+                            >
+                              {task.title}
+                            </span>
+                            {task.description ? (
+                              <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
+                                {task.description}
+                              </span>
+                            ) : null}
+                            {task.productInterest?.length ? (
+                              <span className="mt-1 block">
+                                <ProductChips
+                                  codes={task.productInterest}
+                                  labels={productLabels}
+                                  tone="outline"
+                                />
+                              </span>
+                            ) : null}
+                          </span>
+                        </span>
+                      </td>
+
+                      {/* The lead or customer number, asked for by name: it is
+                          what a rep quotes to the back office. */}
+                      <td className="min-w-[11rem] px-3 py-2.5">
+                        {task.about ? (
+                          <>
+                            <span className="block truncate font-medium">{task.about.name}</span>
+                            <span className="block font-mono text-xs text-[var(--color-text-muted)]">
+                              {task.about.reference}
+                            </span>
+                            <span className="block font-mono text-xs tabular-nums text-[var(--color-text-subtle)]">
+                              {task.about.mobileMasked}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-subtle)]">&mdash;</span>
+                        )}
+                      </td>
+
+                      <td
+                        className={`whitespace-nowrap px-3 py-2.5 text-xs font-semibold ${
+                          task.isOverdue ? 'text-danger-500' : 'text-[var(--color-text-muted)]'
+                        }`}
+                        title={formatDateTime(task.dueAt)}
+                      >
+                        {formatRelative(task.dueAt)}
+                      </td>
+
+                      <td className="px-3 py-2.5">
+                        <PriorityBadge priority={task.priority} />
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-2.5 text-xs text-[var(--color-text-muted)]">
+                        {task.assignee?.fullName ?? '\u2014'}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        {task.entityId &&
+                        (task.entityType === 'LEAD' || task.entityType === 'CUSTOMER') ? (
+                          <Link
+                            href={
+                              (task.entityType === 'LEAD'
+                                ? `/leads/${task.entityId}`
+                                : `/customers/${task.entityId}`) as Route
+                            }
+                            className="btn btn-outline h-8 text-xs"
+                          >
+                            {task.entityType === 'LEAD' ? 'Open lead' : 'Open customer'}
+                          </Link>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <Pagination
+            page={data.page}
+            totalPages={Math.max(1, Math.ceil(data.total / data.pageSize))}
+            total={data.total}
+            pageSize={data.pageSize}
+          />
+        </>
       )}
     </div>
   );

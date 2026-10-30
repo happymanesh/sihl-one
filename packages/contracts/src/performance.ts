@@ -60,6 +60,16 @@ export interface RatedLead {
 // Behaviour
 // ---------------------------------------------------------------------------
 
+/**
+ * Days without contact before a lead counts as slipping.
+ *
+ * Shared, because two places ask the same question: the performance report
+ * counts "no contact in N days", and the lead list filters for them when
+ * somebody clicks that number. A second copy would let the drill-down
+ * disagree with the figure it came from.
+ */
+export const SLIPPING_DAYS = 2;
+
 export interface BehaviourInputs {
   /** Median hours between a lead arriving and the first logged interaction. */
   medianFirstResponseHours: number | null;
@@ -69,7 +79,27 @@ export interface BehaviourInputs {
   overdueRate: number;
   /** Interactions logged per open lead over the period. */
   activitiesPerLead: number;
-  /** Share of lost leads that carry a reason, 0–1. */
+  /**
+   * Share of leads that have ever been spoken to, 0–1.
+   *
+   * "Ever reached contact", taken from whether any human interaction was
+   * logged — not current status, or a lead contacted and then disqualified
+   * would count against the rep who did the work.
+   *
+   * Added because volume was offsetting neglect: a rep holding thirteen leads
+   * with seven never contacted scored nearly double one holding six that were
+   * all worked. Nothing in the old set asked whether a lead had been touched
+   * at all.
+   */
+  contactCoverage: number;
+  /**
+   * Share of lost lead *products* that carry a reason, 0–1.
+   *
+   * Per product, not per lead. The lead's own `lostReason` is a roll-up that
+   * always resolves to something — falling back to OTHER when a product
+   * carries an unrecognised code — so measured there the figure was 100% for
+   * everybody and the metric scored nothing.
+   */
   lostReasonCoverage: number;
 }
 
@@ -139,18 +169,45 @@ export function scoreBehaviour(inputs: BehaviourInputs): {
   });
 
   metrics.push({
+    code: 'CONTACT_COVERAGE',
+    label: 'Leads actually contacted',
+    value: `${Math.round(inputs.contactCoverage * 100)}% ever spoken to`,
+    score: Math.round(clamp(inputs.contactCoverage * 100)),
+    target: 'Every lead',
+  });
+
+  metrics.push({
     code: 'LOST_REASONS',
     label: 'Lost reasons recorded',
     value: `${Math.round(inputs.lostReasonCoverage * 100)}%`,
     score: Math.round(clamp(inputs.lostReasonCoverage * 100)),
-    target: 'Every lost lead',
+    target: 'Every lost product',
   });
 
+  /*
+    Rebalanced on the business's instruction, and they must sum to 1.
+
+    What changed and why:
+
+      - Contact coverage enters at 0.25. Nothing previously asked whether a
+        lead had been spoken to at all, so a large untouched book scored well
+        on the strength of its size.
+      - Overdue drops from 0.25 to 0.15. It overlaps follow-up coverage —
+        both measure follow-up discipline — and between them they were
+        carrying half the behaviour score.
+      - First response eases from 0.30 to 0.25 and engagement from 0.15 to
+        0.10 to make room, both still weighted as the signals they are.
+
+    Every rep's score moves the day this ships. Run the old and new side by
+    side on real data and circulate the comparison before release, because
+    anyone whose rating drops will ask why.
+  */
   const weights: Record<string, number> = {
-    FIRST_RESPONSE: 0.3,
-    FOLLOW_UP_COVERAGE: 0.25,
-    OVERDUE: 0.25,
-    ENGAGEMENT: 0.15,
+    FIRST_RESPONSE: 0.25,
+    CONTACT_COVERAGE: 0.25,
+    FOLLOW_UP_COVERAGE: 0.2,
+    OVERDUE: 0.15,
+    ENGAGEMENT: 0.1,
     LOST_REASONS: 0.05,
   };
 
@@ -223,9 +280,20 @@ export function computeRating(input: RatingInput): Rating {
 
   const behaviour = scoreBehaviour(input.behaviour);
 
-  // Outcome converted to a 0–100 scale where parity (1.0) sits at 60, so
-  // "exactly as expected" reads as solid rather than as a failing mark.
-  const outcomePoints = clamp(60 * outcomeIndex);
+  /*
+    Outcome on a 0–100 scale, piecewise around parity.
+
+    Parity (1.0) sits at 55, so "exactly as expected" still reads as solid.
+    Above parity the slope flattens to 30 points per whole multiple, which
+    puts the ceiling at 2.5× expectation instead of 1.67×.
+
+    The flat `60 × index` it replaces clamped at 1.67, so a rep converting at
+    three times expectation scored identically to one at 1.7× — the top of
+    the distribution was compressed into a single number and the best people
+    were indistinguishable from the merely good.
+  */
+  const outcomePoints =
+    outcomeIndex <= 1 ? clamp(55 * outcomeIndex) : clamp(55 + 30 * (outcomeIndex - 1));
 
   // Behaviour is weighted heavily on purpose. It is the part a rep controls,
   // the part a manager can coach, and the part that is fair to rank on.

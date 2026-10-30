@@ -207,6 +207,33 @@ export async function cancelVisit(
 }
 
 /**
+ * Accept a visit whose location evidence was flagged.
+ *
+ * Does not clear the flag — the geometry is what it is — but takes the visit
+ * out of the needs-review queue and records who accepted it.
+ */
+export async function reviewVisit(
+  _previous: VisitActionState,
+  formData: FormData,
+): Promise<VisitActionState> {
+  const visitId = String(formData.get('visitId'));
+  const note = String(formData.get('note') ?? '').trim();
+
+  try {
+    await apiFetch(`/visits/${visitId}/review`, {
+      method: 'POST',
+      body: note ? { note } : {},
+    });
+  } catch (error) {
+    return toErrorState(error, 'The visit could not be marked as reviewed.');
+  }
+
+  revalidatePath('/visits');
+  revalidatePath(`/visits/${visitId}`);
+  return { status: 'success', message: 'Marked as reviewed.' };
+}
+
+/**
  * Move a planned visit to a different time.
  *
  * A mistyped date used to mean cancelling and planning again, which loses the

@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
+  hasFinished,
   maskMobile,
   type BookPresentationInput,
   type CreatePresentationSlotInput,
@@ -340,9 +341,28 @@ export class PresentationsService {
   async updateSlot(slotId: string, input: UpdatePresentationSlotInput) {
     const existing = await this.prisma.presentationSlot.findUnique({
       where: { id: slotId },
-      select: { id: true, eventId: true, startsAt: true },
+      select: { id: true, eventId: true, startsAt: true, durationMinutes: true },
     });
     if (!existing) throw new NotFoundException({ title: 'No such talk' });
+
+    /*
+      A talk that has finished is a record, not a plan.
+
+      The same cut-off training uses, from the same function, so the two read
+      the sentence identically rather than drifting into two nearly-equal
+      rules. Until it ends it can be edited or switched off; afterwards the
+      screen shows it read-only and this refuses, which is what stops somebody
+      quietly rewriting what was presented last month.
+    */
+    if (hasFinished(existing.startsAt, existing.durationMinutes, new Date())) {
+      const ended = new Date(
+        existing.startsAt.getTime() + existing.durationMinutes * 60_000,
+      );
+      throw new BadRequestException({
+        title: 'This talk has finished',
+        detail: `It ended at ${ended.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} and is now read-only.`,
+      });
+    }
 
     if (input.startsAt) {
       const event = await this.mustFindEvent(existing.eventId);

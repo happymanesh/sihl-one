@@ -5,6 +5,7 @@ import type { LeadListItem, Partner360 } from '@sihl-one/contracts';
 import { Badge, LeadStatusBadge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/shell/Icon';
+import { PartnerPortalPicker } from '@/components/partner/PartnerPortalPicker';
 import { ReferralCard, type ReferralLink } from '@/components/partner/ReferralCard';
 import { StatTile } from '@/components/ui/StatTile';
 import { apiFetch } from '@/lib/api';
@@ -31,21 +32,81 @@ interface CustomerRow {
  * Building a parallel set of partner-only endpoints would have meant a second
  * place for the scoping rules to be wrong.
  */
-export default async function PartnerPortalPage() {
+export default async function PartnerPortalPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ partnerId?: string }>;
+}) {
   const user = await requireUser();
-  if (!user.roles.includes('PARTNER')) redirect('/dashboard');
+
+  /*
+    Two readers, one page.
+
+    A partner sees their own portal, which is the whole point of it. A super
+    admin sees whichever partner they pick, so support can answer "what does
+    this partner actually see" — a question the Partners directory cannot
+    answer, because that shows the firm as SIHL sees it rather than the
+    referral link and lead list the partner logs in to.
+
+    Nobody else reaches it. Management used to see the menu entry and be
+    bounced straight back to the Dashboard, which is why it looked like a
+    duplicate of it.
+  */
+  const isPartner = user.roles.includes('PARTNER');
+  const isSuperAdmin = user.roles.includes('SUPER_ADMIN');
+  if (!isPartner && !isSuperAdmin) redirect('/dashboard');
+
+  const params = await searchParams;
+
+  // A partner's own id is never read from the URL: `/partners/me` is the only
+  // thing that decides whose portal a partner sees.
+  const viewingId = isPartner ? null : (params.partnerId ?? null);
+
+  const directory = isPartner
+    ? []
+    : // 100 is the cap the API enforces; asking for more is a validation
+      // error, not a larger page.
+      await apiFetch<Array<{ id: string; name: string }>>('/partners?pageSize=100')
+        .then((rows) => (Array.isArray(rows) ? rows : ((rows as { items?: [] }).items ?? [])))
+        .catch(() => []);
+
+  // Super admin before they have chosen: the picker and nothing else. There
+  // is no portal to show yet, and an empty one would read as a broken page.
+  if (!isPartner && !viewingId) {
+    return (
+      <div className="space-y-4">
+        <header>
+          <h1 className="text-2xl font-bold">Partner portal</h1>
+          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+            Pick a partner to see their own view of SIHL ONE.
+          </p>
+        </header>
+        <PartnerPortalPicker partners={directory} />
+      </div>
+    );
+  }
+
+  const base = isPartner ? '/partners/me' : `/partners/${viewingId}`;
+  // Scoped to the partner being viewed. A super admin's own scope is
+  // everything, so without this they would see the whole book under a
+  // partner's name.
+  const scope = isPartner ? '' : `&partnerId=${viewingId}`;
 
   const [partner, leads, clients, referral] = await Promise.all([
-    apiFetch<Partner360>('/partners/me'),
-    apiFetch<{ items: LeadListItem[]; total: number }>('/leads?pageSize=10'),
-    apiFetch<{ items: CustomerRow[]; total: number }>('/customers?pageSize=10'),
+    apiFetch<Partner360>(base),
+    apiFetch<{ items: LeadListItem[]; total: number }>(`/leads?pageSize=10${scope}`),
+    apiFetch<{ items: CustomerRow[]; total: number }>(`/customers?pageSize=10${scope}`),
     // Issued on first request. Degrades to nothing rather than taking the whole
     // portal down if it cannot be minted.
-    apiFetch<ReferralLink>('/partners/me/referral-link').catch(() => null),
+    apiFetch<ReferralLink>(`${base}/referral-link`).catch(() => null),
   ]);
 
   return (
     <div className="space-y-6">
+      {!isPartner ? (
+        <PartnerPortalPicker partners={directory} selectedId={viewingId ?? undefined} />
+      ) : null}
+
       <header>
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-2xl font-bold">{partner.profile.name}</h1>

@@ -231,6 +231,9 @@ export async function createLead(_previous: ActionState, formData: FormData): Pr
   const estimatedValue = formData.get('estimatedValue');
 
   const parsed = createLeadSchema.safeParse({
+    // Falls back rather than failing: the schema defaults it too, so an older
+    // form or a direct post still means what it always meant.
+    entityType: formData.get('entityType') || 'INDIVIDUAL',
     firstName: formData.get('firstName'),
     lastName: formData.get('lastName') || undefined,
     mobile: formData.get('mobile'),

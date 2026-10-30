@@ -12,12 +12,14 @@ import {
   checkInSchema,
   checkOutSchema,
   planVisitSchema,
+  reviewVisitSchema,
   visitQuerySchema,
   type CancelVisitInput,
   type RescheduleVisitInput,
   type CheckInInput,
   type CheckOutInput,
   type PlanVisitInput,
+  type ReviewVisitInput,
   type VisitQuery,
 } from '@sihl-one/contracts';
 
@@ -224,4 +226,21 @@ export class VisitsController {
     return this.visits.addExpense(user, id, body);
   }
 
+  @Post(':id/review')
+  @RequirePermissions('visit:update')
+  @ApiParam({ name: 'id' })
+  @ApiOperation({
+    summary: 'Accept a visit whose location evidence was flagged',
+    description:
+      'Records who looked and when. It does not clear the flag — the geometry is what it is — ' +
+      'but the visit leaves the needs-review queue. Reviewing twice is not an error.',
+  })
+  @ApiZodBody(reviewVisitSchema)
+  review(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('id', IdParamPipe) id: string,
+    @ZodBody(reviewVisitSchema) body: ReviewVisitInput,
+  ) {
+    return this.visits.review(user, id, body);
+  }
 }

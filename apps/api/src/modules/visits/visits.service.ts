@@ -21,6 +21,7 @@ import {
   type RescheduleVisitInput,
   type CheckInInput,
   type CheckOutInput,
+  type ReviewVisitInput,
   type PlanVisitInput,
   type VisitListItem,
   type VisitQuery,
@@ -42,6 +43,8 @@ type VisitRow = {
   id: string;
   reference: string;
   status: string;
+  reviewedAt?: Date | null;
+  reviewedBy?: { firstName: string; lastName: string } | null;
   purpose: string;
   mode?: string;
   modeMaster?: {
@@ -555,6 +558,97 @@ export class VisitsService {
       });
     }
 
+    /*
+      The view the screen asked for.
+
+      An explicit `status` still wins — the three buttons are a convenience
+      over the same filters, not a separate mechanism, so a link carrying a
+      status keeps working exactly as before.
+    */
+    /*
+      Needs review means flagged *and* not yet accepted.
+
+      Only the second half can be expressed here — the flag itself is derived
+      from the geometry after the rows come back — but excluding the accepted
+      ones in SQL keeps the queue shrinking as managers work it, which is the
+      whole point of the acknowledgement.
+    */
+    if (query.needsReview) {
+      and.push({ reviewedAt: null, status: 'COMPLETED' });
+    }
+
+    /*
+      The view, unless a narrower question was already asked.
+
+      Skipped when `needsReview` is set: that queue is completed visits, and
+      the default view is the opposite — planned and in progress. Letting
+      both apply pushed two contradictory status filters and the queue came
+      back empty however many visits were flagged.
+    */
+    if (!query.status && !query.needsReview) {
+      const now = new Date();
+      if (query.view === 'OPEN') {
+        // Planned, overdue and in progress. Overdue is not a status of its
+        // own — it is a planned visit whose time has passed — so it is
+        // already inside PLANNED and needs no separate clause.
+        and.push({ status: { in: ['PLANNED', 'CHECKED_IN'] } });
+      } else if (query.view === 'OVERDUE') {
+        and.push({ status: 'PLANNED', plannedAt: { lt: now } });
+      } else if (query.view === 'COMPLETED_7D') {
+        and.push({
+          status: 'COMPLETED',
+          checkOutAt: { gte: new Date(now.getTime() - 7 * 86_400_000) },
+        });
+      }
+    }
+
+    /*
+      Free text across the row.
+
+      The client is resolved first and matched by id, because a visit points
+      at its subject through `entityType` + `entityId` — a loose pointer with
+      nothing for the database to join on. Everything else is a column on the
+      visit or its owner, so those go into the same OR.
+    */
+    if (query.q) {
+      const needle = { contains: query.q, mode: 'insensitive' as const };
+      const [leads, customers] = await Promise.all([
+        this.prisma.lead.findMany({
+          where: {
+            deletedAt: null,
+            OR: [
+              { firstName: needle },
+              { lastName: needle },
+              { mobile: needle },
+              { reference: needle },
+            ],
+          },
+          select: { id: true },
+        }),
+        this.prisma.customer.findMany({
+          where: {
+            OR: [
+              { firstName: needle },
+              { lastName: needle },
+              { mobile: needle },
+              { reference: needle },
+            ],
+          },
+          select: { id: true },
+        }),
+      ]);
+      const subjectIds = [...leads, ...customers].map((row) => row.id);
+
+      and.push({
+        OR: [
+          { reference: needle },
+          { purpose: needle },
+          { user: { OR: [{ firstName: needle }, { lastName: needle }] } },
+          ...(subjectIds.length > 0 ? [{ entityId: { in: subjectIds } }] : []),
+        ],
+      });
+    }
+
     const where = { AND: and };
 
     const [rows, total] = await this.prisma.$transaction([
@@ -583,11 +677,71 @@ export class VisitsService {
     const names = await this.resolveEntityNames(rows);
     let items = rows.map((row) => this.toListItem(row as unknown as VisitRow, names));
 
-    // Applied after mapping because "needs review" is derived from the geometry
-    // rather than stored — see the note on VisitIntegrity.
+    /*
+      Applied after mapping, because "needs review" is derived from the
+      geometry rather than stored — see the note on VisitIntegrity.
+
+      Only the outstanding ones: a visit a manager has already accepted is
+      still flagged, because the evidence has not changed, but it is no
+      longer work. That half *is* stored, so it is excluded in SQL above
+      rather than here.
+
+      The total still counts rows before this filter, so a Needs-review page
+      can report more than it shows. Fixing that properly means persisting
+      the flag at check-out, which is a migration and a backfill of every
+      historic visit — worth doing, and deliberately not bundled into this
+      change.
+    */
     if (query.needsReview) items = items.filter((item) => item.requiresReview);
 
     return paginate(items, total, query.page, query.pageSize);
+  }
+
+  /**
+   * Record that a manager has looked at a flagged visit and accepted it.
+   *
+   * It does not clear `requiresReview`. The evidence is what it is — no fix
+   * at check-in, a check-out half a kilometre away — and rewriting that
+   * because somebody signed it off would destroy the only record of why the
+   * visit was questioned. What changes is that the visit leaves the queue.
+   *
+   * Idempotent: reviewing an already-reviewed visit is not an error, it just
+   * does not move the date. Two managers opening the same queue should not
+   * produce a failure for the slower one.
+   */
+  async review(user: AuthenticatedPrincipal, visitId: string, input: ReviewVisitInput) {
+    const visit = await this.prisma.visit.findFirst({
+      where: { id: visitId, AND: [this.scope.visitScope(user)] },
+      select: { id: true, reviewedAt: true, outcome: true },
+    });
+    if (!visit) throw new NotFoundException({ title: 'Visit not found' });
+
+    if (!visit.reviewedAt) {
+      await this.prisma.visit.update({
+        where: { id: visitId },
+        data: {
+          reviewedById: user.id,
+          reviewedAt: new Date(),
+          // The note joins the outcome rather than taking a column of its
+          // own: it is the same kind of thing — what somebody concluded about
+          // this visit — and a second free-text field invites the two to
+          // disagree.
+          ...(input.note
+            ? { outcome: [visit.outcome, `Reviewed: ${input.note}`].filter(Boolean).join(' · ') }
+            : {}),
+        },
+      });
+
+      await this.audit.record({
+        action: 'UPDATE',
+        resource: 'visit.review',
+        resourceId: visitId,
+        reason: input.note ?? 'Location evidence accepted',
+        changes: { reviewedBy: user.id },
+      });
+    }
+
+    return this.findOne(user, visitId);
   }
 
   /**
@@ -684,6 +838,7 @@ export class VisitsService {
       where: { id: visitId, AND: [this.scope.visitScope(user)] },
       include: {
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        reviewedBy: { select: { firstName: true, lastName: true } },
         attendees: {
           include: {
             user: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
@@ -789,6 +944,13 @@ export class VisitsService {
       durationMinutes: visit.durationMinutes,
       meetingNotes: visit.meetingNotes,
       outcome: visit.outcome,
+      // The flag stays true after a review — the geometry does not improve
+      // because somebody looked at it. These say a named person accepted it.
+      requiresReview: integrity.requiresReview,
+      reviewedBy: visit.reviewedBy
+        ? `${visit.reviewedBy.firstName} ${visit.reviewedBy.lastName}`.trim()
+        : null,
+      reviewedAt: visit.reviewedAt?.toISOString() ?? null,
       nextFollowUpAt: visit.nextFollowUpAt?.toISOString() ?? null,
       integrity,
       createdAt: visit.createdAt.toISOString(),
@@ -821,21 +983,46 @@ export class VisitsService {
     const start = istToday();
     const end = new Date(start.getTime() + 86_400_000);
 
-    const [planned, inProgress, completedToday] = await this.prisma.$transaction([
-      this.prisma.visit.findMany({
-        where: {
-          userId: user.id,
-          status: 'PLANNED',
-          OR: [{ plannedAt: { gte: start, lt: end } }, { plannedAt: null }],
-        },
-        orderBy: [{ plannedAt: 'asc' }],
-        take: 20,
-      }),
-      this.prisma.visit.findFirst({ where: { userId: user.id, status: 'CHECKED_IN' } }),
-      this.prisma.visit.count({
-        where: { userId: user.id, status: 'COMPLETED', checkOutAt: { gte: start, lt: end } },
-      }),
-    ]);
+    const [planned, inProgress, completedToday, overdue, openTotal] =
+      await this.prisma.$transaction([
+        this.prisma.visit.findMany({
+          where: {
+            userId: user.id,
+            status: 'PLANNED',
+            OR: [{ plannedAt: { gte: start, lt: end } }, { plannedAt: null }],
+          },
+          orderBy: [{ plannedAt: 'asc' }],
+          take: 20,
+        }),
+        this.prisma.visit.findFirst({ where: { userId: user.id, status: 'CHECKED_IN' } }),
+        this.prisma.visit.count({
+          where: { userId: user.id, status: 'COMPLETED', checkOutAt: { gte: start, lt: end } },
+        }),
+        /*
+          Overdue is a planned visit whose time has passed, counted across the
+          whole book rather than today — a visit missed last Tuesday is the
+          one most worth chasing, and counting only today hid exactly those.
+
+          Scoped the way the list is, not to this user alone. These two
+          numbers are tiles that link straight to that list, so counting
+          something different from what the click opens would show a manager
+          "0 overdue" above a list of four. For a rep, whose scope is SELF,
+          the two are the same number anyway.
+        */
+        this.prisma.visit.count({
+          where: {
+            AND: [this.scope.visitScope(user)],
+            status: 'PLANNED',
+            plannedAt: { lt: new Date() },
+          },
+        }),
+        this.prisma.visit.count({
+          where: {
+            AND: [this.scope.visitScope(user)],
+            status: { in: ['PLANNED', 'CHECKED_IN'] },
+          },
+        }),
+      ]);
 
     const names = await this.resolveEntityNames([
       ...planned,
@@ -848,6 +1035,10 @@ export class VisitsService {
       inProgress: inProgress ? this.toListItem(inProgress as unknown as VisitRow, names) : null,
       planned: planned.map((visit) => this.toListItem(visit as unknown as VisitRow, names)),
       completedToday,
+      // Counts behind the tiles, each one a filter the reader can click
+      // through to rather than a number they have to go and reconstruct.
+      overdue,
+      openTotal,
     };
   }
 
@@ -890,6 +1081,12 @@ export class VisitsService {
       outcome: visit.outcome,
       locationQuality: locationQuality(toNumber(visit.checkInAccuracy)),
       requiresReview: integrity.requiresReview,
+      // The flag stays true after a review — the geometry does not improve
+      // because somebody looked. These say that a named person accepted it.
+      reviewedBy: visit.reviewedBy
+        ? `${visit.reviewedBy.firstName} ${visit.reviewedBy.lastName}`.trim()
+        : null,
+      reviewedAt: visit.reviewedAt?.toISOString() ?? null,
       isOverdue: Boolean(
         visit.status === 'PLANNED' && visit.plannedAt && visit.plannedAt < new Date(),
       ),

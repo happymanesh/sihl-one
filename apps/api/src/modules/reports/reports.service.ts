@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   DEFAULT_REPORT_DAYS,
   NO_VERTICAL_HEAD,
+  istDayWindow,
   rate,
   verticalHeadOf,
   type BranchReportRow,
@@ -15,6 +16,7 @@ import {
   type StatusReportRow,
 } from '@sihl-one/contracts';
 
+import { istDayKey } from '../../common/ist-day';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScopeService } from '../../common/scope.service';
 import type { AuthenticatedPrincipal } from '../../common/types';
@@ -50,8 +52,21 @@ export class ReportsService {
    * midnight disagree with itself.
    */
   period(range: ReportRange): { from: Date; to: Date; view: ReportPeriod } {
-    const to = range.to ?? new Date();
-    const from = range.from ?? new Date(to.getTime() - DEFAULT_REPORT_DAYS * 86_400_000);
+    /*
+      The default is whole IST days too, not "this time 30 days ago".
+
+      A caller who names no range is the first load of the Reports screen.
+      Anchoring on the current instant gave a window with a half-day at each
+      end, so the first and last days of the report were partial and the
+      totals quietly disagreed with the same report run an hour later. Whole
+      days are what the comparison against "the previous period" assumes, and
+      what anybody reading a 30-day figure takes it to mean.
+    */
+    const today = istDayKey(new Date());
+    const to = range.to ?? istDayWindow(today).to;
+    const from =
+      range.from ??
+      istDayWindow(istDayKey(new Date(to.getTime() - (DEFAULT_REPORT_DAYS - 1) * 86_400_000))).from;
     return {
       from,
       to,

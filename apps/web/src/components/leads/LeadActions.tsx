@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, useRef } from 'react';
+import { useActionState, useEffect, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import { ProductPicker } from '@/components/leads/ProductPicker';
 import {
@@ -270,6 +270,59 @@ function LogInteractionForm({
   const [mode, setMode] = useState('');
   const [converting, setConverting] = useState(false);
 
+  /*
+    Everything typed, held here.
+
+    A form action resets uncontrolled inputs once it returns, so a refused
+    save threw away the whole interaction — the summary, the remarks, the
+    follow-up date — and the rep had to write it again to fix one field. What
+    somebody just typed about a conversation they just had is the most
+    expensive thing on this screen to lose.
+  */
+  const [values, setValues] = useState({
+    type: 'CALL',
+    direction: 'OUTBOUND',
+    durationMinutes: '',
+    subject: '',
+    body: '',
+    outcome: '',
+    nextFollowUpAt: '',
+    meetingLink: '',
+    lostReason: '',
+  });
+  const bind = (field: keyof typeof values) => ({
+    value: values[field],
+    onChange: (event: { target: { value: string } }) =>
+      setValues((current) => ({ ...current, [field]: event.target.value })),
+  });
+
+  /*
+    Cleared on a successful save, and only then.
+
+    The form already remounts on success via its `key`, which emptied the
+    inputs while they were uncontrolled. Now the values live up here, so a
+    remount re-renders them unchanged and the clearing has to be explicit —
+    otherwise logging one call leaves its summary in the box, ready to be
+    logged twice.
+
+    Keyed on the whole state object, not `state.status`: two successes in a
+    row leave that string identical and the effect would never re-run.
+  */
+  useEffect(() => {
+    if (state.status !== 'success') return;
+    setValues({
+      type: 'CALL',
+      direction: 'OUTBOUND',
+      durationMinutes: '',
+      subject: '',
+      body: '',
+      outcome: '',
+      nextFollowUpAt: '',
+      meetingLink: '',
+      lostReason: '',
+    });
+  }, [state]);
+
   // The guess follows what is typed until the rep overrides it, and the
   // override then sticks — retyping a character should not undo their choice.
 
@@ -344,6 +397,7 @@ function LogInteractionForm({
             type="url"
             className="input"
             placeholder="https://meet.google.com/…"
+            {...bind('meetingLink')}
             aria-invalid={Boolean(state.errors?.meetingLink)}
             aria-describedby="meeting-link-help"
           />
@@ -373,7 +427,7 @@ function LogInteractionForm({
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
           <label className="label" htmlFor="type">Type</label>
-          <select id="type" name="type" className="input" defaultValue="CALL">
+          <select id="type" name="type" className="input" {...bind('type')}>
             {['CALL', 'WHATSAPP', 'EMAIL', 'SMS', 'MEETING', 'NOTE'].map((type) => (
               <option key={type} value={type}>{humanise(type)}</option>
             ))}
@@ -381,14 +435,14 @@ function LogInteractionForm({
         </div>
         <div>
           <label className="label" htmlFor="direction">Direction</label>
-          <select id="direction" name="direction" className="input" defaultValue="OUTBOUND">
+          <select id="direction" name="direction" className="input" {...bind('direction')}>
             <option value="OUTBOUND">Outbound</option>
             <option value="INBOUND">Inbound</option>
           </select>
         </div>
         <div>
           <label className="label" htmlFor="durationMinutes">Duration (min)</label>
-          <input id="durationMinutes" name="durationMinutes" type="number" min={0} max={600} className="input" />
+          <input id="durationMinutes" name="durationMinutes" type="number" min={0} max={600} className="input" {...bind('durationMinutes')} />
         </div>
       </div>
 
@@ -405,6 +459,7 @@ function LogInteractionForm({
           className="input"
           required
           placeholder="Enter discussion topic or agenda"
+          {...bind('subject')}
           aria-invalid={missing.includes('subject') || Boolean(state.errors?.subject)}
           aria-describedby={missing.includes('subject') ? 'subject-error' : undefined}
         />
@@ -429,6 +484,7 @@ function LogInteractionForm({
             rows={3}
             className="input min-w-0 flex-1 resize-none"
             placeholder="Anything the next person needs to know."
+            {...bind('body')}
           />
           <VoiceInputButton enabled={voiceInputEnabled} targetId="body" />
         </div>
@@ -439,13 +495,13 @@ function LogInteractionForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label" htmlFor="outcome">Outcome</label>
-          <input id="outcome" name="outcome" className="input" placeholder="Interested, call back Friday" />
+          <input id="outcome" name="outcome" className="input" placeholder="Interested, call back Friday" {...bind('outcome')} />
         </div>
         <div>
           {/* Scheduling the next follow-up from the same form is what keeps the
               overdue count meaningful — a separate step gets skipped. */}
           <label className="label" htmlFor="nextFollowUpAt">Next follow-up</label>
-          <input id="nextFollowUpAt" name="nextFollowUpAt" type="datetime-local" className="input" />
+          <input id="nextFollowUpAt" name="nextFollowUpAt" type="datetime-local" className="input" {...bind('nextFollowUpAt')} aria-invalid={Boolean(state.errors?.nextFollowUpAt)} />
         </div>
       </div>
 
@@ -475,7 +531,7 @@ function LogInteractionForm({
           {nextStatus === 'LOST' ? (
             <div className="mt-2">
               <label className="label" htmlFor="lostReason">Why was it lost?</label>
-              <input id="lostReason" name="lostReason" className="input" />
+              <input id="lostReason" name="lostReason" className="input" {...bind('lostReason')} aria-invalid={Boolean(state.errors?.lostReason)} />
             </div>
           ) : null}
 

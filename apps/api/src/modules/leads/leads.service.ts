@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -9,7 +10,10 @@ import {
   closedSince,
   isOpenLeadProductStatus,
   OPEN_LEAD_PRODUCT_STATUSES,
+  SLIPPING_DAYS,
+  LEAD_ENTITY_TYPE_LABELS,
   LEAD_LOST_REASONS,
+  type LeadEntityType,
   rollUpLeadStatus,
   canTransitionLead,
   LEAD_STATUS_TRANSITIONS,
@@ -158,6 +162,8 @@ const LEAD_EXPORT_MAX_ROWS = 20_000;
 
 @Injectable()
 export class LeadsService {
+  private readonly logger = new Logger(LeadsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly scope: ScopeService,
@@ -613,6 +619,7 @@ export class LeadsService {
       nextFollowUpAt: lead.nextFollowUpAt?.toISOString() ?? null,
       lastActivityAt: lead.lastActivityAt?.toISOString() ?? null,
       convertedAt: lead.convertedAt?.toISOString() ?? null,
+      entityType: lead.entityType,
       lostReason: lead.lostReason,
       lostNote: lead.lostNote,
       createdAt: lead.createdAt.toISOString(),
@@ -664,7 +671,7 @@ export class LeadsService {
   // -------------------------------------------------------------------------
 
   async create(user: AuthenticatedPrincipal, input: CreateLeadInput) {
-    await this.assertNoOpenDuplicate(input.mobile);
+    await this.assertNoOpenDuplicate(input.mobile, input.entityType);
 
     // A lead created by a salesperson defaults to that salesperson. Leaving it
     // unassigned would put it in a queue nobody is watching.
@@ -696,6 +703,10 @@ export class LeadsService {
       const created = await tx.lead.create({
         data: {
           reference,
+          // Only this path carries one: the public capture form and the
+          // quick-add take the column's INDIVIDUAL default, which is what a
+          // walk-in or a QR scan is until somebody says otherwise.
+          entityType: input.entityType,
           firstName: input.firstName,
           lastName: input.lastName ?? null,
           mobile: input.mobile,
@@ -2110,6 +2121,25 @@ export class LeadsService {
         status: { notIn: [...CLOSED_LEAD_STATUSES] },
       });
     }
+    /*
+      How long since anybody spoke to the lead.
+
+      Reads `lastActivityAt`, exactly as the performance report does, so the
+      number on that screen and the list it drills into agree. `never` is the
+      NULL side; `stale` includes it, because a lead nobody has ever rung is
+      also a lead nobody has rung lately.
+    */
+    if (query.contact === 'never') {
+      and.push({ lastActivityAt: null });
+    } else if (query.contact === 'stale') {
+      and.push({
+        OR: [
+          { lastActivityAt: null },
+          { lastActivityAt: { lt: new Date(Date.now() - SLIPPING_DAYS * 86_400_000) } },
+        ],
+      });
+    }
+
     // Unverified is the side worth hunting for, and it is the NULL side, so it
     // cannot be expressed as an equality.
     if (query.mobileVerified !== undefined) {
@@ -2859,18 +2889,47 @@ export class LeadsService {
    * history to tidy a list.
    */
   private async standDownOpenWork(tx: Prisma.TransactionClient, leadId: string): Promise<void> {
-    const openCodes = (
-      await tx.taskStatusMaster.findMany({
-        where: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
-        select: { code: true },
-      })
-    ).map((row) => row.code);
+    /*
+      Both ends of this read the status master.
 
-    if (openCodes.length > 0) {
+      It already resolved the open codes correctly and then wrote the literal
+      'CANCELLED' back — which is only right if a master row happens to be
+      coded that way. The master is administrator-editable, so a cancelled
+      status named anything else left the task carrying a code that matches no
+      row: invisible to every category filter, and stuck open forever.
+    */
+    const statuses = await tx.taskStatusMaster.findMany({
+      where: { category: { in: ['OPEN', 'IN_PROGRESS', 'CANCELLED'] } },
+      select: { code: true, category: true, isActive: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    // Open codes are taken whether or not the status is still active: a task
+    // sitting on a status an administrator has since switched off is still an
+    // open task, and still has to be stood down.
+    const openCodes = statuses.filter((row) => row.category !== 'CANCELLED').map((row) => row.code);
+
+    // An active cancelled status by preference, and the first by sort order,
+    // so a master with several picks the one an administrator put at the top
+    // rather than an arbitrary row. Falls back to an inactive one rather than
+    // leaving the work standing.
+    const cancelled =
+      statuses.find((row) => row.category === 'CANCELLED' && row.isActive) ??
+      statuses.find((row) => row.category === 'CANCELLED');
+
+    if (openCodes.length > 0 && cancelled) {
       await tx.task.updateMany({
         where: { entityType: 'LEAD', entityId: leadId, status: { in: openCodes } },
-        data: { status: 'CANCELLED' },
+        data: { status: cancelled.code },
       });
+    } else if (openCodes.length > 0) {
+      // Said out loud rather than passed over. Without a cancelled status the
+      // tasks stay open against a closed lead, and the rep keeps being chased
+      // for a client who has gone — a configuration problem that would
+      // otherwise only surface as a complaint months later.
+      this.logger.warn(
+        'No task status with category CANCELLED exists; open tasks on closed leads cannot be stood down.',
+      );
     }
 
     await tx.visit.updateMany({
@@ -4056,10 +4115,27 @@ export class LeadsService {
     }));
   }
 
-  private async assertNoOpenDuplicate(mobile: string): Promise<void> {
+  /**
+   * Refuse a second open lead for the same person.
+   *
+   * Keyed on mobile *and* entity type. An HUF is a different legal entity
+   * from the individual who is its karta — different PAN, different account —
+   * and routinely shares the karta's mobile number. Matching on the number
+   * alone refused that second account outright, with no way round it while
+   * the individual's lead was still open, which is not something a rep could
+   * work around and not something the business wanted refused.
+   *
+   * Two leads of the *same* type on one number are still refused, which is
+   * the case this check exists for.
+   */
+  private async assertNoOpenDuplicate(
+    mobile: string,
+    entityType: LeadEntityType = 'INDIVIDUAL',
+  ): Promise<void> {
     const existing = await this.prisma.lead.findFirst({
       where: {
         mobile,
+        entityType,
         deletedAt: null,
         status: { notIn: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
       },
@@ -4084,8 +4160,10 @@ export class LeadsService {
       throw new BadRequestException({
         title: 'Lead already exists',
         detail:
-          `Lead already exists. added on : ${addedOn} (${existing.reference}), ${withWhom}. ` +
-          `Add your update to that lead instead.`,
+          `An existing ${LEAD_ENTITY_TYPE_LABELS[entityType].toLowerCase()} lead already uses ` +
+          `this number. Added on ${addedOn} (${existing.reference}), ${withWhom}. Add your update ` +
+          `to that lead instead — or change the entity type if this is a different account, ` +
+          `such as an HUF.`,
         errors: {
           mobile: [
             `Already exists, added on ${addedOn} as ${existing.reference}, ` +
