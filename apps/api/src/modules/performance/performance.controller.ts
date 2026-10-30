@@ -46,6 +46,21 @@ export class PerformanceController {
     return this.report.verticals();
   }
 
+  @Get('report/verticals')
+  @RequirePermissions('analytics:sales:read')
+  @ApiOperation({
+    summary: 'One report per vertical head, for the daily round of emails',
+    description:
+      'Every report in the batch shares one anchor date, so a set of emails cannot disagree ' +
+      'about which day it covers. Sends nothing — this is what would be sent.',
+  })
+  reportPerVertical(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Query(new ZodValidationPipe(performanceReportQuerySchema)) query: PerformanceReportQuery,
+  ) {
+    return this.report.reportPerVertical(user, query);
+  }
+
   @Get('report')
   @RequirePermissions('analytics:sales:read')
   @ApiOperation({ summary: 'Performance across a team, region or branch' })
