@@ -45,16 +45,32 @@ export class UsersService {
       regional head sees their whole vertical rather than the handful of people
       who happen to report to them directly.
     */
+    /*
+      Both of these go in `AND`, because either can be an `OR` of its own: a
+      branch manager's scope is "me, or anybody in my subtree", and a search is
+      "first name, or last name, or email".
+
+      Merged onto `where` side by side, the search's `OR` simply replaced the
+      scope's — so the filter fell back to every active internal user and the
+      picker answered a search with the whole firm's roster. Exactly the leak
+      the note above says this list exists to prevent, reachable by typing.
+    */
+    const and: Record<string, unknown>[] = [];
+
     const widen = forTransfer && canTransferLeads(user.dataScope);
-    if (!widen) Object.assign(where, this.scope.assignableUserScope(user));
+    if (!widen) and.push(this.scope.assignableUserScope(user));
 
     if (search) {
-      where.OR = [
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
+      and.push({
+        OR: [
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      });
     }
+
+    if (and.length) where.AND = and;
 
     const users = await this.prisma.user.findMany({
       where,

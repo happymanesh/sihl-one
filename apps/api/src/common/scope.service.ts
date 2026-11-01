@@ -287,12 +287,22 @@ export class ScopeService {
     if (targetUserId === user.id) return true;
     if (user.dataScope === 'ALL' && !user.partnerId) return true;
 
+    /*
+      Both halves must hold of the same row: it has to be the target, and the
+      target has to sit inside what this user may hand work to.
+
+      `AND` rather than spreading the scope beside the id, which is what this
+      did. A `SELF` filter is `{ id: user.id }` and a `TEAM` filter
+      `{ id: { in: [...] } }`, so the spread overwrote `id` and the query became
+      "is this user, or anyone on their team, active?" — which answers yes
+      whoever the target is, and that is the whole check.
+    */
     const match = await this.prisma.user.findFirst({
       where: {
         id: targetUserId,
         deletedAt: null,
         status: 'ACTIVE',
-        ...this.assignableUserScope(user),
+        AND: [this.assignableUserScope(user)],
       },
       select: { id: true },
     });
