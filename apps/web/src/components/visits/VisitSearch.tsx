@@ -19,11 +19,21 @@ export function VisitSearch() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      /*
+        Nothing is rewritten unless the search itself changed.
+
+        This effect runs on mount too, and dropping `page` before comparing
+        meant that merely arriving on /visits?page=2 rewrote the address to
+        /visits — as a `replace`, so the history entry for page 2 was
+        overwritten and Back from a lead returned to page 1.
+      */
+      if ((params.get('q') ?? '') === draft) return;
+
       const next = new URLSearchParams(params.toString());
       if (draft) next.set('q', draft);
       else next.delete('q');
-      // A new search starts at the top. Staying on page three of a narrower
-      // result is how a list appears to be empty.
+      // Only once the search changed: a new one starts at the top, because
+      // staying on page three of a narrower result looks like an empty list.
       next.delete('page');
 
       const query = next.toString();

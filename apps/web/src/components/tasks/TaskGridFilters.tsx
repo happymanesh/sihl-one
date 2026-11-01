@@ -40,18 +40,37 @@ export function TaskGridFilters({ assignees }: { assignees: Array<{ id: string; 
   const serialised = JSON.stringify(draft);
   useEffect(() => {
     const timer = setTimeout(() => {
+      const typed = JSON.parse(serialised) as typeof draft;
+
+      /*
+        Does what was typed differ from what the URL already says?
+
+        This has to be asked before anything is rewritten. The effect runs on
+        mount as well as on a keystroke, and the earlier version dropped
+        `page` unconditionally and then compared — so simply arriving on
+        /tasks?page=3 rewrote the address to /tasks. Because that was a
+        `replace`, it overwrote the history entry for page 3, and Back from a
+        lead returned to page 1 instead of where the reader actually was.
+
+        Comparing the filters alone leaves an untouched grid untouched, which
+        is what makes the page survive a round trip to a lead and back.
+      */
+      const changed = Object.entries(typed).some(
+        ([key, value]) => (params.get(key) ?? '') !== value,
+      );
+      if (!changed) return;
+
       const next = new URLSearchParams(params.toString());
-      for (const [key, value] of Object.entries(JSON.parse(serialised) as typeof draft)) {
+      for (const [key, value] of Object.entries(typed)) {
         if (value) next.set(key, value);
         else next.delete(key);
       }
-      // Any change to a filter puts you back on the first page. Staying on
-      // page 4 of a narrower result is how a grid appears to be empty.
+      // Only now: a changed filter puts you back on the first page, because
+      // staying on page 4 of a narrower result is how a grid appears empty.
       next.delete('page');
 
       const query = next.toString();
-      const current = params.toString();
-      if (query === current) return;
+      if (query === params.toString()) return;
       router.replace(`/tasks${query ? `?${query}` : ''}` as Route, { scroll: false });
     }, 350);
 

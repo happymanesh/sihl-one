@@ -176,6 +176,21 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
 
   MANAGEMENT: [
+    /*
+      Adding a lead by hand, and Insta Lead.
+
+      Both roles could import a spreadsheet of thousands and not type in a
+      single walk-in, which is the wrong way round: an import is the bulk,
+      riskier act and it was the only one they had.
+
+      The visit grants come with Insta Lead rather than on their own merit.
+      It captures someone in person and checks straight into the meeting, so
+      without `visit:create` the button cannot work, and without read and
+      update the user is left inside a visit they cannot see or close.
+    */
+    'lead:create',
+    'visit:create',
+    'visit:update',
     'training:manage',
     'test:manage',
     'report:mis',
@@ -204,6 +219,22 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   OPERATIONS: [
+    /*
+      Adding a lead by hand, and Insta Lead.
+
+      Both roles could import a spreadsheet of thousands and not type in a
+      single walk-in, which is the wrong way round: an import is the bulk,
+      riskier act and it was the only one they had.
+
+      The visit grants come with Insta Lead rather than on their own merit.
+      It captures someone in person and checks straight into the meeting, so
+      without `visit:create` the button cannot work, and without read and
+      update the user is left inside a visit they cannot see or close.
+    */
+    'lead:create',
+    'visit:create',
+    'visit:read',
+    'visit:update',
     'training:manage',
     'test:manage',
     'report:mis',
