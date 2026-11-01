@@ -33,6 +33,9 @@ const PATHS: Record<string, string> = {
   refresh:
     'M12 4a8 8 0 1 0 7.6 5.5h-2.15A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35A7.96 7.96 0 0 0 12 4Z',
   'chevron-down': 'M7.4 9 12 13.6 16.6 9 18 10.4l-6 6-6-6L7.4 9Z',
+  // Used once, on the lead purge entry. The menu has no other delete, which is
+  // the point — this glyph appears nowhere a routine action lives.
+  trash: 'M9 3h6l1 2h4v2H4V5h4l1-2ZM6 8h12l-1 13H7L6 8Zm4 2v9h1.5v-9H10Zm3 0v9h1.5v-9H13Z',
 };
 
 export function Icon({

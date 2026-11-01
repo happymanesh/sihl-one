@@ -18,6 +18,23 @@ export const PERMISSIONS = [
   'lead:convert',
   'lead:export',
   'lead:import',
+  /*
+    Permanent, irreversible destruction of a lead and everything hanging off it.
+
+    Deliberately not `lead:delete`, which every operations user holds and which
+    only sets `deletedAt` — a soft delete the record survives and can be undone
+    from. This one leaves nothing behind but the audit row, so it is its own
+    grant, held by super admin alone through ALL_PERMISSIONS and named in no
+    other role's list.
+
+    It exists for the two cases a soft delete cannot answer: an erasure the
+    DPDP Act obliges SIHL to carry out, and test or junk data that must not sit
+    in a regulated book for ever. Both are rare and both are decisions somebody
+    has to be accountable for, which is why the endpoint demands the lead
+    number typed back and a written reason, and why the audit row records a
+    count of every table it emptied.
+  */
+  'lead:purge',
 
   // CRM — customers
   'customer:read',

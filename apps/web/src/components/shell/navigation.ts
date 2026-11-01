@@ -113,6 +113,14 @@ export const NAV_ITEMS: NavItem[] = [
 
   { label: 'Sources & products', href: '/admin/masters', icon: 'grid', permissions: ['system:configure'], section: 'admin' },
   { label: 'Audit trail', href: '/admin/audit', icon: 'file', permissions: ['audit:read'], section: 'admin' },
+  /*
+    Last in the list on purpose, and gated on a permission only super admin
+    holds, so for everybody else this entry does not exist. The page behind it
+    destroys a lead permanently; it is reachable from the menu rather than
+    from a lead precisely so that getting there is a decision rather than a
+    stray click next to Transfer.
+  */
+  { label: 'Purge a lead', href: '/admin/lead-purge' as Route, icon: 'trash', permissions: ['lead:purge'], section: 'admin' },
 ];
 
 export const SECTION_LABELS: Record<NavItem['section'], string> = {
