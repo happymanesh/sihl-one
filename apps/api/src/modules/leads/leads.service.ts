@@ -2436,35 +2436,70 @@ export class LeadsService {
    * Closed leads are reported too. A number belonging to a lead marked lost six
    * months ago is not a blocker, but it is worth knowing before the same
    * conversation is started from scratch.
+   *
+   * Keyed on mobile *and* account type, like `assertNoOpenDuplicate`. While
+   * this read looked at the number alone it contradicted the write guard it
+   * exists to pre-announce: the form said "already an open lead" for a number
+   * the database would have accepted, so adding an HUF meant overriding a
+   * warning that was simply wrong. A warning a rep is routinely right to
+   * ignore is worse than no warning.
    */
   async checkMobile(
     user: AuthenticatedPrincipal,
     input: CheckLeadMobileInput,
   ): Promise<DuplicateLeadMatch> {
-    const existing = await this.prisma.lead.findFirst({
-      where: {
-        mobile: input.mobile,
-        deletedAt: null,
-        ...(input.excludeLeadId ? { id: { not: input.excludeLeadId } } : {}),
-      },
-      // An open lead is the one worth surfacing, so prefer it over a closed one
-      // that happens to be newer.
-      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
-      select: {
-        id: true,
-        reference: true,
-        firstName: true,
-        lastName: true,
-        status: true,
-        createdAt: true,
-        productInterest: true,
-        owner: { select: { firstName: true, lastName: true } },
-        ownerId: true,
-        orgUnitId: true,
-      },
+    const exclude = input.excludeLeadId ? { id: { not: input.excludeLeadId } } : {};
+    const select = {
+      id: true,
+      reference: true,
+      firstName: true,
+      lastName: true,
+      entityType: true,
+      status: true,
+      createdAt: true,
+      productInterest: true,
+      owner: { select: { firstName: true, lastName: true } },
+      ownerId: true,
+      orgUnitId: true,
+    };
+    // An open lead is the one worth surfacing, so prefer it over a closed one
+    // that happens to be newer.
+    const orderBy = [{ status: 'asc' as const }, { createdAt: 'desc' as const }];
+
+    /*
+      Two looks, in the order the rep needs them.
+
+      A lead of the *same* account type is the one that matters: it is what the
+      unique index forbids and what the save will refuse. Only when there is
+      none is a different type reported, and then as context rather than an
+      obstacle — the karta's individual lead, while the family's HUF is being
+      opened, is a useful thing to see and not a reason to stop.
+
+      Two queries rather than one, because "same type first" is not an ordering
+      Prisma can express over an enum whose declaration order means something
+      else entirely.
+    */
+    const sameType = await this.prisma.lead.findFirst({
+      where: { mobile: input.mobile, entityType: input.entityType, deletedAt: null, ...exclude },
+      orderBy,
+      select,
     });
 
-    if (!existing) return { exists: false, visible: false, lead: null };
+    const existing =
+      sameType ??
+      (await this.prisma.lead.findFirst({
+        where: { mobile: input.mobile, deletedAt: null, ...exclude },
+        orderBy,
+        select,
+      }));
+
+    if (!existing) return { exists: false, visible: false, blocks: false, lead: null };
+
+    // Only a live lead of the same type stands in the way. Anything else is
+    // reported for recognition, which is why `blocks` is answered here rather
+    // than left for the screen to infer from a status it would have to know
+    // the closed set of.
+    const blocks = Boolean(sameType) && !CLOSED_LEAD_STATUSES.has(existing.status);
 
     // Same scope filter the list uses, applied to this one row. Re-deriving the
     // rule here would be a second place for it to drift.
@@ -2476,16 +2511,20 @@ export class LeadsService {
     if (!visible) {
       // Everything identifying is withheld. See the note on DuplicateLeadMatch:
       // the alternative turns this into a directory of the whole firm's book.
-      return { exists: true, visible: false, lead: null };
+      // `blocks` still travels, because whether a different account type would
+      // be accepted is not a fact about anybody's client.
+      return { exists: true, visible: false, blocks, lead: null };
     }
 
     return {
       exists: true,
       visible: true,
+      blocks,
       lead: {
         id: existing.id,
         reference: existing.reference,
         name: [existing.firstName, existing.lastName].filter(Boolean).join(' ').trim(),
+        entityType: existing.entityType as LeadEntityType,
         status: existing.status as LeadStatus,
         ownerName: existing.owner
           ? `${existing.owner.firstName} ${existing.owner.lastName}`.trim()
@@ -3246,9 +3285,21 @@ export class LeadsService {
    * stopping the rep dead to explain a data rule is the worst available answer.
    */
   async instaLead(user: AuthenticatedPrincipal, input: InstaLeadInput): Promise<InstaLeadResult> {
+    /*
+      Scoped to individuals, because that is all this ever creates.
+
+      Insta Lead asks for a name, a number and where you are standing; it does
+      not ask what kind of account, and the insert below takes the column's
+      INDIVIDUAL default. So the lead it looks for has to be an individual
+      too. Matching on the number alone meant a walk-in whose number already
+      sat on the family's *HUF* lead was quietly attached to that HUF — the
+      meeting recorded against the wrong entity, and no individual lead
+      created at all, which is the one thing the button is for.
+    */
     const existing = await this.prisma.lead.findFirst({
       where: {
         mobile: input.mobile,
+        entityType: 'INDIVIDUAL',
         deletedAt: null,
         status: { notIn: ['CONVERTED', 'LOST', 'DISQUALIFIED'] },
       },

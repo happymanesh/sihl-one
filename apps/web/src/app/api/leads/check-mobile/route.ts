@@ -14,9 +14,14 @@ const API_BASE =
  * The browser cannot call the API directly: the access token lives in an
  * httpOnly cookie, which is the point of keeping it there.
  *
- * Only `mobile` and `excludeLeadId` are forwarded. Passing the caller's query
- * string through wholesale would let anything appended in the browser reach the
- * API, and this endpoint answers questions about other people's clients.
+ * Only `mobile`, `entityType` and `excludeLeadId` are forwarded. Passing the
+ * caller's query string through wholesale would let anything appended in the
+ * browser reach the API, and this endpoint answers questions about other
+ * people's clients.
+ *
+ * The allowlist is why `entityType` has to be named here: a parameter the
+ * browser sends and this route drops is silently ignored, and the check would
+ * have gone on answering for individuals whatever account type was picked.
  */
 export async function GET(request: Request): Promise<NextResponse> {
   const token = await getAccessToken();
@@ -31,6 +36,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   const params = new URLSearchParams({ mobile });
+  // Left out when absent rather than defaulted here, so INDIVIDUAL is decided
+  // in one place — the schema — and not again in every caller.
+  const entityType = incoming.get('entityType');
+  if (entityType) params.set('entityType', entityType);
   const exclude = incoming.get('excludeLeadId');
   if (exclude) params.set('excludeLeadId', exclude);
 
@@ -40,7 +49,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   });
 
   const body: unknown = await response.json().catch(() => null);
-  return NextResponse.json(body ?? { exists: false, visible: false, lead: null }, {
+  return NextResponse.json(body ?? { exists: false, visible: false, blocks: false, lead: null }, {
     status: response.status,
   });
 }

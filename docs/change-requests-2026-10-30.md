@@ -176,6 +176,55 @@ director's number.
 
 ---
 
+### CR-25 — Carry account type through the rest of the product
+**Change.** CR-17 landed the column and the database key, and stopped there.
+`lead.entityType` is `NOT NULL DEFAULT 'INDIVIDUAL'`, so every lead that
+predates it already reads as Individual and anything that does not name a type
+gets Individual; `lead_active_mobile_entity_key` already enforces one live
+lead per `(mobile, entityType)`; Insta Lead's insert omits the field and so
+saves an Individual. All of that is correct and needs no further work.
+
+What was missed is that the identity rule is only half-applied. The database
+knows the pair; three places in the application still key on the number alone,
+and four screens never show the type at all.
+
+**Bugs left behind by CR-17:**
+
+- `checkMobile` — the Add Lead form's live duplicate warning — keys on mobile
+  only, so the form warns "already exists" for an account type the database
+  would happily accept. The screen and the constraint disagree.
+- Insta Lead's duplicate pre-check keys on mobile only. A walk-in whose number
+  sits on an **HUF** lead is attached to that HUF lead instead of starting an
+  Individual one — the opposite of what Insta Lead is for.
+- Duplicate detection groups `by: ['mobile']`, so a legitimate
+  Individual + HUF pair is reported as a duplicate for ever, with nothing a
+  user can do to resolve it.
+
+**Missing display:**
+
+- Lead **detail** panel — account type is not shown anywhere, so a rep cannot
+  tell an HUF lead from the karta's own.
+- **Lead import** — add an account-type column. Without it every imported row
+  is silently an Individual, which is also the one case where a file of HUF
+  accounts is most likely to arrive.
+- **Report** and **MIS Summary** — add the column, and a filter.
+- **Performance report** — add account type as a dimension.
+
+**Decision:** approved. One live lead per number *per account type*, applied
+consistently in the application and not only in the database; account type
+visible wherever a lead is read, imported or counted. Leads with no type
+continue to read as Individual, and Insta Lead continues to save Individual.
+
+*Files:* `apps/api/src/modules/leads/leads.service.ts`,
+`apps/api/src/modules/duplicates/duplicates.service.ts`,
+`apps/api/src/modules/imports/imports.service.ts`,
+`apps/api/src/modules/reports/{reports,mis}.service.ts`,
+`apps/api/src/modules/performance/performance-report.service.ts`,
+`packages/contracts/src/{import,report,performance}.ts`,
+`apps/web/src/app/(app)/leads/[id]/page.tsx`
+
+---
+
 ### CR-18 — Remove lead-level "Lost reason"
 **Change.** Superseded by product-wise status. The lead-level reason still
 displays on the detail panel, and `LeadActions` still *asks* "Why was it
@@ -367,6 +416,11 @@ the `changes` JSON payload, which is most of the volume; and measure which
   a literal status instead of resolving it from the status master.
 - **CR-6, CR-10 and CR-16** all add navigation back and forth between screens;
   worth doing as one piece of work so the behaviour is consistent.
+- **CR-25 after CR-17** — it finishes CR-17. Do the three application-level
+  duplicate checks before the display work: while the form, Insta Lead and
+  duplicate detection still read the number alone, the screens contradict the
+  constraint, and showing the type everywhere would only make the
+  contradiction easier to see.
 
 ## Open questions
 

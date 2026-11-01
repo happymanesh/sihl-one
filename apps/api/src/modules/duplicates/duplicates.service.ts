@@ -7,6 +7,7 @@ import {
   suggestSurvivor,
   type DuplicateGroup,
   type DuplicateQuery,
+  type LeadEntityType,
   type MergeableRecord,
   type MergeLeadsInput,
   type MergePreview,
@@ -117,12 +118,15 @@ export class DuplicatesService {
       // filter correct.
       const values = await this.duplicatedValues(key, where);
 
-      for (const value of values) {
+      for (const { value, entityType } of values) {
         const leads = await this.prisma.lead.findMany({
           where: {
             ...where,
+            // `entityType` is set for MOBILE only, and is what keeps an HUF out
+            // of its karta's group. Prisma ignores an undefined filter, so the
+            // other two keys are unaffected.
             ...(key === 'MOBILE'
-              ? { mobile: value }
+              ? { mobile: value, entityType }
               : key === 'EMAIL'
                 ? { email: value }
                 : { pan: value }),
@@ -290,22 +294,40 @@ export class DuplicatesService {
    * `groupBy` types cannot follow a computed column name, and the only way to
    * make the generic version compile is a cast that discards the check on the
    * scope filter travelling with it — the one part that must not be wrong.
+   *
+   * MOBILE returns an account type alongside the number; the other two keys
+   * return the value alone. A PAN belongs to exactly one legal entity, and an
+   * email address shared between an individual and an HUF is a genuine
+   * duplicate of exactly the kind this screen is for.
    */
   private async duplicatedValues(
     key: 'MOBILE' | 'EMAIL' | 'PAN',
     where: Record<string, unknown>,
-  ): Promise<string[]> {
+  ): Promise<Array<{ value: string; entityType?: LeadEntityType }>> {
     if (key === 'MOBILE') {
+      /*
+        Grouped by number *and* account type.
+
+        Grouping on the number alone reported an individual and the family's
+        HUF as duplicates of each other — two different legal entities, each
+        with its own PAN and its own account, which the duplicate index now
+        explicitly permits to share a number. Nothing could be done about it
+        either: merging them would have been wrong, and there is no "not a
+        duplicate" verdict, so the pair sat in the queue for ever. A review
+        queue with a permanent resident is a review queue people stop opening.
+      */
       const rows = await this.prisma.lead.groupBy({
-        by: ['mobile'],
+        by: ['mobile', 'entityType'],
         where: { ...where, mobile: { not: '' } } as never,
         _count: { _all: true },
-        // The count filter nests under the grouped column, not beside it.
+        // The count filter nests under a grouped column, not beside it.
         having: { mobile: { _count: { gt: 1 } } },
-        orderBy: { mobile: 'asc' },
+        orderBy: [{ mobile: 'asc' }, { entityType: 'asc' }],
         take: DETECTION_LIMIT,
       });
-      return rows.map((row) => row.mobile).filter((value): value is string => Boolean(value));
+      return rows
+        .filter((row): row is typeof row & { mobile: string } => Boolean(row.mobile))
+        .map((row) => ({ value: row.mobile, entityType: row.entityType as LeadEntityType }));
     }
 
     if (key === 'EMAIL') {
@@ -317,7 +339,9 @@ export class DuplicatesService {
         orderBy: { email: 'asc' },
         take: DETECTION_LIMIT,
       });
-      return rows.map((row) => row.email).filter((value): value is string => Boolean(value));
+      return rows
+        .filter((row): row is typeof row & { email: string } => Boolean(row.email))
+        .map((row) => ({ value: row.email }));
     }
 
     const rows = await this.prisma.lead.groupBy({
@@ -328,7 +352,9 @@ export class DuplicatesService {
       orderBy: { pan: 'asc' },
       take: DETECTION_LIMIT,
     });
-    return rows.map((row) => row.pan).filter((value): value is string => Boolean(value));
+    return rows
+      .filter((row): row is typeof row & { pan: string } => Boolean(row.pan))
+      .map((row) => ({ value: row.pan }));
   }
 
   // -------------------------------------------------------------------------

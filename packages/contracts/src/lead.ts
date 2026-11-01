@@ -7,6 +7,7 @@ import {
   LEAD_STATUSES,
   PRIORITIES,
   type DataScope,
+  type LeadEntityType,
   type LeadStatus,
 } from './enums';
 import {
@@ -192,10 +193,33 @@ export interface DuplicateLeadMatch {
   exists: boolean;
   /** Whether the caller's scope allows them to see whose lead it is. */
   visible: boolean;
+  /**
+   * Whether this match would actually refuse the capture.
+   *
+   * True only for a live lead of the *same* account type, because that is all
+   * `lead_active_mobile_entity_key` forbids. A match of a different type is
+   * still reported, but as context rather than an obstacle: an HUF shares its
+   * karta's number by design, and the rep needs to see the individual lead to
+   * know they have the right family — not to be told to stop.
+   *
+   * Without this the screen and the constraint disagreed. The form warned
+   * "already an open lead" on a number the database would have accepted, so
+   * the honest way to add an HUF was to ignore a warning — which is how reps
+   * learn to ignore all of them.
+   */
+  blocks: boolean;
   lead: {
     id: string;
     reference: string;
     name: string;
+    /**
+     * Which kind of account the existing lead is for.
+     *
+     * Shown rather than implied: "already an open lead" means something quite
+     * different when the lead is the karta's individual account and you are
+     * opening the family's HUF.
+     */
+    entityType: LeadEntityType;
     status: LeadStatus;
     ownerName: string | null;
     createdAt: string;
@@ -207,6 +231,13 @@ export interface DuplicateLeadMatch {
 
 export const checkLeadMobileSchema = z.object({
   mobile: indianMobileSchema,
+  /**
+   * The account type being captured, so the answer matches the write guard.
+   *
+   * Defaults to INDIVIDUAL — what every caller that does not ask is creating:
+   * the public capture form, a QR scan, Insta Lead.
+   */
+  entityType: z.enum(LEAD_ENTITY_TYPES).default('INDIVIDUAL'),
   /** Set when editing, so a lead does not report itself as its own duplicate. */
   excludeLeadId: idSchema.optional(),
 });
