@@ -123,6 +123,21 @@ export const PERMISSIONS = [
     their colleagues.
   */
   'report:mis',
+  /*
+    Emailing a performance report out of the system.
+
+    Split off `analytics:sales:read`, which it used to sit on. Reading a
+    dashboard and mailing a judgement of named colleagues' work to their
+    inboxes are not the same authority, and that read is held by five roles
+    including every sales executive — so a route that sends mail in SIHL's
+    name was reachable by nearly anybody who could log in.
+
+    Granted to the roles whose job this is: management, operations, and a sales
+    manager reporting on their own team. Not marketing, who hold the read for
+    attribution and have no business mailing staff appraisals, and not a sales
+    executive, who is one of the people the report is about.
+  */
+  'report:send',
 
   /*
     Templated outbound messaging.
@@ -211,6 +226,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'training:manage',
     'test:manage',
     'report:mis',
+    'report:send',
     'lead:read',
     'lead:export',
     'lead:import',
@@ -255,6 +271,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'training:manage',
     'test:manage',
     'report:mis',
+    'report:send',
     'lead:read',
     'lead:update',
     'lead:import',
@@ -296,6 +313,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'lead:assign',
     'lead:convert',
     'lead:export',
+    // Their own team's performance report, to their own team. The screen that
+    // sends it is a manager's screen; the report is addressed to the people in
+    // it, and every recipient has to resolve to an active SIHL user.
+    'report:send',
     // A new joiner arriving with a spreadsheet is onboarded by their sales
     // manager, not by marketing. Withholding this forced the import through
     // whoever happened to hold a marketing role, which is both inconvenient

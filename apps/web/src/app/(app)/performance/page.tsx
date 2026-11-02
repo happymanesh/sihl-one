@@ -11,7 +11,7 @@ import { EmailReportDialog } from '@/components/performance/EmailReportDialog';
 import { PerformanceFilters } from '@/components/performance/PerformanceFilters';
 import { apiFetch } from '@/lib/api';
 import { asEmailBody, asEmailSubject } from '@/lib/performance-email';
-import { requireUser } from '@/lib/auth';
+import { can, requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 
 export const metadata = { title: 'Performance' };
@@ -125,7 +125,7 @@ export default async function PerformancePage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const params = await searchParams;
 
   const scope = (params.scope as PerformanceScope) ?? 'TEAM';
@@ -375,7 +375,12 @@ export default async function PerformancePage({
         obvious recipient list — a team is a set of people, so the report is
         already addressed to somebody.
       */}
-      {report.suggestedRecipients.length > 0 && report.rows.length > 0 ? (
+      {/* Gated on `report:send`, which the API now requires. Reading this page
+          is `analytics:sales:read` and every sales role holds it, so without
+          this the button was offered to people the endpoint would refuse. */}
+      {can(user, 'report:send') &&
+      report.suggestedRecipients.length > 0 &&
+      report.rows.length > 0 ? (
         <div className="flex justify-end">
           <EmailReportDialog
             subject={subject}

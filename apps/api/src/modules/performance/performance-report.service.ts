@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   SLIPPING_DAYS,
   computeRating,
@@ -67,6 +67,11 @@ export class PerformanceReportService {
     user: AuthenticatedPrincipal,
     input: SendPerformanceReportInput,
   ): Promise<{ sent: boolean; recipients: number; failureReason: string | null }> {
+    // Before the mailer is touched, and throwing rather than filtering: a
+    // sender who typed one address wrong wants to be told, not to have it
+    // silently dropped and be left believing that person received the report.
+    await this.assertRecipientsAreColleagues(input);
+
     const result = await this.mailer
       .send({
         to: input.to.join(', '),
@@ -89,6 +94,14 @@ export class PerformanceReportService {
       resource: 'report.performance',
       reason: `Performance report emailed to ${input.to.length} recipients`,
       changes: {
+        // The addresses, not just how many of them there were.
+        //
+        // This row is the answer to "where did this team's performance go",
+        // and a count cannot answer it. Every address here has already been
+        // resolved to an active SIHL user, so recording them widens nothing:
+        // the staff directory is readable by anybody holding `user:read`.
+        recipients: input.to,
+        ccRecipients: input.cc,
         to: input.to.length,
         cc: input.cc.length,
         subject: input.subject,
@@ -103,6 +116,73 @@ export class PerformanceReportService {
         ? null
         : (result.failureReason ?? 'The email was not accepted.'),
     };
+  }
+
+  /**
+   * Every recipient must be a colleague.
+   *
+   * The design always said so — "this is a team report, the recipients are the
+   * team" — but nothing enforced it. The route accepted a hundred `to`
+   * addresses, fifty `cc`, and a hundred kilobytes of caller-supplied body,
+   * on `analytics:sales:read`. That is not a reporting feature with a loose
+   * edge; it is a mail relay that signs as SIHL, and it was reachable by
+   * anybody who could open a dashboard.
+   *
+   * Resolving each address against an active internal user closes it without
+   * touching the flow the screens actually use. On the team page the To list
+   * is pre-filled from the people in the report; on the verticals page it is
+   * the head's own address. Both are SIHL staff by construction, so this
+   * refuses nothing the UI legitimately sends.
+   *
+   * Deliberately *not* narrowed to the caller's data scope. Copying the
+   * vertical head above you is the explicit use case on the verticals page,
+   * and a scope check would refuse exactly that while buying nothing — the
+   * report contains only rows the caller could already see, and the recipient
+   * is a colleague either way.
+   *
+   * It does not police the body. A manager may still send odd prose to their
+   * own team, which is a conduct question rather than a platform hole; what
+   * has gone is the ability to send it to anybody outside SIHL.
+   */
+  private async assertRecipientsAreColleagues(input: SendPerformanceReportInput): Promise<void> {
+    const wanted = [...new Set([...input.to, ...input.cc])];
+    if (wanted.length === 0) return;
+
+    const known = await this.prisma.user.findMany({
+      where: {
+        email: { in: wanted },
+        userType: 'INTERNAL',
+        // An address that has been suspended, locked, disabled or never
+        // accepted its invitation is not somebody to mail a team's numbers to.
+        status: 'ACTIVE',
+        deletedAt: null,
+      },
+      select: { email: true },
+    });
+
+    const found = new Set(known.map((row) => row.email));
+    const strangers = wanted.filter((address) => !found.has(address));
+    if (strangers.length === 0) return;
+
+    // Named per field, so the dialog can mark the box the bad address is in
+    // rather than reporting "something is wrong" above both of them.
+    const errors: Record<string, string[]> = {};
+    const blame = (field: 'to' | 'cc', addresses: readonly string[]) => {
+      const mine = addresses.filter((address) => strangers.includes(address));
+      if (mine.length > 0) {
+        errors[field] = mine.map((address) => `${address} is not an active SIHL user.`);
+      }
+    };
+    blame('to', input.to);
+    blame('cc', input.cc);
+
+    throw new BadRequestException({
+      title: 'Recipients must be SIHL staff',
+      detail:
+        'A performance report names colleagues and their numbers, so it can only be emailed ' +
+        `inside SIHL. Not recognised: ${strangers.join(', ')}.`,
+      errors,
+    });
   }
 
   /**

@@ -648,9 +648,18 @@ export interface PerformanceReport {
  * be edited, so the list that was on screen must be the list that goes — a
  * server that re-derived it could mail somebody the sender never saw.
  */
+/**
+ * Addresses are lower-cased here, as sign-in does to the identifier it looks
+ * up. The server resolves every recipient against `app_user` before sending,
+ * and that lookup is an exact match on a column written lower-cased — so
+ * normalising at the boundary is what stops `Asha@sihl.in` being reported as
+ * somebody who does not work here.
+ */
+const recipientSchema = z.string().trim().toLowerCase().email();
+
 export const sendPerformanceReportSchema = z.object({
-  to: z.array(z.string().trim().email()).min(1, 'Add at least one recipient').max(100),
-  cc: z.array(z.string().trim().email()).max(50).default([]),
+  to: z.array(recipientSchema).min(1, 'Add at least one recipient').max(100),
+  cc: z.array(recipientSchema).max(50).default([]),
   subject: z.string().trim().min(3).max(200),
   /** The rendered report, as the sender previewed it. */
   body: z.string().trim().min(1).max(100_000),
