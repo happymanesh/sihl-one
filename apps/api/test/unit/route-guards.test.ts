@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { PERMISSIONS, type Permission } from '@sihl-one/contracts';
 
-import { collectRoutes } from './support/route-inventory';
+import { collectRoutes, type RouteEntry } from './support/route-inventory';
 
 /**
  * Every route, checked against the access rules it is supposed to obey.
@@ -20,6 +20,23 @@ import { collectRoutes } from './support/route-inventory';
  */
 
 const routes = collectRoutes('src');
+
+/**
+ * Everything a route requires, in either form.
+ *
+ * `PermissionsGuard` enforces `@RequirePermissions` (all of them) and
+ * `@RequireAnyPermission` (one of them) alike, so for the question these tests
+ * ask — is this route guarded, and by what — the two belong together. Reading
+ * only `route.permissions` is how five guarded import routes came to be
+ * reported as open.
+ */
+function requires(route: RouteEntry): string[] {
+  return [...route.permissions, ...route.anyPermissions];
+}
+
+function unguarded(exempt: ReadonlySet<string>): RouteEntry[] {
+  return routes.filter((route) => requires(route).length === 0 && !exempt.has(route.route));
+}
 
 /**
  * Reachable with no token at all.
@@ -53,6 +70,41 @@ const PUBLIC_ROUTES = [
   */
   'POST /leads/capture/resend-code',
   'POST /leads/capture/verify-mobile',
+  /*
+    The visitor-facing half of event talks, and the same front door as the
+    capture routes above: somebody standing at a stall with a QR code and no
+    account, who will never have one.
+
+    Neither is a way in. The listing takes the event code the QR carries, not
+    an id, and returns only talks that are still bookable — no attendee names,
+    no lead data. The booking is authorised by the token issued when that
+    visitor's own number was confirmed, so it cannot be pointed at a stranger,
+    and every slot is re-checked server-side on arrival. Both are throttled on
+    the route at the capture limit, sized for a hall sharing one address.
+  */
+  'GET /presentations/public/:eventCode',
+  'POST /presentations/public/book',
+];
+
+/**
+ * Authenticated, carrying no permission, because the thing being read is
+ * announced to everybody.
+ *
+ * Distinct from the self-service list below, which rests on the resource being
+ * the caller — that argument does not apply here and borrowing it would be
+ * dishonest. This rests on a product decision recorded in `rbac.ts`: a
+ * training session is announced to the branches expected to attend it, and
+ * gating the announcement behind a permission would defeat the point of
+ * announcing it. Scheduling, editing and uploading material are all gated by
+ * `training:manage`; only reading is open, and only to signed-in staff.
+ */
+const OPEN_TO_EVERY_USER = [
+  'GET /training',
+  'GET /training/:id',
+  // The material itself, not just the fact of the session. Still staff-only —
+  // there is no @Public() here — and the file is served through the storage
+  // layer's signed, expiring grant rather than as a bare object URL.
+  'GET /training/:id/material/:materialId',
 ];
 
 /**
@@ -120,13 +172,11 @@ describe('route guards', () => {
   });
 
   it('no route is reachable without either a permission or a deliberate exemption', () => {
-    const exempt = new Set([...PUBLIC_ROUTES, ...SELF_SERVICE_ROUTES]);
-    const unguarded = routes
-      .filter((route) => route.permissions.length === 0 && !exempt.has(route.route))
-      .map((route) => `${route.route}  (${route.controller})`);
+    const exempt = new Set([...PUBLIC_ROUTES, ...SELF_SERVICE_ROUTES, ...OPEN_TO_EVERY_USER]);
+    const open = unguarded(exempt).map((route) => `${route.route}  (${route.controller})`);
 
     assert.deepEqual(
-      unguarded,
+      open,
       [],
       'These routes carry no @RequirePermissions and are not on an allow-list. ' +
         'Add the permission, or — if the route really is public or self-service — ' +
@@ -148,22 +198,17 @@ describe('route guards', () => {
     );
   });
 
-  it('the set of self-service routes is exactly the allow-list', () => {
-    const exempt = new Set(PUBLIC_ROUTES);
+  it('the routes reachable with a token but no permission are exactly the two allow-lists', () => {
     assert.deepEqual(
-      sorted(
-        routes
-          .filter((route) => route.permissions.length === 0 && !exempt.has(route.route))
-          .map((route) => route.route),
-      ),
-      sorted(SELF_SERVICE_ROUTES),
+      sorted(unguarded(new Set(PUBLIC_ROUTES)).map((route) => route.route)),
+      sorted([...SELF_SERVICE_ROUTES, ...OPEN_TO_EVERY_USER]),
     );
   });
 
   it('every permission named on a route exists', () => {
     const known = new Set<string>(PERMISSIONS as readonly Permission[]);
     const unknown = routes
-      .flatMap((route) => route.permissions.map((permission) => ({ route, permission })))
+      .flatMap((route) => requires(route).map((permission) => ({ route, permission })))
       .filter((entry) => !known.has(entry.permission))
       .map((entry) => `${entry.route.route} requires "${entry.permission}"`);
 
@@ -176,16 +221,16 @@ describe('route guards', () => {
   it('a write is not guarded only by a read permission', () => {
     const offenders = routes
       .filter((route) => /^(POST|PATCH|PUT|DELETE)/.test(route.route))
-      .filter((route) => route.permissions.length > 0)
-      .filter((route) => route.permissions.every((permission) => permission.endsWith(':read')))
-      .map((route) => `${route.route}  requires ${route.permissions.join(', ')}`);
+      .filter((route) => requires(route).length > 0)
+      .filter((route) => requires(route).every((permission) => permission.endsWith(':read')))
+      .map((route) => `${route.route}  requires ${requires(route).join(', ')}`);
 
     assert.deepEqual(
       sorted(offenders),
       sorted(
         WRITES_GUARDED_BY_READ.map((route) => {
           const found = routes.find((candidate) => candidate.route === route);
-          return `${route}  requires ${found?.permissions.join(', ')}`;
+          return `${route}  requires ${found ? requires(found).join(', ') : ''}`;
         }),
       ),
       'A write reachable with only a read permission. Either give it a write ' +
@@ -224,10 +269,8 @@ describe('route guards', () => {
             !DRY_RUNS.has(route.route) &&
             / \/(org-units|assignment-rules)\b/.test(route.route)),
       )
-      .filter(
-        (route) => !route.permissions.some((permission) => ADMIN_PERMISSIONS.has(permission)),
-      )
-      .map((route) => `${route.route}  requires ${route.permissions.join(', ') || '(nothing)'}`);
+      .filter((route) => !requires(route).some((permission) => ADMIN_PERMISSIONS.has(permission)))
+      .map((route) => `${route.route}  requires ${requires(route).join(', ') || '(nothing)'}`);
 
     assert.deepEqual(sorted(offenders), []);
   });

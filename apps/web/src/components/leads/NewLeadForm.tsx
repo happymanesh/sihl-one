@@ -240,7 +240,8 @@ export function NewLeadForm({
               productLabels={Object.fromEntries(products.map((p) => [p.code, p.name]))}
             />
             <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
-              One open lead per mobile number — a duplicate will be rejected.
+              One open lead per mobile number <em>per account type</em>. The same number may carry
+              an individual and an HUF; a second lead of the same type will be rejected.
             </p>
           </div>
           <div>

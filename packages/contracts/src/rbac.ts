@@ -18,6 +18,23 @@ export const PERMISSIONS = [
   'lead:convert',
   'lead:export',
   'lead:import',
+  /*
+    Permanent, irreversible destruction of a lead and everything hanging off it.
+
+    Deliberately not `lead:delete`, which every operations user holds and which
+    only sets `deletedAt` — a soft delete the record survives and can be undone
+    from. This one leaves nothing behind but the audit row, so it is its own
+    grant, held by super admin alone through ALL_PERMISSIONS and named in no
+    other role's list.
+
+    It exists for the two cases a soft delete cannot answer: an erasure the
+    DPDP Act obliges SIHL to carry out, and test or junk data that must not sit
+    in a regulated book for ever. Both are rare and both are decisions somebody
+    has to be accountable for, which is why the endpoint demands the lead
+    number typed back and a written reason, and why the audit row records a
+    count of every table it emptied.
+  */
+  'lead:purge',
 
   // CRM — customers
   'customer:read',
@@ -106,6 +123,21 @@ export const PERMISSIONS = [
     their colleagues.
   */
   'report:mis',
+  /*
+    Emailing a performance report out of the system.
+
+    Split off `analytics:sales:read`, which it used to sit on. Reading a
+    dashboard and mailing a judgement of named colleagues' work to their
+    inboxes are not the same authority, and that read is held by five roles
+    including every sales executive — so a route that sends mail in SIHL's
+    name was reachable by nearly anybody who could log in.
+
+    Granted to the roles whose job this is: management, operations, and a sales
+    manager reporting on their own team. Not marketing, who hold the read for
+    attribution and have no business mailing staff appraisals, and not a sales
+    executive, who is one of the people the report is about.
+  */
+  'report:send',
 
   /*
     Templated outbound messaging.
@@ -176,9 +208,25 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
 
   MANAGEMENT: [
+    /*
+      Adding a lead by hand, and Insta Lead.
+
+      Both roles could import a spreadsheet of thousands and not type in a
+      single walk-in, which is the wrong way round: an import is the bulk,
+      riskier act and it was the only one they had.
+
+      The visit grants come with Insta Lead rather than on their own merit.
+      It captures someone in person and checks straight into the meeting, so
+      without `visit:create` the button cannot work, and without read and
+      update the user is left inside a visit they cannot see or close.
+    */
+    'lead:create',
+    'visit:create',
+    'visit:update',
     'training:manage',
     'test:manage',
     'report:mis',
+    'report:send',
     'lead:read',
     'lead:export',
     'lead:import',
@@ -204,9 +252,26 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   OPERATIONS: [
+    /*
+      Adding a lead by hand, and Insta Lead.
+
+      Both roles could import a spreadsheet of thousands and not type in a
+      single walk-in, which is the wrong way round: an import is the bulk,
+      riskier act and it was the only one they had.
+
+      The visit grants come with Insta Lead rather than on their own merit.
+      It captures someone in person and checks straight into the meeting, so
+      without `visit:create` the button cannot work, and without read and
+      update the user is left inside a visit they cannot see or close.
+    */
+    'lead:create',
+    'visit:create',
+    'visit:read',
+    'visit:update',
     'training:manage',
     'test:manage',
     'report:mis',
+    'report:send',
     'lead:read',
     'lead:update',
     'lead:import',
@@ -248,6 +313,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'lead:assign',
     'lead:convert',
     'lead:export',
+    // Their own team's performance report, to their own team. The screen that
+    // sends it is a manager's screen; the report is addressed to the people in
+    // it, and every recipient has to resolve to an active SIHL user.
+    'report:send',
     // A new joiner arriving with a spreadsheet is onboarded by their sales
     // manager, not by marketing. Withholding this forced the import through
     // whoever happened to hold a marketing role, which is both inconvenient

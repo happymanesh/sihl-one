@@ -54,6 +54,28 @@ const istDayBoundary = (edge: 'from' | 'to') =>
     return value;
   }, z.coerce.date());
 
+/**
+ * Whole days between two instants.
+ *
+ * The floor is the whole point, and leaving it out cost a year of range.
+ * `istDayBoundary` widens `from` to the first millisecond of its day and `to`
+ * to the *last* — which is right, and is what makes the final day inclusive in
+ * every query downstream. But it means the two instants for 1 Jan 2024 to
+ * 1 Jan 2025 are 366 days and 23:59:59.999 apart, so a raw division gave
+ * 366.99999 and `<= 366` refused exactly the full leap year the limit was
+ * written to allow.
+ *
+ * Counting whole days instead compares the days the caller actually named and
+ * ignores the widening, which exists for a different purpose. A caller passing
+ * full timestamps rather than plain dates is measured the same way, so asking
+ * for 366 days and twelve hours counts as 366 — deliberately, since the limit
+ * is there to bound how much of the lead table one query aggregates, and half
+ * a day either way does not change that.
+ */
+function wholeDaysBetween(from: Date, to: Date): number {
+  return Math.floor((to.getTime() - from.getTime()) / 86_400_000);
+}
+
 export const reportRangeSchema = z
   .object({
     from: istDayBoundary('from').optional(),
@@ -63,7 +85,7 @@ export const reportRangeSchema = z
     message: 'The start of the range must not be after its end',
     path: ['from'],
   })
-  .refine((r) => !r.from || !r.to || (r.to.getTime() - r.from.getTime()) / 86_400_000 <= 366, {
+  .refine((r) => !r.from || !r.to || wholeDaysBetween(r.from, r.to) <= 366, {
     message: 'A report may cover at most 366 days',
     path: ['to'],
   });

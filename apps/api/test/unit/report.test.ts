@@ -50,4 +50,18 @@ describe('report range', () => {
     const result = reportRangeSchema.safeParse({ from: '2024-01-01', to: '2025-01-01' });
     assert.equal(result.success, true);
   });
+
+  it('still refuses the day after that', () => {
+    /*
+      The other side of the same boundary.
+
+      The test above failed for a year because `to` is widened to the last
+      millisecond of its day, so the raw gap was 366.99999 days and the limit
+      refused a full leap year. The fix counts whole days — and the obvious
+      wrong fix, raising the limit to 367, would pass that test while quietly
+      buying a whole extra day. This is the case that tells the two apart.
+    */
+    const result = reportRangeSchema.safeParse({ from: '2024-01-01', to: '2025-01-02' });
+    assert.equal(result.success, false);
+  });
 });

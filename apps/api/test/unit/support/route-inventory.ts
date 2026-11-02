@@ -25,8 +25,18 @@ export interface RouteEntry {
   controller: string;
   file: string;
   handler: string;
-  /** Permissions the route requires. Empty when it carries none. */
+  /** Permissions the route requires, ALL of them. Empty when it carries none. */
   permissions: string[];
+  /**
+   * Permissions of which ANY one admits the caller — `@RequireAnyPermission`.
+   *
+   * Tracked separately from `permissions` rather than merged into it, because
+   * the two mean different things to a reader deciding whether a route is
+   * guarded tightly enough. Both are enforced by `PermissionsGuard`, so for
+   * the question "is this route guarded at all" they count equally; use
+   * `requires()` in the guard test for that.
+   */
+  anyPermissions: string[];
   public: boolean;
   allowsServiceAccount: boolean;
   allowsPendingPassword: boolean;
@@ -123,6 +133,17 @@ export function collectRoutes(srcDir: string): RouteEntry[] {
 
       const block = `${above}\n${below}`;
       const permissionMatch = /@RequirePermissions\(([^)]*)\)/s.exec(block);
+      /*
+        The ANY form, which this parser was blind to.
+
+        Every route on `ImportsController` carries `@RequireAnyPermission` and
+        is enforced by `PermissionsGuard` through `ANY_PERMISSIONS_KEY` — yet
+        all five were reported as carrying no permission at all, because only
+        the ALL form was ever looked for. Five permanent false alarms is worse
+        than none: it is what teaches a reader that this test is noise and that
+        the way to deal with it is to extend the allow-list.
+      */
+      const anyPermissionMatch = /@RequireAnyPermission\(([^)]*)\)/s.exec(block);
       const auditMatch = /@Audited\(\{([^}]*)\}\)/s.exec(block);
 
       entries.push({
@@ -131,6 +152,7 @@ export function collectRoutes(srcDir: string): RouteEntry[] {
         file: file.replace(/\\/g, '/').split('/src/')[1] ?? file,
         handler,
         permissions: permissionMatch ? literals(permissionMatch[1]).sort() : [],
+        anyPermissions: anyPermissionMatch ? literals(anyPermissionMatch[1]).sort() : [],
         public: classPublic || /@Public\(\)/.test(block),
         allowsServiceAccount: classServiceAccount || /@AllowServiceAccount\(\)/.test(block),
         allowsPendingPassword: /@AllowPendingPasswordChange\(\)/.test(block),

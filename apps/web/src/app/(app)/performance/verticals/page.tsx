@@ -96,7 +96,7 @@ export default async function VerticalReportsPage({
                     is no address: a head who never receives their report and
                     is never told is worse off than one who sees an error.
                   */}
-                  {head.email ? (
+                  {!can(user, 'report:send') ? null : head.email ? (
                     <EmailReportDialog
                       subject={asEmailSubject(report)}
                       body={body}

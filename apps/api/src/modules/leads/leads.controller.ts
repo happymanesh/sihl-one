@@ -49,6 +49,11 @@ import {
   type VerifyOtpInput,
   leadExportQuerySchema,
   leadQuerySchema,
+  leadReferenceSchema,
+  purgeLeadSchema,
+  type LeadPurgePreview,
+  type LeadPurgeResult,
+  type PurgeLeadInput,
   updateLeadSchema,
   type AssignAllLeadProductsInput,
   type AssignLeadInput,
@@ -73,9 +78,24 @@ import { AuditService } from '../../common/audit.service';
 import { istDayKey } from '../../common/ist-day';
 import { Audited, CurrentUser, Public, RequirePermissions } from '../../common/decorators';
 import type { AuthenticatedPrincipal } from '../../common/types';
-import { ApiZodBody, ApiZodQuery, IdParamPipe, ZodBody, ZodQuery } from '../../common/zod';
+import {
+  ApiZodBody,
+  ApiZodQuery,
+  IdParamPipe,
+  ZodBody,
+  ZodQuery,
+  ZodValidationPipe,
+} from '../../common/zod';
 import { AllocationService } from '../performance/allocation.service';
+import { LeadPurgeService } from './lead-purge.service';
 import { LeadsService } from './leads.service';
+
+/**
+ * Narrows a lead number before it reaches the database, and upper-cases it, so
+ * `ld-2026-000123` typed into the address bar resolves to the same lead the
+ * confirmation box is compared against.
+ */
+const LeadReferenceParamPipe = new ZodValidationPipe(leadReferenceSchema);
 
 /*
   Throttles for the three public capture endpoints.
@@ -117,6 +137,7 @@ export class LeadsController {
     private readonly leads: LeadsService,
     private readonly allocation: AllocationService,
     private readonly audit: AuditService,
+    private readonly purgeService: LeadPurgeService,
   ) {}
 
   /**
@@ -657,11 +678,72 @@ export class LeadsController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermissions('lead:delete')
-  @ApiOperation({ summary: 'Soft-delete a lead' })
+  @ApiOperation({
+    summary: 'Soft-delete a lead',
+    description:
+      'Sets `deletedAt`. The row stays in the database and the lead can be restored. This is ' +
+      'the only delete most roles have; the permanent one is DELETE /leads/by-reference/{reference}.',
+  })
   remove(
     @CurrentUser() user: AuthenticatedPrincipal,
     @Param('id', IdParamPipe) id: string,
   ): Promise<void> {
     return this.leads.remove(user, id);
+  }
+
+  /*
+    The two purge routes.
+
+    Addressed by lead number rather than by id, and the preview is a separate
+    call rather than a flag on the delete, because both decisions are about the
+    person at the keyboard: they are reading `LD-2026-000123` off a screen, and
+    they should see what is about to be destroyed in a reply they can read
+    before they send anything that destroys it.
+  */
+
+  @Get('by-reference/:reference/purge-preview')
+  @RequirePermissions('lead:purge')
+  @ApiParam({ name: 'reference', description: 'Lead number, e.g. LD-2026-000123' })
+  @ApiOperation({
+    summary: 'What a permanent purge of this lead would destroy',
+    description:
+      'Read-only. Returns the lead, a count per related table, the rupee total of any expense ' +
+      'claims that would go with it, and the records that would deliberately be left standing. ' +
+      'Finds soft-deleted leads too — they are the usual subject of a purge.',
+  })
+  @ApiResponse({ status: 404, description: 'No lead carries that number.' })
+  purgePreview(
+    @Param('reference', LeadReferenceParamPipe) reference: string,
+  ): Promise<LeadPurgePreview> {
+    return this.purgeService.preview(reference);
+  }
+
+  @Delete('by-reference/:reference')
+  @RequirePermissions('lead:purge')
+  @ApiParam({ name: 'reference', description: 'Lead number, e.g. LD-2026-000123' })
+  @ApiOperation({
+    summary: 'PERMANENTLY destroy a lead and everything owned by it — not reversible',
+    description:
+      'A hard delete, not the `deletedAt` flag that DELETE /leads/{id} sets. The lead row and ' +
+      'its activities, tasks, visits, expense claims, documents, products, approvals, status ' +
+      'history, profile, family, consent ledger, event attendance, bookings, message log, OTPs, ' +
+      'notifications, import rows and unrelayed outbox events are removed in one transaction, ' +
+      'and the files behind them are deleted from the object store afterwards. Nothing survives ' +
+      'but the audit row, which records a count per table.\n\n' +
+      'Requires `lead:purge`, held by super admin alone. The body must repeat the lead number ' +
+      'from the path and give a reason of at least twenty characters; both are refused ' +
+      'otherwise. Left standing on purpose: any customer this lead converted into, other leads ' +
+      'merged into it, standing opt-outs, and import rows belonging to other people.',
+  })
+  @ApiResponse({ status: 200, description: 'Purged. The reply is the receipt — keep it.' })
+  @ApiResponse({ status: 400, description: 'The confirmation does not match the lead number.' })
+  @ApiResponse({ status: 404, description: 'No lead carries that number.' })
+  @ApiZodBody(purgeLeadSchema)
+  purge(
+    @CurrentUser() user: AuthenticatedPrincipal,
+    @Param('reference', LeadReferenceParamPipe) reference: string,
+    @ZodBody(purgeLeadSchema) body: PurgeLeadInput,
+  ): Promise<LeadPurgeResult> {
+    return this.purgeService.purge(user, reference, body);
   }
 }

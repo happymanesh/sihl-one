@@ -116,8 +116,13 @@ export class PerformanceController {
    * watches for exactly that.
    */
   @Post('report/send')
-  @RequirePermissions('analytics:sales:read')
-  @ApiOperation({ summary: 'Email a performance report that has been previewed' })
+  @RequirePermissions('report:send')
+  @ApiOperation({
+    summary: 'Email a performance report that has been previewed',
+    description:
+      'Every address in `to` and `cc` must belong to an active internal SIHL user; anything ' +
+      'else is refused and named in the reply. The report goes to colleagues or it does not go.',
+  })
   @ApiZodBody(sendPerformanceReportSchema)
   sendReport(
     @CurrentUser() user: AuthenticatedPrincipal,

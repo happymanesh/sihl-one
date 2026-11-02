@@ -5,6 +5,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/configuration';
 import { OnlySmsSender } from '../messaging/onlysms-sender';
 import { RecordingSmsSender, SmsSender } from '../messaging/sms-sender';
 import { ExistingClientService } from './existing-client.service';
+import { LeadPurgeService } from './lead-purge.service';
 import { OtpService } from './otp.service';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
@@ -25,6 +26,14 @@ import { LeadsService } from './leads.service';
     LeadsService,
     OtpService,
     ExistingClientService,
+    /*
+      The hard delete, kept in its own provider rather than folded into
+      LeadsService. Nothing else in this module can undo what it does, and a
+      separate class is the cheapest way to make sure a change to the ordinary
+      soft delete never lands on it by accident. StorageService arrives from
+      the global StorageModule.
+    */
+    LeadPurgeService,
     /*
       The SMS driver is chosen here, once, from configuration — the same shape
       as MessagingModule binds MessageSender. `noop` is the default, so a build
