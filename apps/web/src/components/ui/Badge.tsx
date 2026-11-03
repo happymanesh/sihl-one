@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { LEAD_ENTITY_TYPE_LABELS, type LeadEntityType } from '@sihl-one/contracts';
 
 import { humanise } from '@/lib/format';
 
@@ -71,6 +72,31 @@ const PRIORITY_TONES: Record<string, Tone> = {
 
 export function PriorityBadge({ priority }: { priority: string }) {
   return <Badge tone={PRIORITY_TONES[priority] ?? 'neutral'}>{humanise(priority)}</Badge>;
+}
+
+/**
+ * Which legal entity a lead's account is for.
+ *
+ * Labelled from the contract rather than `humanise`, which lower-cases an
+ * acronym it does not recognise — HUF would become "Huf". The `.badge` class
+ * uppercases its text, so that is invisible here; the label still matters
+ * because it is what `textContent` carries into a copy-paste, a screen reader
+ * and any future use outside a badge, and because the contract is where the
+ * business's own wording belongs.
+ *
+ * Individual is neutral and everything else is navy — not as a severity, but
+ * because an individual is the overwhelming default and the others are the
+ * ones that behave differently: their own PAN, their own account, and the
+ * reason one mobile number may legitimately carry two leads. Colour draws the
+ * eye to the unusual case; the label carries the meaning on its own.
+ */
+export function AccountTypeBadge({ entityType }: { entityType: string }) {
+  const label = LEAD_ENTITY_TYPE_LABELS[entityType as LeadEntityType] ?? humanise(entityType);
+  return (
+    <Badge tone={entityType === 'INDIVIDUAL' ? 'neutral' : 'navy'} title="Account type">
+      {label}
+    </Badge>
+  );
 }
 
 /**
