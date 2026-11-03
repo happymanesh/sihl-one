@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { CLOSED_LEAD_STATUSES, type LeadListItem } from '@sihl-one/contracts';
 
-import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
+import { AccountTypeBadge, LeadStatusBadge, PriorityBadge } from '@/components/ui/Badge';
 import { LeadCheckbox, LeadSelectAllCheckbox } from '@/components/leads/LeadSelection';
 import { ProductChips } from '@/components/ui/ProductChips';
 import { formatCompactCurrency, formatDateCompact, formatRelative, humanise } from '@/lib/format';
@@ -47,7 +47,18 @@ export function LeadTable({
                 ) : null}
                 <Th>Lead</Th>
                 <Th>Status</Th>
-                <Th>Score</Th>
+                {/*
+                  Account type, where the score used to be.
+
+                  The score is still on the lead itself; what the list could
+                  not show was which legal entity a row is for. Since the
+                  duplicate key became (mobile, account type) two rows may
+                  carry the same masked number quite legitimately — the
+                  karta's own lead and the family's HUF — and the column that
+                  tells them apart earns the width more than a number nobody
+                  sorts the list by.
+                */}
+                <Th>Account type</Th>
                 <Th>Products</Th>
                 <Th>Source</Th>
                 <Th>Owner</Th>
@@ -116,7 +127,7 @@ export function LeadTable({
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <ScoreBadge score={lead.score} band={lead.scoreBand} />
+                    <AccountTypeBadge entityType={lead.entityType} />
                   </td>
                   <td className="px-4 py-3">
                     <ProductChips
@@ -213,7 +224,7 @@ export function LeadTable({
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-                <ScoreBadge score={lead.score} band={lead.scoreBand} />
+                <AccountTypeBadge entityType={lead.entityType} />
                 <span className="font-semibold tnum">
                   {formatCompactCurrency(lead.estimatedValue)}
                 </span>

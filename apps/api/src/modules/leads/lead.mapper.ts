@@ -24,6 +24,7 @@ export const LEAD_LIST_SELECT = {
   email: true,
   pan: true,
   city: true,
+  entityType: true,
   status: true,
   source: true,
   priority: true,
@@ -50,6 +51,7 @@ export interface LeadRow {
   email: string | null;
   pan: string | null;
   city: string | null;
+  entityType: string;
   status: string;
   source: string;
   priority: string;
@@ -98,6 +100,7 @@ export function toLeadListItem(lead: LeadRow): LeadListItem {
     mobileMasked: maskMobile(lead.mobile),
     email: lead.email,
     city: lead.city,
+    entityType: lead.entityType as LeadListItem['entityType'],
     status: lead.status as LeadListItem['status'],
     source: lead.source as LeadListItem['source'],
     priority: lead.priority as LeadListItem['priority'],
