@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ANNUAL_INCOME_LABELS,
@@ -36,15 +36,29 @@ export function LeadProfilePanel({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [state, action] = useActionState(updateLeadProfile, INITIAL);
   const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
-    if (state.status === 'success') {
+  /*
+    Closing is part of submitting, not a reaction to the result changing.
+
+    This was an effect keyed on `state.status`. The first save closed the
+    panel; every one after it left it open, because after that first success
+    the status *is* already "success" — saving again produced an identical
+    value, nothing in the dependency array moved, and the effect never ran a
+    second time. The save worked; the thing meant to react to it had already
+    fired.
+
+    Doing it here says what is meant: a submission that succeeded closes the
+    panel, every time. Same fix as RenameLead.
+  */
+  const [state, action] = useActionState(async (previous: ActionState, formData: FormData) => {
+    const result = await updateLeadProfile(previous, formData);
+    if (result.status === 'success') {
       setEditing(false);
       router.refresh();
     }
-  }, [state.status, router]);
+    return result;
+  }, INITIAL);
 
   const filled = hasProfileContent(profile);
 

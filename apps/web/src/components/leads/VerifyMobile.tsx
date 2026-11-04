@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   MOBILE_VERIFICATION_METHOD_LABELS,
@@ -35,16 +35,45 @@ export function VerifyMobile({
   canVerify: boolean;
 }) {
   const router = useRouter();
-  const [state, action] = useActionState(verifyLeadMobile, INITIAL);
-  const [undoState, undoAction] = useActionState(unverifyLeadMobile, INITIAL);
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (state.status === 'success' || undoState.status === 'success') {
+  /*
+    Closing is part of submitting, not a reaction to the result changing.
+
+    This was an effect keyed on `state.status` and `undoState.status`. The
+    first confirmation closed the panel; every one after it left it open,
+    because after that first success the status *is* already "success" —
+    submitting again produced an identical value, nothing in the dependency
+    array moved, and the effect never ran a second time. The submission
+    worked; the thing meant to react to it had already fired.
+
+    Both actions get the same treatment rather than one wrapper over the
+    pair: they are two different writes that happen to share a panel, and
+    reaching for their combined status is what tangled this in the first
+    place. Same fix as RenameLead.
+  */
+  const closeOnSuccess = (result: ActionState) => {
+    if (result.status === 'success') {
       setOpen(false);
       router.refresh();
     }
-  }, [state.status, undoState.status, router]);
+    return result;
+  };
+
+  const [state, action] = useActionState(
+    async (previous: ActionState, formData: FormData) =>
+      closeOnSuccess(await verifyLeadMobile(previous, formData)),
+    INITIAL,
+  );
+  // The undo's state is deliberately not bound: nothing renders it, and
+  // nothing did before either — it existed only to feed the effect above.
+  // Its failures are therefore still silent, which is worth fixing but is a
+  // different change from this one.
+  const [, undoAction] = useActionState(
+    async (previous: ActionState, formData: FormData) =>
+      closeOnSuccess(await unverifyLeadMobile(previous, formData)),
+    INITIAL,
+  );
 
   if (verifiedAt) {
     return (
