@@ -153,6 +153,28 @@ export const PERMISSIONS = [
   */
   'messaging:manage',
   /*
+    Seeing the Performance screen.
+
+    Split from `analytics:sales:read`, which also opens Reports and the
+    Dashboard and is held by Management, Operations, Marketing, sales managers
+    and executives. Tightening that one would have taken all three screens
+    from all five roles, so Performance needed a grant of its own.
+
+    Held by super admin alone, through ALL_PERMISSIONS, and deliberately not
+    listed against any other role. This is a holding position rather than a
+    judgement about rank: the screen measures people against targets and
+    incentives the system does not yet hold, so it is withdrawn until it has
+    something real to measure. CR-15 — which scopes a rep to their own row —
+    stays exactly as it is, and is what will make the screen safe to reopen.
+
+    Granted on the read routes *and* on `report/send`. That route mails the
+    report out in SIHL's name and sits on `report:send`, which Management,
+    Operations and sales managers hold; leaving it alone would have let the
+    three roles that just lost the screen go on posting its contents to
+    people's inboxes.
+  */
+  'performance:read',
+  /*
     Seeing the partner portal.
 
     Split from `analytics:partner:read`, which Management also holds — so
