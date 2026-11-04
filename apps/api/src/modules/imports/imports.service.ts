@@ -10,7 +10,9 @@ import {
   eventImportOpen,
   findMatches,
   indianMobileSchema,
+  LEAD_ENTITY_TYPES,
   panSchema,
+  type LeadEntityType,
   parseDelimited,
   parseImportedAmount,
   parseImportedDateTime,
@@ -221,12 +223,26 @@ export class ImportsService {
         invalid += 1;
       } else {
         const mobile = mapped.mobile ?? null;
+        /*
+          Two rows are the same lead when the number *and* the account type
+          match, which is what the database enforces.
 
-        const earlierRow = mobile ? seenInFile.get(mobile) : undefined;
+          Keyed on the number alone, a file holding a karta and the family's
+          HUF — the ordinary shape of an HUF list, and the reason the account
+          type column exists at all — silently dropped the second row as a
+          duplicate of the first. The import reported it as skipped and the
+          HUF was simply never created.
+        */
+        const entityType = mapped.entityType ?? 'INDIVIDUAL';
+        const fileKey = mobile ? `${mobile}|${entityType}` : null;
+
+        const earlierRow = fileKey ? seenInFile.get(fileKey) : undefined;
         if (earlierRow !== undefined) {
           status = 'DUPLICATE';
           duplicate += 1;
-          matchReasons = [`Row ${earlierRow} of this file has the same mobile number`];
+          matchReasons = [
+            `Row ${earlierRow} of this file has the same mobile number and account type`,
+          ];
           duplicateOf = {
             id: '',
             reference: `row ${earlierRow}`,
@@ -238,7 +254,7 @@ export class ImportsService {
             reasons: matchReasons,
           };
         } else {
-          if (mobile) seenInFile.set(mobile, row.rowNumber);
+          if (fileKey) seenInFile.set(fileKey, row.rowNumber);
 
           /*
             An event import matches on the mobile number and nothing else.
@@ -256,7 +272,15 @@ export class ImportsService {
           */
           const matches = context
             ? candidates
-                .filter((candidate) => mobile && candidate.mobile === mobile)
+                .filter(
+                  (candidate) =>
+                    mobile &&
+                    candidate.mobile === mobile &&
+                    // Same reason as the within-file key above: at a stall the
+                    // number decides, but a different kind of account on that
+                    // number is a different lead, not the same one again.
+                    (candidate.entityType ?? 'INDIVIDUAL') === entityType,
+                )
                 .slice(0, 1)
                 .map((candidate) => ({
                   candidate,
@@ -750,6 +774,32 @@ export class ImportsService {
 
     if (mapped.pincode && !/^[1-9]\d{5}$/.test(mapped.pincode)) delete mapped.pincode;
 
+    /*
+      Account type.
+
+      Rejected rather than dropped, which is the opposite of how a bad email
+      or PAN is treated here, and deliberately. Those are details a rep can
+      fill in later and the lead is still the right lead without them. This
+      one decides which legal entity the record *is*: silently importing an
+      HUF as an individual produces a lead that looks fine, reads fine, and
+      collides with the karta's own the next time anybody touches it. A row
+      somebody has to fix is far cheaper than a wrong one nobody notices.
+
+      Spelled loosely on purpose — files say "HUF", "huf", "Individual",
+      "individual ". Anything else names itself in the error so the importer
+      can see which cell to correct.
+    */
+    if (mapped.entityType) {
+      const given = mapped.entityType.trim().toUpperCase();
+      const match = LEAD_ENTITY_TYPES.find((type) => type === given);
+      if (match) mapped.entityType = match;
+      else {
+        errors.push(
+          `Account type "${mapped.entityType}" is not one of ` + `${LEAD_ENTITY_TYPES.join(', ')}`,
+        );
+      }
+    }
+
     if (!context) {
       // Outside an event these two have nothing to be relative to. Dropped
       // rather than rejected: a file that happens to carry a date column should
@@ -870,6 +920,9 @@ export class ImportsService {
         firstName: true,
         lastName: true,
         mobile: true,
+        // Needed by the duplicate match: a number shared by an individual and
+        // the family HUF is two leads, not one seen twice.
+        entityType: true,
         email: true,
         pan: true,
         city: true,
@@ -967,6 +1020,9 @@ export class ImportsService {
         reference,
         firstName: mapped.firstName!,
         lastName: mapped.lastName ?? null,
+        // Absent means INDIVIDUAL, the same answer the column's default gives
+        // and the same one every file got before the column existed.
+        entityType: (mapped.entityType as LeadEntityType | undefined) ?? 'INDIVIDUAL',
         mobile: mapped.mobile!,
         email: mapped.email ?? null,
         pan: mapped.pan ?? null,
