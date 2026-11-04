@@ -348,6 +348,47 @@ only bounce them — which is why it looked identical to the Dashboard.
 
 ---
 
+### CR-27 — Performance: Super Admin only, until it is mature
+**Change.** Hide Performance from everybody except Super Admin, and keep it
+that way until targets and incentives exist. The screen judges people against
+numbers the system does not yet hold, so a mature version is a later
+conversation; until then it should not be in anyone else's menu.
+
+**This reverses CR-12's disposal.** CR-12 proposed restricting Performance and
+was dropped, because CR-15 scoped reps to their own row and that was judged
+enough. The reasoning has changed: the objection now is not who can see whose
+figures, it is that the screen is not finished. CR-15 stays as it is — correct
+regardless, and it is what makes the screen safe to reopen later.
+
+**Today it is visible to very nearly everyone.** The menu entry is gated on
+`analytics:sales:read`, held by MANAGEMENT, OPERATIONS, MARKETING,
+SALES_MANAGER and SALES_EXECUTIVE.
+
+**Two things make this more than a one-line change:**
+
+- `analytics:sales:read` is shared with **Reports and the Dashboard**.
+  Tightening it would take those away from the same five roles, which is not
+  what is being asked. Performance needs a permission of its own —
+  `performance:read` — granted to SUPER_ADMIN alone.
+- The page has **no guard beyond the menu**. Anyone who knows the URL can open
+  `/performance` today whether or not the item is shown, so removing the menu
+  entry alone is presentation, not access control. The new permission has to
+  be enforced on the route as well.
+
+**Decision:** approved in principle — Super Admin only, as a holding position,
+to be revisited once targets and incentives land.
+
+*Files:* `packages/contracts/src/rbac.ts`,
+`apps/web/src/components/shell/navigation.ts`,
+`apps/web/src/app/(app)/performance/page.tsx` and its `verticals` sub-page,
+plus the API controller guarding the performance endpoints.
+
+**Note:** CR-25 lists "add account type as a dimension" to the performance
+report. If this is approved first, that work only ever reaches Super Admin —
+worth deciding whether it is still wanted now or deferred with the rest.
+
+---
+
 ### CR-21 — Messaging restricted to Super Admin
 **Change.** Currently gated on `campaign:read` / `campaign:create`, which
 Management and Marketing also hold.
@@ -460,7 +501,7 @@ the `changes` JSON payload, which is most of the volume; and measure which
 | # | Item | Reason |
 |---|---|---|
 | CR-1 | Event captures: assign unassigned leads to the event owner | Cancelled by the business. This was removed deliberately — it made every walk-up the property of one person who never asked for it, and meant a stall's registrations could not be handed out because they were already owned. |
-| CR-12 | Restrict Performance to Super Admin / Management / Operations | Discarded. CR-15 addresses the underlying concern by scoping reps to themselves, without removing access. |
+| CR-12 | Restrict Performance to Super Admin / Management / Operations | Discarded. CR-15 addresses the underlying concern by scoping reps to themselves, without removing access. **Superseded by CR-27**, which restricts the screen for a different reason — it is unfinished, not unsafe. |
 
 ---
 
