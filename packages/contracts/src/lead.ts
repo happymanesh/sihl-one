@@ -441,6 +441,15 @@ export interface LeadListItem {
   mobileMasked: string;
   email: string | null;
   city: string | null;
+  /**
+   * Which legal entity the account is for.
+   *
+   * On the list because a mobile number no longer identifies a lead on its
+   * own: since the duplicate key became (mobile, account type), two rows can
+   * legitimately show the same masked number, and without this the only thing
+   * telling them apart is whatever somebody typed in the name.
+   */
+  entityType: LeadEntityType;
   status: (typeof LEAD_STATUSES)[number];
   source: string;
   priority: (typeof PRIORITIES)[number];

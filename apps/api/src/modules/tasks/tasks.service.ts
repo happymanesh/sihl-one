@@ -9,6 +9,7 @@ import {
 import { AuditService } from '../../common/audit.service';
 import { OutboxService } from '../../common/outbox.service';
 import { ReferenceService } from '../../common/reference.service';
+import { istDayEnd, istToday } from '../../common/ist-day';
 import { ScopeService } from '../../common/scope.service';
 import { paginate, type AuthenticatedPrincipal, type PaginatedResult } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -49,14 +50,44 @@ export class TasksService {
 
       `overdueOnly` below already filtered on the category. The two now agree.
     */
-    if (query.status) and.push({ statusMaster: { category: query.status } });
+    if (query.status) {
+      and.push({ statusMaster: { category: query.status } });
+    } else {
+      /*
+        No status asked for means work in hand, not everything ever.
+
+        The screen offered an "Open" button pointing at bare /tasks and marked
+        it active by default, so it looked like the open view. It was not: the
+        list returned all 28 tasks while the Open tile beside it said 17, and
+        done and cancelled work sat among today's follow-ups. Defaulting here
+        rather than in the page keeps the tile and the rows it links to
+        counting the same thing.
+
+        An explicit `status` still wins, which is what lets a Completed view
+        exist at all.
+      */
+      and.push({ statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } });
+    }
     if (query.assigneeId) and.push({ assigneeId: query.assigneeId });
     if (query.entityType) and.push({ entityType: query.entityType });
     if (query.entityId) and.push({ entityId: query.entityId });
     if (query.dueBefore) and.push({ dueAt: { lte: query.dueBefore } });
     if (query.overdueOnly) {
+      /*
+        Overdue means the day passed, not the hour.
+
+        This compared `dueAt` with the current instant, so a task due at nine
+        this morning was overdue by ten — on the same day it was meant to be
+        done, while the person was still doing it. Reps saw today's work in
+        red and the Due today tile skipped it, which is the complaint that
+        "any task of today is also considered as Overdue".
+
+        Midnight IST, not `new Date()` and not the process's local midnight.
+        The containers run UTC, so a local midnight is half past five in the
+        morning here — the same half-day skew CR-13 found in the reports.
+      */
       and.push({
-        dueAt: { lt: new Date() },
+        dueAt: { lt: istToday() },
         statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
       });
     }
@@ -200,7 +231,9 @@ export class TasksService {
       }
     }
 
-    const now = new Date();
+    // Midnight here, so a row is late on the same terms the filter and the
+    // tiles use it.
+    const startOfToday = istToday();
     return paginate(
       rows.map((task) => ({
         id: task.id,
@@ -210,8 +243,12 @@ export class TasksService {
         status: task.status,
         priority: task.priority,
         dueAt: task.dueAt.toISOString(),
+        // The same boundary the filter and the tiles use. Three different
+        // answers to "is this late" on one screen is how a count ends up
+        // disagreeing with the rows beneath it.
         isOverdue:
-          task.dueAt < now && !TERMINAL_CATEGORIES.has(task.statusMaster?.category ?? 'OPEN'),
+          task.dueAt < startOfToday &&
+          !TERMINAL_CATEGORIES.has(task.statusMaster?.category ?? 'OPEN'),
         statusLabel: task.statusMaster?.label ?? task.status,
         statusCategory: task.statusMaster?.category ?? 'OPEN',
         entityType: task.entityType,
@@ -400,24 +437,43 @@ export class TasksService {
   async summary(user: AuthenticatedPrincipal) {
     const base = { deletedAt: null, AND: [this.scope.taskScope(user)] };
     const now = new Date();
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    /*
+      Both boundaries in IST, which is the only place a "day" means anything
+      to this business.
+
+      `new Date(y, m, d, 23, 59, 59)` is the end of the day *the process*
+      thinks it is. On Railway that is UTC, so "today" ran from 05:30 to
+      05:30 and the tiles were wrong by half a day for everybody.
+    */
+    const startOfToday = istToday();
+    const endOfToday = istDayEnd(now);
 
     const [open, overdue, dueToday, completedThisWeek] = await this.prisma.$transaction([
       this.prisma.task.count({
         where: { ...base, statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } },
       }),
+      // Overdue: the due day is behind us. Anything due later today belongs
+      // in Due today, which is the next count along.
       this.prisma.task.count({
         where: {
           ...base,
           statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
-          dueAt: { lt: now },
+          dueAt: { lt: startOfToday },
         },
       }),
+      /*
+        Due today: the whole day, not the rest of it.
+
+        This started at `now`, so a task due at nine fell out of Due today by
+        ten and reappeared under Overdue. The two tiles between them lost
+        exactly the tasks a rep had not got to yet this morning — the ones
+        most worth showing.
+      */
       this.prisma.task.count({
         where: {
           ...base,
           statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } },
-          dueAt: { gte: now, lte: endOfToday },
+          dueAt: { gte: startOfToday, lte: endOfToday },
         },
       }),
       this.prisma.task.count({

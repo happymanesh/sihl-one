@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import type { Route } from 'next';
 import type {
   PerformancePeriodKind,
@@ -126,6 +127,12 @@ export default async function PerformancePage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
+  // This page checked that you were signed in and nothing more, so it opened
+  // for every role that could reach the API behind it. The API refuses the
+  // data now, which would leave a signed-in reader staring at an error; this
+  // is the courtesy redirect in front of that refusal.
+  if (!can(user, 'performance:read')) redirect('/dashboard');
+
   const params = await searchParams;
 
   const scope = (params.scope as PerformanceScope) ?? 'TEAM';

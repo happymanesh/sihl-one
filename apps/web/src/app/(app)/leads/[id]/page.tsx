@@ -11,7 +11,12 @@ import {
 } from '@sihl-one/contracts';
 import type { Route } from 'next';
 
-import { LeadStatusBadge, PriorityBadge, ScoreBadge } from '@/components/ui/Badge';
+import {
+  AccountTypeBadge,
+  LeadStatusBadge,
+  PriorityBadge,
+  ScoreBadge,
+} from '@/components/ui/Badge';
 import { DocumentPanel } from '@/components/documents/DocumentPanel';
 import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
@@ -46,6 +51,8 @@ interface LeadDetail {
   status: string;
   source: string;
   priority: string;
+  /** Individual / HUF / Corporate / NRI / Trust. */
+  entityType: string;
   productInterest: string[];
   profile: LeadProfileView | null;
   estimatedValue: string | null;
@@ -220,6 +227,18 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold">{lead.fullName}</h1>
+              {/*
+                Account type sits first of the three, because it says what this
+                record *is* while the other two say how it is going. It is also
+                the one that changes how the name should be read: "Bachhan HUF"
+                and "Abhishek Bachhan" can share a mobile number quite
+                legitimately, and on screen the only thing telling them apart
+                was the name somebody happened to type.
+
+                Shown on every lead, including individuals. An absent badge
+                would be ambiguous — individual, or did it fail to load?
+              */}
+              <AccountTypeBadge entityType={lead.entityType} />
               <LeadStatusBadge status={lead.status} />
               <PriorityBadge priority={lead.priority} />
               {/* Converted leads are read-only in the API — the customer record

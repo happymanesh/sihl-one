@@ -27,6 +27,15 @@ export interface NavItem {
  * leads to a 403.
  */
 export const NAV_ITEMS: NavItem[] = [
+  /*
+    First, because it is the question the day starts with.
+
+    Gated on `task:read` alone rather than on both lists. A rep who can see
+    tasks but not visits still has a day worth showing, and the page asks for
+    each list separately and tolerates either coming back empty — so a missing
+    grant costs that half of the agenda, not the screen.
+  */
+  { label: 'My day', href: '/my-day', icon: 'calendar', permissions: ['task:read'], section: 'work' },
   {
     // Gated, despite being everyone's default landing page for staff. A partner
     // holds none of the sales analytics permissions the staff dashboard reads,
@@ -49,7 +58,10 @@ export const NAV_ITEMS: NavItem[] = [
   // not where anyone looked for it.
   { label: 'Visits', href: '/visits', icon: 'pin', permissions: ['visit:read'], section: 'work' },
 
-  { label: 'Performance', href: '/performance', icon: 'chart', permissions: ['analytics:sales:read'], section: 'work' },
+  // Super admin only, until targets and incentives exist. See CR-27 and the
+  // note on `performance:read` — the page and the API enforce it too, because
+  // a menu that hides a link is presentation, not access control.
+  { label: 'Performance', href: '/performance', icon: 'chart', permissions: ['performance:read'], section: 'work' },
 
   // Same permission as the dashboard, because the separation here is by data
   // scope rather than by rank: a rep opens this and sees one row — their own.

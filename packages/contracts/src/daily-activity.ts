@@ -242,3 +242,32 @@ export function istDayWindow(date: string): { from: Date; to: Date } {
   const from = new Date(`${date}T00:00:00.000+05:30`);
   return { from, to: new Date(from.getTime() + 86_400_000 - 1) };
 }
+
+/** A bare calendar day, as a date picker sends it. */
+const IST_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A calendar day from a picker, read as the instant the business means.
+ *
+ * `z.coerce.date()` reads `2026-10-05` as **UTC** midnight, which here is
+ * half past five that morning. A range filter built on it therefore loses the
+ * first five and a half hours of its first day and the last eighteen and a
+ * half of its last — the defect CR-13 found in the sales report, and the same
+ * one in every other filter that takes a day from a picker.
+ *
+ * `from` widens to the first millisecond of that IST day, `to` to the last. A
+ * full timestamp passes through untouched: a caller asking for an exact
+ * instant means it.
+ *
+ * Shared rather than written out per schema, for the reason the server's
+ * `ist-day` module gives: a timezone rule copied to a second call site is a
+ * timezone rule that will disagree with itself.
+ */
+export const istDayBoundary = (edge: 'from' | 'to') =>
+  z.preprocess((value) => {
+    if (typeof value === 'string' && IST_DAY.test(value)) {
+      const window = istDayWindow(value);
+      return edge === 'from' ? window.from : window.to;
+    }
+    return value;
+  }, z.coerce.date());

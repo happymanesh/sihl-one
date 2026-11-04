@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { istDayWindow } from './daily-activity';
+import { istDayBoundary } from './daily-activity';
 
 /**
  * Sales reporting.
@@ -25,35 +25,6 @@ import { istDayWindow } from './daily-activity';
  * table scan that times out — which is how reporting features come to be
  * blamed for slowing down the CRM.
  */
-/** A bare calendar day, as the range picker sends it. */
-const IST_DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * A calendar day from the picker, as the instant the business means.
- *
- * `z.coerce.date()` reads `2026-10-05` as **UTC** midnight, which in IST is
- * 05:30 that morning. A 5–7 October range was therefore queried as 05-Oct
- * 05:30 → 07-Oct 05:30 IST: the whole of the 7th was missing, and the first
- * five and a half hours of the 5th were dropped silently. Every report
- * circulated before this fix understated its final day.
- *
- * The day is widened to the IST day it names — `from` to its first
- * millisecond, `to` to its last — using the same helper the Daily Activity
- * report already uses, so the two reports cannot disagree about where a day
- * begins.
- *
- * A full timestamp passes through untouched: a caller asking for an exact
- * instant means it.
- */
-const istDayBoundary = (edge: 'from' | 'to') =>
-  z.preprocess((value) => {
-    if (typeof value === 'string' && IST_DAY.test(value)) {
-      const window = istDayWindow(value);
-      return edge === 'from' ? window.from : window.to;
-    }
-    return value;
-  }, z.coerce.date());
-
 /**
  * Whole days between two instants.
  *

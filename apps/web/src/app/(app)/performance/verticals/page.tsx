@@ -33,7 +33,7 @@ export default async function VerticalReportsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
-  if (!can(user, 'analytics:sales:read')) redirect('/dashboard');
+  if (!can(user, 'performance:read')) redirect('/dashboard');
 
   const params = await searchParams;
 

@@ -115,18 +115,27 @@ export function DuplicateMobileNotice({
   const entityLabel = LEAD_ENTITY_TYPE_LABELS[lead.entityType];
 
   /*
-    Three things this can mean, and only the first is a problem.
+    Three things this can mean, and only the first is a problem. `blocks`
+    answers "same account type, still live", which is the one the save will
+    refuse; an open lead that does not block is of some other type, and a
+    closed lead of any type is history.
 
-    `blocks` already answers "same account type, still live", which is the one
-    the save will refuse. An open lead that does not block is therefore of a
-    different type — worth naming, because recognising the karta is how the rep
-    knows they have the right family. A closed lead of any type is history.
+    All three name the account type of the lead that was *found*, never the
+    one being typed. That is the only one the rep cannot work out for
+    themselves — they chose the other a moment ago — and it is what tells them
+    whether they are looking at the karta's own lead or a straight duplicate.
+
+    The label is used as the contract spells it, not lower-cased. Lower-casing
+    read fine for "individual" and turned HUF into "Open huf lead on this
+    number", which looks like a bug in the product to the one audience that
+    uses the term daily. Written this way the article is always "an open", so
+    there is no a/an to get wrong either.
   */
   const headline = match.blocks
-    ? 'Already an open lead'
+    ? `Already an open ${entityLabel} lead`
     : lead.isOpen
-      ? `Open ${entityLabel.toLowerCase()} lead on this number`
-      : `Previously a ${entityLabel.toLowerCase()} lead`;
+      ? `Open ${entityLabel} lead on this number`
+      : `Closed ${entityLabel} lead on this number`;
 
   return (
     <>

@@ -35,7 +35,7 @@ export class PerformanceController {
    * they are accountable for, and it is scoped to what they can already see.
    */
   @Get('verticals')
-  @RequirePermissions('analytics:sales:read')
+  @RequirePermissions('performance:read')
   @ApiOperation({
     summary: 'The National Heads who own a vertical, with how many roll up to each',
     description:
@@ -47,7 +47,7 @@ export class PerformanceController {
   }
 
   @Get('report/verticals')
-  @RequirePermissions('analytics:sales:read')
+  @RequirePermissions('performance:read')
   @ApiOperation({
     summary: 'One report per vertical head, for the daily round of emails',
     description:
@@ -62,7 +62,7 @@ export class PerformanceController {
   }
 
   @Get('report')
-  @RequirePermissions('analytics:sales:read')
+  @RequirePermissions('performance:read')
   @ApiOperation({ summary: 'Performance across a team, region or branch' })
   reportFor(
     @CurrentUser() user: AuthenticatedPrincipal,
@@ -72,7 +72,7 @@ export class PerformanceController {
   }
 
   @Get('me')
-  @RequirePermissions('analytics:sales:read')
+  @RequirePermissions('performance:read')
   @ApiQuery({ name: 'days', required: false })
   @ApiOperation({
     summary: 'Your own scorecard',
@@ -88,7 +88,7 @@ export class PerformanceController {
   }
 
   @Get('users/:id')
-  @RequirePermissions('analytics:sales:read')
+  @RequirePermissions('performance:read')
   @ApiQuery({ name: 'days', required: false })
   @ApiOperation({
     summary: 'A team member’s scorecard',
@@ -116,7 +116,7 @@ export class PerformanceController {
    * watches for exactly that.
    */
   @Post('report/send')
-  @RequirePermissions('report:send')
+  @RequirePermissions('performance:read', 'report:send')
   @ApiOperation({
     summary: 'Email a performance report that has been previewed',
     description:

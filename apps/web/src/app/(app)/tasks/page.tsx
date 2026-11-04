@@ -13,6 +13,7 @@ import { ProductChips } from '@/components/ui/ProductChips';
 import { apiFetch, toQuery } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { formatDateTime, formatRelative } from '@/lib/format';
+import { istDayKey } from '@/lib/time';
 
 export const metadata = { title: 'Tasks' };
 
@@ -82,22 +83,39 @@ export default async function TasksPage({
         </p>
       </header>
 
+      {/*
+        The tiles are the filters.
+
+        A row of buttons underneath repeated Open and Overdue word for word,
+        so the screen asked the reader to choose between two controls that did
+        the same thing. Three of the four tiles now carry the filter their
+        number describes, which is the link somebody already expects to be
+        there when they read a count.
+
+        "Completed this week" stays a count. Its number is the last seven days
+        and the old Completed button showed every completed task ever, so
+        wiring one to the other would have put a list of 240 under a tile
+        reading 12.
+      */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label="Open" value={summary.open} />
+        <StatTile label="Open" value={summary.open} href="/tasks" />
         <StatTile
           label="Overdue"
           value={summary.overdue}
           tone={summary.overdue > 0 ? 'danger' : 'default'}
           href="/tasks?overdueOnly=true"
         />
-        <StatTile label="Due today" value={summary.dueToday} />
+        {/*
+          Today in IST, named explicitly rather than left to the server's own
+          clock. The range filters widen a bare day to the IST day it names,
+          so this matches the tile's count exactly.
+        */}
+        <StatTile
+          label="Due today"
+          value={summary.dueToday}
+          href={`/tasks?dueFrom=${istDayKey()}&dueTo=${istDayKey()}`}
+        />
         <StatTile label="Completed this week" value={summary.completedThisWeek} />
-      </div>
-
-      <div className="flex gap-2">
-        <FilterLink href={"/tasks" as Route} label="Open" active={!params.status && !params.overdueOnly} />
-        <FilterLink href={"/tasks?overdueOnly=true" as Route} label="Overdue" active={params.overdueOnly === 'true'} />
-        <FilterLink href={"/tasks?status=DONE" as Route} label="Completed" active={params.status === 'DONE'} />
       </div>
 
       {data.items.length === 0 ? (
@@ -262,20 +280,5 @@ export default async function TasksPage({
         </>
       )}
     </div>
-  );
-}
-
-function FilterLink({ href, label, active }: { href: Route; label: string; active: boolean }) {
-  return (
-    <Link
-      href={href}
-      className={`h-9 rounded-lg border px-3 text-xs font-semibold leading-9 transition-colors ${
-        active
-          ? 'border-navy-500 bg-navy-500 text-white'
-          : 'border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)]'
-      }`}
-    >
-      {label}
-    </Link>
   );
 }

@@ -1871,6 +1871,7 @@ export class LeadsService {
         reference: true,
         firstName: true,
         lastName: true,
+        entityType: true,
         mobile: true,
         email: true,
         city: true,
@@ -1934,6 +1935,18 @@ export class LeadsService {
       'Reference',
       'First name',
       'Last name',
+      /*
+        Account type sits with the name rather than with the contact details,
+        because it says which legal entity the row is, not how to reach it.
+
+        It belongs in the file at all for the same reason it is on the list: a
+        mobile number stopped identifying a lead when the duplicate key became
+        (mobile, account type). Two rows of an export can now carry the same
+        number legitimately — the karta and the family's HUF — and without
+        this column a spreadsheet deduplicated on Mobile silently merges two
+        different accounts.
+      */
+      'Account type',
       'Mobile',
       'Mobile verified',
       'Email',
@@ -1962,6 +1975,10 @@ export class LeadsService {
       lead.reference,
       lead.firstName,
       lead.lastName ?? '',
+      // The stored value, not the display label, to match Status, Source and
+      // Priority either side of it. A file whose enums are raw in three
+      // columns and prose in a fourth is one somebody has to special-case.
+      lead.entityType,
       lead.mobile,
       lead.mobileVerifiedAt ? 'Yes' : 'No',
       lead.email ?? '',
