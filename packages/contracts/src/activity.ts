@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ACTIVITY_DIRECTIONS, ACTIVITY_TYPES, PRIORITIES, TASK_STATUSES } from './enums';
+import { istDayBoundary } from './daily-activity';
 import { checkMeetingLink } from './masters';
 import { codeSchema, idSchema, paginationQuerySchema } from './common';
 
@@ -196,7 +197,15 @@ export const taskQuerySchema = paginationQuerySchema.extend({
    */
   client: z.string().trim().max(120).optional(),
   priority: z.enum(PRIORITIES).optional(),
-  dueFrom: z.coerce.date().optional(),
-  dueTo: z.coerce.date().optional(),
+  /*
+    Widened to the IST day, like every other day a picker sends.
+
+    `z.coerce.date()` reads a bare `2026-11-04` as UTC midnight, which here is
+    half past five that morning. "Due on or before today" therefore cut the
+    day off at 05:30 and missed everything due during working hours, while
+    "due on or after today" swept in the back half of yesterday evening.
+  */
+  dueFrom: istDayBoundary('from').optional(),
+  dueTo: istDayBoundary('to').optional(),
 });
 export type TaskQuery = z.infer<typeof taskQuerySchema>;
