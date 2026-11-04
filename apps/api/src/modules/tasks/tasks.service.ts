@@ -50,7 +50,24 @@ export class TasksService {
 
       `overdueOnly` below already filtered on the category. The two now agree.
     */
-    if (query.status) and.push({ statusMaster: { category: query.status } });
+    if (query.status) {
+      and.push({ statusMaster: { category: query.status } });
+    } else {
+      /*
+        No status asked for means work in hand, not everything ever.
+
+        The screen offered an "Open" button pointing at bare /tasks and marked
+        it active by default, so it looked like the open view. It was not: the
+        list returned all 28 tasks while the Open tile beside it said 17, and
+        done and cancelled work sat among today's follow-ups. Defaulting here
+        rather than in the page keeps the tile and the rows it links to
+        counting the same thing.
+
+        An explicit `status` still wins, which is what lets a Completed view
+        exist at all.
+      */
+      and.push({ statusMaster: { category: { in: ['OPEN', 'IN_PROGRESS'] } } });
+    }
     if (query.assigneeId) and.push({ assigneeId: query.assigneeId });
     if (query.entityType) and.push({ entityType: query.entityType });
     if (query.entityId) and.push({ entityId: query.entityId });
