@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { renameLead, type ActionState } from '@/app/actions/leads';
@@ -30,14 +30,30 @@ export function RenameLead({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [state, action] = useActionState(renameLead, INITIAL);
 
-  useEffect(() => {
-    if (state.status === 'success') {
+  /*
+    Closing is part of submitting, not a reaction to the result changing.
+
+    This used to be an effect keyed on `state.status`. The first correction
+    closed the panel; every one after it did not, and the only way out was
+    Cancel. After the first success the status *is* already "success", so
+    saving again produced an identical value, nothing in the dependency array
+    moved, and the effect never ran a second time.
+
+    Watching the whole `state` object instead would work — each action returns
+    a fresh object — but it works by identity rather than by intent, and reads
+    like something to tidy back into `state.status` later, which is how the
+    bug would return. Doing the close here says what is meant: a submission
+    that succeeded closes the panel, every time.
+  */
+  const [state, action] = useActionState(async (previous: ActionState, formData: FormData) => {
+    const result = await renameLead(previous, formData);
+    if (result.status === 'success') {
       setOpen(false);
       router.refresh();
     }
-  }, [state.status, router]);
+    return result;
+  }, INITIAL);
 
   if (!canEdit) return null;
 
