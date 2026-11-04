@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { VISIT_STATUSES } from './enums';
 import { ENTITY_TYPES } from './activity';
+import { istDayBoundary } from './daily-activity';
 import { ATTENDEE_ROLES } from './attendee';
 import { idSchema, paginationQuerySchema } from './common';
 
@@ -205,8 +206,15 @@ export const visitQuerySchema = paginationQuerySchema.extend({
   userId: idSchema.optional(),
   entityType: z.enum(ENTITY_TYPES).optional(),
   entityId: idSchema.optional(),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+  /*
+    Widened to the IST day, the same as the task grid's due-date filters.
+
+    A bare `2026-11-04` coerces to UTC midnight, which here is half past five
+    that morning — so "visits on the 4th" began mid-morning and ran into the
+    5th. My day asks for exactly one day and would have shown the wrong one.
+  */
+  from: istDayBoundary('from').optional(),
+  to: istDayBoundary('to').optional(),
   /** Restricts to visits whose location evidence needs a manager's eye. */
   needsReview: z.coerce.boolean().optional(),
 
