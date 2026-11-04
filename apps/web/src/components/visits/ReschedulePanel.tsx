@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { rescheduleVisit, type VisitActionState } from '@/app/actions/visits';
@@ -26,14 +26,27 @@ export function ReschedulePanel({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [state, action] = useActionState(rescheduleVisit, INITIAL);
+  /*
+    Closing is part of submitting, not a reaction to the result changing.
 
-  useEffect(() => {
-    if (state.status === 'success') {
+    This was an effect keyed on `state.status`. The first reschedule closed
+    the panel; every one after it left it open, because after that first
+    success the status *is* already "success" — saving again produced an
+    identical value, nothing in the dependency array moved, and the effect
+    never ran a second time. The save worked; the thing meant to react to it
+    had already fired.
+
+    Doing it here says what is meant: a submission that succeeded closes the
+    panel, every time. Same fix as RenameLead.
+  */
+  const [state, action] = useActionState(async (previous: VisitActionState, formData: FormData) => {
+    const result = await rescheduleVisit(previous, formData);
+    if (result.status === 'success') {
       setOpen(false);
       router.refresh();
     }
-  }, [state.status, router]);
+    return result;
+  }, INITIAL);
 
   // datetime-local wants `YYYY-MM-DDTHH:mm` in local time, and an ISO string
   // ending in Z is UTC. Slicing the ISO string would show a time five and a

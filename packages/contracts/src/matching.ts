@@ -21,6 +21,16 @@ export interface MatchCandidate {
   email?: string | null;
   pan?: string | null;
   city?: string | null;
+  /**
+   * Which legal entity the candidate is.
+   *
+   * Not scored, and deliberately: the fuzzy matcher weighs name, email, PAN
+   * and city, and an account type is none of those. It is here so a caller
+   * that decides on the mobile number alone — the event import does — can
+   * refuse to call an individual and the family HUF the same lead when they
+   * share a number, which they are entitled to do.
+   */
+  entityType?: string | null;
   /** Present on existing leads; used to explain the conflict, never to score it. */
   ownerName?: string | null;
   status?: string | null;

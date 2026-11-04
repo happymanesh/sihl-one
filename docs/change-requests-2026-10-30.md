@@ -2,9 +2,13 @@
 
 **Raised by:** Business team, via Manesh Mukherjee
 **Reviewed:** 28–30 October 2026
-**Status:** Approved items have been built and are on the branch
-`prod-findings-nov-2026`. Nothing is deployed. CR-9, CR-20 and CR-26 are
-still open — see Open questions.
+**Status:** Everything approved is built, merged to `main` and **live in
+production since 4 November 2026** — the API at 09:21 and the web at 09:27
+UTC, with no pending migrations in the batch.
+
+Still open: **CR-20** needs a retention period from compliance. **CR-9** is
+held for the next sprint and **CR-28** is parked. Everything else is built;
+work done after 4 November 09:27 UTC is on `main` but not yet deployed.
 
 Each point was checked against the source before being logged. Where the
 business reported a fault, the finding states whether it is a defect, intended
@@ -217,6 +221,26 @@ consistently in the application and not only in the database; account type
 visible wherever a lead is read, imported or counted. Leads with no type
 continue to read as Individual, and Insta Lead continues to save Individual.
 
+---
+
+**Delivered 1–4 November, and live in production:**
+
+- all three application-level duplicate checks — `checkMobile`, Insta Lead and
+  duplicate detection now key on mobile *and* account type
+- lead detail panel, as a badge beside the name with status and priority
+- lead list, where it replaced the Score column
+- both CSV exports, as column 4 of 21
+- every duplicate notice names the account type of the lead it *found*
+
+**Not delivered, and split out:**
+
+- **the lead import column** — still outstanding. See CR-29; it is a
+  correctness gap rather than a display one and did not belong with the rest.
+- **Report, MIS Summary and the performance report** — parked as CR-28. The
+  wording above says "add the column", which was wrong and is the reason it
+  looked small: MIS Summary is one row per *employee* and the sales report is
+  aggregates, so neither has a lead row to put a column on.
+
 *Files:* `apps/api/src/modules/leads/leads.service.ts`,
 `apps/api/src/modules/duplicates/duplicates.service.ts`,
 `apps/api/src/modules/imports/imports.service.ts`,
@@ -410,8 +434,10 @@ detail page: `summary`, `description`, `keyBenefits`, `chargesSummary`,
 
 Source: the brochures directory on the application host.
 
-**Open:** the PDFs have to be supplied — either by allowing the fetch from the
-host, or by sending the files.
+**Parked for the next sprint**, by decision on 4 November. Blocked since 30
+October on the same thing either way: somebody has to supply the brochures,
+by sending the files or by allowing the fetch from the host. Nothing else
+about it is undecided.
 
 ---
 
@@ -472,6 +498,85 @@ reading the existing task and visit list endpoints. No schema change.
 
 ## Parked
 
+### CR-28 — Account type as a reporting dimension
+**Parked for a future change,** split out of CR-25 once the rest of it
+shipped.
+
+**Change.** Account type does not appear in the sales Report, the MIS Summary
+or the performance report.
+
+**Why it is not a column.** CR-25 described this as "add the column, and a
+filter", which understated it and is why it read as small. Neither report has
+a lead-level row:
+
+- **MIS Summary** is one row per *employee* — counts of leads per rep. Account
+  type means either a set of extra columns per type, or a filter over the
+  whole sheet.
+- **Sales report** is aggregates — by owner, product, source, status and
+  branch. Account type means a new breakdown (`byEntityType`), not a column.
+
+So this is a decision about which question the report should answer, and worth
+designing rather than ticking off.
+
+**The performance part is very likely moot.** CR-27 restricted Performance to
+Super Admin, so a dimension added there would be seen by one person. It should
+move with the rest of the deferred Performance work, not with this.
+
+**What would make it worth doing:** volume. `entityType` only became settable
+at the end of October, so almost every lead in production is Individual and a
+breakdown today would be one bucket at nearly 100%. The Leads list now shows
+account type, so the count is visible at a glance. When somebody asks "how
+many HUF accounts did we open this quarter?" and the answer matters, this
+earns its place.
+
+*Files (if revived):* `apps/api/src/modules/reports/{reports,mis}.service.ts`,
+`apps/api/src/modules/performance/performance-report.service.ts`,
+`packages/contracts/src/{report,performance}.ts`
+
+---
+
+### CR-29 — Lead import cannot set account type
+**Outstanding — not parked.** Raised here because it was logged inside CR-25
+and would otherwise have been closed with it.
+
+**Change.** `IMPORTABLE_FIELDS` has no `entityType`, so every row of every
+imported file becomes an Individual whatever the spreadsheet says. A file of
+HUF accounts — the case where a bulk file is most likely to carry them — is
+silently recorded as a set of individuals.
+
+**This is a correctness gap, not a display one,** and that is why it does not
+belong with CR-28. The consequences compound:
+
+- the leads are wrong from the moment they land, and nothing on screen says so
+- the duplicate key is `(mobile, entityType)`, so an HUF imported as an
+  Individual will later collide with the karta's own lead — and the rep who
+  hits that refusal has no way to tell why
+- it is the one remaining path that can still write the wrong account type
+
+Reps adding leads by hand already pick the type on the form, and both exports
+now carry it, so the import is the last gap in a rule that is otherwise
+applied everywhere.
+
+**Decision:** build it now, taken 4 November — and built the same day.
+
+**Delivered.** `account_type` is an importable column, auto-mapped from the
+spellings these files use. An unrecognised value fails its row rather than
+being dropped, because this field decides what the record *is*; blank still
+means INDIVIDUAL, so files that imported yesterday import identically.
+
+Building it found a fourth place the old rule had survived. CR-25 fixed
+`checkMobile`, Insta Lead and the duplicates screen; the importer has its own
+matching, and it keyed on the number alone — so a file holding a karta and
+the family's HUF silently dropped the second row as a duplicate of the first.
+The within-file key and the event matcher now read the number *and* the
+account type. The fuzzy matcher is untouched: it weighs name, email, PAN and
+city, and its verdict is a suggestion the importer overrides at commit.
+
+*Files:* `packages/contracts/src/import.ts` (`IMPORTABLE_FIELDS`, the alias
+map), `apps/api/src/modules/imports/imports.service.ts`
+
+---
+
 ### CR-20 — Audit trail retention
 **Next sprint.** `audit_log` has no retention or archival and grows unbounded.
 
@@ -522,8 +627,7 @@ the `changes` JSON payload, which is most of the volume; and measure which
 
 ## Open questions
 
-- **CR-9** — how the brochure PDFs will be supplied.
-- **CR-20** — retention period, from compliance.
-- **CR-26** — whether to build the "My day" agenda view, the smaller first
-  step, or neither. The question of merging Tasks and Visits is answered —
-  keep them separate — and only the surface change is undecided.
+- **CR-20** — retention period, from compliance. The only one still waiting
+  on somebody outside the team.
+
+CR-9 moved to the next sprint and CR-29 was built, both on 4 November.

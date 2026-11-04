@@ -103,6 +103,21 @@ export function detectDelimiter(text: string): string {
 export const IMPORTABLE_FIELDS = [
   'firstName',
   'lastName',
+  /*
+    Which legal entity the account is for.
+
+    The import was the last path that could still record the wrong one. The
+    form has asked since CR-17 and both exports carry it, but a file wrote
+    INDIVIDUAL whatever its contents said — and a bulk file is exactly where a
+    set of HUF accounts arrives. Those leads were wrong from the moment they
+    landed, nothing on screen said so, and because the duplicate key is
+    (mobile, entity type) each one would later collide with the karta's own
+    lead and refuse it, for a reason the rep could not see.
+
+    Absent or blank still means INDIVIDUAL, so every file that imported
+    yesterday imports identically today.
+  */
+  'entityType',
   'mobile',
   'email',
   'pan',
@@ -150,6 +165,23 @@ const FIELD_ALIASES: Record<ImportableField, string[]> = {
     'customer name',
   ],
   lastName: ['last name', 'lastname', 'lname', 'surname', 'family name'],
+  /*
+    No bare "type": a lead file routinely carries a product type, a client
+    type or a visit type, and mapping one of those onto the legal entity would
+    turn a column nobody meant as identity into the thing the duplicate check
+    keys on. Auto-mapping is a suggestion the importer confirms, but a wrong
+    suggestion that looks plausible is the one that gets accepted.
+  */
+  entityType: [
+    'account type',
+    'accounttype',
+    'entity type',
+    'entitytype',
+    'legal entity',
+    'constitution',
+    'client constitution',
+    'holding type',
+  ],
   mobile: [
     'mobile',
     'mobile no',

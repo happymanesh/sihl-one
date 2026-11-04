@@ -5,7 +5,7 @@
   "description": "SIHL ONE API — NestJS 11 system-of-engagement service.",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "node scripts/dev.mjs",
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint .",

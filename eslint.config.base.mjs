@@ -19,6 +19,19 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/generated/**',
       '**/*.config.*',
+      /*
+        Build and dev plumbing, run by Node and belonging to no tsconfig.
+
+        The type-aware rules need a program for every file they lint and
+        *throw* when they cannot find one, so a single untyped script takes
+        the whole lint down with a stack trace about parserOptions — which
+        reads as a broken config rather than an unlinted file.
+
+        Ignored here, in the list that already exists, rather than by adding
+        a block that re-enters the typescript-eslint presets to switch them
+        off: that composition exhausted the V8 heap on this config.
+      */
+      '**/scripts/**',
     ],
   },
   js.configs.recommended,
