@@ -2,7 +2,9 @@
 
 **Raised by:** Business team, via Manesh Mukherjee
 **Reviewed:** 28–30 October 2026
-**Status:** Awaiting sign-off. Nothing in this list has been built.
+**Status:** Approved items have been built and are on the branch
+`prod-findings-nov-2026`. Nothing is deployed. CR-9, CR-20 and CR-26 are
+still open — see Open questions.
 
 Each point was checked against the source before being logged. Where the
 business reported a fault, the finding states whether it is a defect, intended
@@ -372,6 +374,61 @@ host, or by sending the files.
 
 ---
 
+## Design decisions
+
+### CR-26 — Should Tasks and Visits be one thing?
+**Asked.** Whether the two modules should stay separate or be combined, and
+what actually distinguishes them.
+
+**Answer: keep the two records separate. The duplication is in the screens,
+not in the model.**
+
+A task is an intention. A visit is evidence that something happened in the
+physical world. Every other difference follows from that one:
+
+| | Task | Visit |
+|---|---|---|
+| Lifecycle | Open → Done, a switch | Planned → Checked in → Checked out, a sequence with a duration |
+| Carries | title, due date, assignee, priority | location, check-in/out times, photo, geo-coordinates, attendees |
+| Who | one assignee | an owner *plus* colleagues who came along, credited separately |
+| Oversight | none | needs-review, with a manager's acknowledgement (CR-8) |
+
+The sharpest evidence turned up while fixing the task overdue defect: **the
+two modules define "overdue" differently, and both are right.** A task is
+overdue when its due *day* has passed — "call them by Friday" is not late at
+ten on Friday morning. A visit is overdue when its appointment *time* has
+passed — a two o'clock meeting is late at three. Merging the records forces
+one rule onto both, and it would be wrong for half of them.
+
+Merging would also force a choice between dragging check-in, geolocation,
+photo, attendees and the review flow onto every task — most of which are phone
+calls — or dropping them from visits. Those fields exist because a field visit
+is a *claim about where somebody was*; they are the audit trail, and ADR-0007
+deliberately shapes them as explicit check-in/check-out rather than tracking.
+Neither outcome is acceptable.
+
+**What is genuinely duplicated** is the surface. A rep asking "what am I doing
+today?" looks in two menu items, reads two sets of tiles, learns two filter
+idioms and reconciles two meanings of overdue. That is the complaint behind the
+question, and it is fixable without touching either model.
+
+**Proposal:** one read-only agenda view — "My day" — merging today's tasks and
+today's visits into a single ordered list, each row labelled with its type and
+opening its own record. Both modules stay exactly as they are; nothing is
+migrated, and no field moves.
+
+**Smaller first step, if the appetite is uncertain:** surface the next visit on
+the Tasks screen, or a combined count on the dashboard, and see whether reps
+stop asking. Cheap to build, cheap to withdraw.
+
+**Decision needed:** full "My day" view, the smaller step, or neither. Nothing
+has been built.
+
+*Files (if approved):* a new read-only route under `apps/web/src/app/(app)/`,
+reading the existing task and visit list endpoints. No schema change.
+
+---
+
 ## Parked
 
 ### CR-20 — Audit trail retention
@@ -426,3 +483,6 @@ the `changes` JSON payload, which is most of the volume; and measure which
 
 - **CR-9** — how the brochure PDFs will be supplied.
 - **CR-20** — retention period, from compliance.
+- **CR-26** — whether to build the "My day" agenda view, the smaller first
+  step, or neither. The question of merging Tasks and Visits is answered —
+  keep them separate — and only the surface change is undecided.
