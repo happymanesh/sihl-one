@@ -6,9 +6,9 @@
 production since 4 November 2026** — the API at 09:21 and the web at 09:27
 UTC, with no pending migrations in the batch.
 
-Still open: **CR-9** (brochure PDFs) and **CR-29** (account type on the lead
-import) need a decision; **CR-20** and **CR-28** are parked for a future
-change. See Open questions.
+Still open: **CR-20** needs a retention period from compliance. **CR-9** is
+held for the next sprint and **CR-28** is parked. Everything else is built;
+work done after 4 November 09:27 UTC is on `main` but not yet deployed.
 
 Each point was checked against the source before being logged. Where the
 business reported a fault, the finding states whether it is a defect, intended
@@ -434,8 +434,10 @@ detail page: `summary`, `description`, `keyBenefits`, `chargesSummary`,
 
 Source: the brochures directory on the application host.
 
-**Open:** the PDFs have to be supplied — either by allowing the fetch from the
-host, or by sending the files.
+**Parked for the next sprint**, by decision on 4 November. Blocked since 30
+October on the same thing either way: somebody has to supply the brochures,
+by sending the files or by allowing the fetch from the host. Nothing else
+about it is undecided.
 
 ---
 
@@ -555,8 +557,20 @@ Reps adding leads by hand already pick the type on the form, and both exports
 now carry it, so the import is the last gap in a rule that is otherwise
 applied everywhere.
 
-**Decision needed:** whether to build it now or accept the risk until bulk
-HUF files actually arrive.
+**Decision:** build it now, taken 4 November — and built the same day.
+
+**Delivered.** `account_type` is an importable column, auto-mapped from the
+spellings these files use. An unrecognised value fails its row rather than
+being dropped, because this field decides what the record *is*; blank still
+means INDIVIDUAL, so files that imported yesterday import identically.
+
+Building it found a fourth place the old rule had survived. CR-25 fixed
+`checkMobile`, Insta Lead and the duplicates screen; the importer has its own
+matching, and it keyed on the number alone — so a file holding a karta and
+the family's HUF silently dropped the second row as a duplicate of the first.
+The within-file key and the event matcher now read the number *and* the
+account type. The fuzzy matcher is untouched: it weighs name, email, PAN and
+city, and its verdict is a suggestion the importer overrides at commit.
 
 *Files:* `packages/contracts/src/import.ts` (`IMPORTABLE_FIELDS`, the alias
 map), `apps/api/src/modules/imports/imports.service.ts`
@@ -613,8 +627,7 @@ the `changes` JSON payload, which is most of the volume; and measure which
 
 ## Open questions
 
-- **CR-9** — how the brochure PDFs will be supplied.
-- **CR-20** — retention period, from compliance.
-- **CR-29** — whether to add the account-type column to the lead import now,
-  or accept that bulk files write the wrong type until HUF volume justifies
-  it. The only remaining path that can still record the wrong account type.
+- **CR-20** — retention period, from compliance. The only one still waiting
+  on somebody outside the team.
+
+CR-9 moved to the next sprint and CR-29 was built, both on 4 November.
