@@ -14,9 +14,9 @@ These are the product owner's standing instructions. They are not negotiable
 defaults, and they override any convenience the code might suggest.
 
 1. **Never deploy without being asked.** Not to Railway, not to Vercel, not to
-   staging, not to production. "It builds" is not permission. Each environment
-   needs its own explicit instruction, and approval for staging is never
-   approval for production.
+   production, not to the in-house servers. "It builds" is not permission.
+   Each environment needs its own explicit instruction, and approval for one is
+   never approval for another.
 2. **The production database holds live client data.** The sales team ran a CUG
    (closed user group) on real leads and never stopped. Nothing may be deleted
    or modified there without being asked. When clearing demo data, delete only
@@ -203,13 +203,19 @@ Not hypothetical. Each of these has bitten at least once.
 
 ## Deploying
 
-Everything runs on **Railway**, project `sihl-one`, environments `production`
-and `staging`. There is no GitHub integration: every deploy is a deliberate act.
+Everything runs on **Railway**, project `sihl-one`, environment `production`.
+There is no GitHub integration: every deploy is a deliberate act.
 
 ```bash
-railway up --environment staging --service api --ci
-railway up --environment staging --service web --ci
+railway up --environment production --service api --ci
+railway up --environment production --service web --ci
 ```
+
+**There is no staging.** It was removed on 5 November 2026: local development
+and production are the two environments, and the in-house UAT server is where
+a build is exercised before it reaches anyone. Deploy the API first and the
+web immediately after — a split between them is the state to avoid, because
+the API enforces permissions the web only describes.
 
 - **Only when explicitly asked.** See constraint 1.
 - Migrations run automatically: `apps/api/docker-entrypoint.sh` executes
