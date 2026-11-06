@@ -96,6 +96,7 @@ export const NAV_ITEMS: NavItem[] = [
     something you *do*, and this is something you look at. Gated on `mis:read`,
     which nobody holds by name — see the note on the permission.
   */
+  { label: 'CEO overview', href: '/mis/overview', icon: 'chart', permissions: ['mis:read'], section: 'mis' },
   { label: 'Team performance', href: '/mis/team', icon: 'users', permissions: ['mis:read'], section: 'mis' },
   { label: 'Campaigns', href: '/campaigns', icon: 'megaphone', permissions: ['campaign:read'], section: 'grow' },
   { label: 'Messaging', href: '/messaging', icon: 'bell', permissions: ['messaging:manage'], section: 'grow' },

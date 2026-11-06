@@ -102,6 +102,24 @@
      anyone who picks dark inside the app on a light machine. */
   --color-warn-surface: rgb(253 236 200 / 0.45);
   --color-warn-strong: #b45309;
+
+  /* Chart series, as their own tokens rather than brand steps used directly.
+     The dark values are chosen against the dark surface rather than flipped:
+     navy-500 on #08243c is too close to its own background, and a chart that
+     is legible in one theme and muddy in the other is a chart nobody trusts.
+     Both pairs are validated for colour-vision separation — see CR-30. */
+  --color-chart-1: #0a5281;
+  --color-chart-2: #1d8f6a;
+
+  /* The pipeline stages: one hue, four steps, light to dark. Ordered stages
+     rather than four categories, so a reader who cannot separate hues still
+     reads lightness. The dark steps are different values, not the same ones
+     on a dark ground — navy-800 against the dark surface is 1.16:1, which is
+     invisible. */
+  --color-stage-1: #6ba7ce;
+  --color-stage-2: #3a80b3;
+  --color-stage-3: #094a74;
+  --color-stage-4: #06304c;
   color-scheme: light;
 }
 
@@ -121,6 +139,12 @@ html.dark {
   --color-chrome-text: #e8f2f9;
   --color-warn-surface: rgb(180 83 9 / 0.18);
   --color-warn-strong: #f0b429;
+  --color-chart-1: #3a80b3;
+  --color-chart-2: #2fa47c;
+  --color-stage-1: #d3e5f1;
+  --color-stage-2: #a7cbe3;
+  --color-stage-3: #6ba7ce;
+  --color-stage-4: #3a80b3;
   color-scheme: dark;
 }
 

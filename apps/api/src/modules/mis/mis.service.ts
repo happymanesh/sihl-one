@@ -5,7 +5,12 @@ import {
   normaliseStaffCode,
   NON_VERTICAL_NATIONAL_HEAD_CODE,
   MIS_TEAM_CSV_COLUMNS,
+  OVERVIEW_MONTHS,
+  OVERVIEW_WEEKS,
   type MisCounts,
+  type MisHeadline,
+  type MisOverview,
+  type MisTrendPoint,
   type MisTeamQuery,
   type MisTeamReport,
   type MisTeamRow,
@@ -363,4 +368,209 @@ export class MisService {
 
     return { csv: toCsv(MIS_TEAM_CSV_COLUMNS, rows), asOn: report.asOn };
   }
+
+  // -------------------------------------------------------------------------
+  // CEO overview
+  // -------------------------------------------------------------------------
+
+  /**
+   * The same firm as charts.
+   *
+   * The vertical comparison is taken from `teamReport` rather than queried
+   * again, so the bars and the table cannot disagree about what a vertical is
+   * carrying — which they would, eventually, if each counted for itself.
+   */
+  async overview(): Promise<MisOverview> {
+    const now = new Date();
+    const team = await this.teamReport({});
+
+    /*
+      Buckets built from IST days, not from UTC instants.
+
+      A lead created at eleven at night in Mumbai is `createdAt` the next day
+      in UTC. Bucketing on the stored instant would push a slice of every
+      evening into the following week, and the last week of a month into the
+      next month — precisely the error CR-13 found in the reports.
+    */
+    const weekKeys = lastWeeks(now, OVERVIEW_WEEKS);
+    const monthKeys = lastMonths(now, OVERVIEW_MONTHS);
+    const earliestWeek = new Date(`${weekKeys[0].start}T00:00:00.000+05:30`);
+    const earliestMonth = new Date(`${monthKeys[0].key}-01T00:00:00.000+05:30`);
+    const from = earliestWeek < earliestMonth ? earliestWeek : earliestMonth;
+
+    const [created, converted] = await Promise.all([
+      this.prisma.lead.findMany({
+        where: { deletedAt: null, mergedIntoId: null, createdAt: { gte: from } },
+        select: { createdAt: true },
+      }),
+      this.prisma.lead.findMany({
+        where: { deletedAt: null, mergedIntoId: null, convertedAt: { gte: from } },
+        select: { convertedAt: true },
+      }),
+    ]);
+
+    const weekly = bucket(weekKeys, weekKeyOf);
+    const monthly = bucket(monthKeys, (day) => day.slice(0, 7));
+
+    for (const row of created) {
+      const day = istDayKey(row.createdAt);
+      weekly.add(day, 'created');
+      monthly.add(day, 'created');
+    }
+    for (const row of converted) {
+      if (!row.convertedAt) continue;
+      const day = istDayKey(row.convertedAt);
+      weekly.add(day, 'converted');
+      monthly.add(day, 'converted');
+    }
+
+    const months = monthly.points();
+    const thisMonth = months[months.length - 1];
+    const lastMonth = months[months.length - 2];
+
+    const rate = (point: MisTrendPoint | undefined): number | null =>
+      point && point.created > 0 ? Math.round((point.converted / point.created) * 1000) / 10 : null;
+
+    const thisRate = rate(thisMonth);
+    const lastRate = rate(lastMonth);
+
+    return {
+      asOn: team.asOn,
+      periodLabel: monthLabel(istDayKey(now).slice(0, 7), true),
+      leadsCreated: headline(thisMonth?.created ?? 0, lastMonth?.created ?? 0, true),
+      converted: headline(thisMonth?.converted ?? 0, lastMonth?.converted ?? 0, true),
+      conversionRate: {
+        value: thisRate,
+        previous: lastRate,
+        better: thisRate === null || lastRate === null ? null : thisRate >= lastRate,
+      },
+      /*
+        Idle has no previous period to compare against.
+
+        It is a state of the firm right now, not a count of something that
+        happened during November, so there is no October figure that would
+        mean the same thing. Carried as a plain number with no movement
+        rather than invented.
+      */
+      idlePeople: {
+        value: team.totalIdle,
+        previous: team.totalIdle,
+        changePercent: null,
+        better: null,
+      },
+      weekly: weekly.points(),
+      monthly: months,
+      verticals: team.rows.map((row) => ({
+        userId: row.userId,
+        name: row.name,
+        counts: row.counts,
+        conversionRate:
+          row.counts.total > 0
+            ? Math.round((row.counts.converted / row.counts.total) * 1000) / 10
+            : null,
+        teamSize: row.teamSize,
+        idleCount: row.idleCount,
+      })),
+      idleAfterDays: IDLE_AFTER_DAYS,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bucketing, all of it in IST days
+// ---------------------------------------------------------------------------
+
+/** A headline and its movement. `risingIsGood` decides wording and colour. */
+function headline(value: number, previous: number, risingIsGood: boolean): MisHeadline {
+  const changePercent =
+    previous > 0 ? Math.round(((value - previous) / previous) * 1000) / 10 : null;
+  const better = value === previous ? null : risingIsGood ? value > previous : value < previous;
+  return { value, previous, changePercent, better };
+}
+
+/** Monday of the week a day falls in, as `YYYY-MM-DD`. */
+function mondayOf(dayKey: string): string {
+  const date = new Date(`${dayKey}T00:00:00.000Z`);
+  // getUTCDay puts Sunday at 0, which is the end of the week here, not its
+  // start — so shift by six before taking the remainder.
+  const shift = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - shift);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Keyed on the Monday, so two spellings of "week 45" cannot disagree. */
+function weekKeyOf(dayKey: string): string {
+  return `W${mondayOf(dayKey)}`;
+}
+
+function dayLabel(dayKey: string): string {
+  const date = new Date(`${dayKey}T00:00:00.000Z`);
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+}
+
+function monthLabel(monthKey: string, long = false): string {
+  const date = new Date(`${monthKey}-01T00:00:00.000Z`);
+  return date.toLocaleDateString('en-IN', {
+    month: long ? 'long' : 'short',
+    year: long ? 'numeric' : '2-digit',
+    timeZone: 'UTC',
+  });
+}
+
+function lastWeeks(
+  now: Date,
+  count: number,
+): Array<{ period: string; label: string; start: string }> {
+  const thisMonday = mondayOf(istDayKey(now));
+  const weeks: Array<{ period: string; label: string; start: string }> = [];
+  for (let back = count - 1; back >= 0; back -= 1) {
+    const date = new Date(`${thisMonday}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() - back * 7);
+    const start = date.toISOString().slice(0, 10);
+    weeks.push({ period: `W${start}`, label: dayLabel(start), start });
+  }
+  return weeks;
+}
+
+function lastMonths(
+  now: Date,
+  count: number,
+): Array<{ period: string; label: string; key: string }> {
+  const parts = istDayKey(now).split('-');
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const months: Array<{ period: string; label: string; key: string }> = [];
+  for (let back = count - 1; back >= 0; back -= 1) {
+    const date = new Date(Date.UTC(year, month - 1 - back, 1));
+    const key = date.toISOString().slice(0, 7);
+    months.push({ period: key, label: monthLabel(key), key });
+  }
+  return months;
+}
+
+/**
+ * Fixed buckets that ignore anything falling outside them.
+ *
+ * Seeded from the key list rather than grown from the data, so a week nobody
+ * worked still appears as a zero. A trend with missing weeks reads as a
+ * shorter period rather than a quiet one.
+ */
+function bucket(
+  keys: ReadonlyArray<{ period: string; label: string }>,
+  keyOf: (dayKey: string) => string,
+) {
+  const index = new Map<string, MisTrendPoint>();
+  const ordered: MisTrendPoint[] = keys.map((k) => {
+    const point: MisTrendPoint = { period: k.period, label: k.label, created: 0, converted: 0 };
+    index.set(k.period, point);
+    return point;
+  });
+
+  return {
+    add(dayKey: string, field: 'created' | 'converted') {
+      const point = index.get(keyOf(dayKey));
+      if (point) point[field] += 1;
+    },
+    points: () => ordered,
+  };
 }

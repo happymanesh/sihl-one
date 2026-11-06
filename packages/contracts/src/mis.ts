@@ -187,3 +187,78 @@ export const MIS_TEAM_CSV_COLUMNS = [
   'Last activity',
   'Idle days',
 ] as const;
+
+// ---------------------------------------------------------------------------
+// CEO overview
+// ---------------------------------------------------------------------------
+
+/**
+ * How far back the trends reach.
+ *
+ * Twelve of each: a quarter is too short to show a trend and two years is a
+ * history lesson. Twelve weeks also means the current week is always visible
+ * beside the same week of the previous quarter.
+ */
+export const OVERVIEW_WEEKS = 12;
+export const OVERVIEW_MONTHS = 12;
+
+/** One bucket of a trend. */
+export interface MisTrendPoint {
+  /** Machine key — `2026-W45` or `2026-11`. Stable, and never displayed. */
+  period: string;
+  /** What a person reads on the axis: `10 Nov` or `Nov 26`. */
+  label: string;
+  created: number;
+  /**
+   * Leads converted *in* this bucket, whenever they were created.
+   *
+   * A rep who closes January's lead in March is counted in March, which is
+   * when the work happened. It also means `converted` is not a subset of this
+   * bucket's `created`, so the two series must never be stacked — the gap
+   * between them is not a funnel, and drawing it as one would invite exactly
+   * that reading.
+   */
+  converted: number;
+}
+
+/** One vertical, for the comparison. */
+export interface MisVerticalSummary {
+  userId: string;
+  name: string;
+  counts: MisCounts;
+  /** Percentage to one decimal, or null when the vertical holds no leads. */
+  conversionRate: number | null;
+  teamSize: number;
+  idleCount: number;
+}
+
+/**
+ * A headline figure and its movement.
+ *
+ * The direction is carried rather than inferred from the sign, because for
+ * `idlePeople` a rise is bad and for everything else it is good — and a tile
+ * that colours by sign alone gets one of them backwards.
+ */
+export interface MisHeadline {
+  value: number;
+  previous: number;
+  /** Null when the previous period was zero: a change from nothing is not a %. */
+  changePercent: number | null;
+  /** Whether the movement is good news, for colour *and* wording. */
+  better: boolean | null;
+}
+
+export interface MisOverview {
+  asOn: string;
+  /** The IST month these headlines cover, e.g. `November 2026`. */
+  periodLabel: string;
+  leadsCreated: MisHeadline;
+  converted: MisHeadline;
+  /** Percentage points, one decimal — not a count. */
+  conversionRate: { value: number | null; previous: number | null; better: boolean | null };
+  idlePeople: MisHeadline;
+  weekly: MisTrendPoint[];
+  monthly: MisTrendPoint[];
+  verticals: MisVerticalSummary[];
+  idleAfterDays: number;
+}

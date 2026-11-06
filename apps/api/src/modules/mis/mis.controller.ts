@@ -40,6 +40,21 @@ export class MisController {
     return this.mis.teamReport(query);
   }
 
+  /**
+   * The headline picture: this month against last, and the trends behind it.
+   *
+   * Its vertical comparison comes from the same rollup the tree does, so the
+   * two screens cannot disagree about what a vertical is carrying.
+   */
+  @Get('overview')
+  @RequirePermissions('mis:read')
+  @ApiOperation({
+    summary: 'Headline figures, week-on-week and month-on-month progress, and verticals compared',
+  })
+  overview() {
+    return this.mis.overview();
+  }
+
   /** The same report as a file, every level of the tree. */
   @Get('team/export')
   @RequirePermissions('mis:read')
