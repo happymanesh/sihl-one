@@ -102,6 +102,30 @@
      anyone who picks dark inside the app on a light machine. */
   --color-warn-surface: rgb(253 236 200 / 0.45);
   --color-warn-strong: #b45309;
+
+  /* Chart series, as their own tokens rather than brand steps used directly.
+     The dark values are chosen against the dark surface rather than flipped:
+     navy-500 on #08243c is too close to its own background, and a chart that
+     is legible in one theme and muddy in the other is a chart nobody trusts.
+     Both pairs are validated for colour-vision separation — see CR-30. */
+  --color-chart-1: #0a5281;
+  --color-chart-2: #1d8f6a;
+
+  /* The pipeline stages, as the business names them: blue untouched, orange
+     in progress, green converted, red lost. The same four the lead status
+     badges already use, so a stage reads the same wherever it appears.
+
+     One set for both themes: every step clears 3:1 against the light surface
+     *and* the dark one, and all four sit inside each theme's lightness band.
+
+     Green and red are adjacent in the bar and separate by only ΔE 4.6 under
+     deuteranopia, so colour alone cannot carry the pair. Two things cover it:
+     every segment's number is written out beside its own swatch, and Lost
+     carries a diagonal texture as well as a hue — see `.stage-textured`. */
+  --color-stage-1: #2563eb;
+  --color-stage-2: #d97706;
+  --color-stage-3: #55a038;
+  --color-stage-4: #dc2626;
   color-scheme: light;
 }
 
@@ -121,7 +145,26 @@ html.dark {
   --color-chrome-text: #e8f2f9;
   --color-warn-surface: rgb(180 83 9 / 0.18);
   --color-warn-strong: #f0b429;
+  --color-chart-1: #3a80b3;
+  --color-chart-2: #2fa47c;
   color-scheme: dark;
+}
+
+/*
+  A second signal for a segment whose hue is not enough on its own.
+
+  Green and red sit next to each other in the pipeline bar and separate by
+  ΔE 4.6 under deuteranopia — indistinguishable for the commonest form of
+  colour blindness, and they are the two numbers a chief executive most needs
+  to tell apart. The hatch means the pair differ in pattern as well, which
+  also survives a black-and-white printout and forced-colours mode.
+*/
+.stage-textured {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgb(255 255 255 / 0.55) 0 2px,
+    transparent 2px 5px
+  );
 }
 
 @layer base {

@@ -1,9 +1,11 @@
 import Link from 'next/link';
+import type { Route } from 'next';
 import { CLOSED_LEAD_STATUSES, type LeadListItem } from '@sihl-one/contracts';
 
 import { AccountTypeBadge, LeadStatusBadge, PriorityBadge } from '@/components/ui/Badge';
 import { LeadCheckbox, LeadSelectAllCheckbox } from '@/components/leads/LeadSelection';
 import { ProductChips } from '@/components/ui/ProductChips';
+import { leadHref } from '@/lib/lead-list';
 import { formatCompactCurrency, formatDateCompact, formatRelative, humanise } from '@/lib/format';
 
 /**
@@ -18,6 +20,7 @@ export function LeadTable({
   leads,
   productLabels,
   selectable = false,
+  listQuery = null,
 }: {
   leads: LeadListItem[];
   /** Code → name from the product master, so chips read "NRI" not "Nri". */
@@ -31,6 +34,13 @@ export function LeadTable({
     feeds does.
   */
   selectable?: boolean;
+  /*
+    The list these rows came from, carried into each lead so it can offer the
+    next one. Absent wherever this table is not the leads list itself — a lead
+    opened from somewhere else has no list to walk, and the control it feeds
+    does not appear.
+  */
+  listQuery?: string | null;
 }) {
   return (
     <>
@@ -84,7 +94,7 @@ export function LeadTable({
                   ) : null}
                   <td className="px-4 py-3">
                     <Link
-                      href={`/leads/${lead.id}`}
+                      href={leadHref(lead.id, listQuery) as Route}
                       className="font-semibold hover:text-teal-600 hover:underline dark:hover:text-teal-300"
                     >
                       {lead.fullName}
@@ -202,7 +212,7 @@ export function LeadTable({
                 {lead.owner ? null : <LeadCheckbox id={lead.id} label={lead.fullName} />}
               </span>
             ) : null}
-            <Link href={`/leads/${lead.id}`} className="card block flex-1 p-4">
+            <Link href={leadHref(lead.id, listQuery) as Route} className="card block flex-1 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-bold">{lead.fullName}</p>

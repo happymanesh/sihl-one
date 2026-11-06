@@ -50,7 +50,7 @@ export function AppShell({
     });
   };
 
-  const sections = (['work', 'grow', 'learn', 'admin'] as const)
+  const sections = (['work', 'mis', 'grow', 'learn', 'admin'] as const)
     .map((section) => ({ section, items: items.filter((item) => item.section === section) }))
     .filter((group) => group.items.length > 0);
 

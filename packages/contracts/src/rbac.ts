@@ -175,6 +175,20 @@ export const PERMISSIONS = [
   */
   'performance:read',
   /*
+    The CEO's MIS.
+
+    Its own grant, and not folded into `performance:read`: that one withdrew a
+    screen until it has targets to measure against, while this one is the view
+    of the firm from the top and is wanted now. Tying them would mean reviving
+    Performance in order to give somebody the MIS.
+
+    Held by super admin through ALL_PERMISSIONS, and granted to nobody else by
+    name. The report reads the whole firm by design — it is not scoped, because
+    a CEO report that showed a subtree would be answering a different question
+    — so the permission is the only thing standing in front of it.
+  */
+  'mis:read',
+  /*
     Seeing the partner portal.
 
     Split from `analytics:partner:read`, which Management also holds — so
