@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import type { Route } from 'next';
-import type { LeadListItem } from '@sihl-one/contracts';
 
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/leads/ExportMenu';
@@ -11,7 +10,8 @@ import { LeadTable } from '@/components/leads/LeadTable';
 import { BackLink } from '@/components/ui/BackLink';
 import { Pagination } from '@/components/ui/Pagination';
 import type { LeadOwnerFilterOptions, LeadSourceItem, ProductItem } from '@sihl-one/contracts';
-import { apiFetch, toQuery } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
+import { leadListQuery, type LeadListPage } from '@/lib/lead-list';
 import { can, canAny, requireUser } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 
@@ -21,14 +21,6 @@ export const metadata = { title: 'Leads' };
 interface Assignee {
   id: string;
   fullName: string;
-}
-
-interface Paginated {
-  items: LeadListItem[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
 }
 
 /**
@@ -60,47 +52,18 @@ export default async function LeadsPage({
     return Array.isArray(value) ? value[0] : value;
   };
 
-  const query = toQuery({
-    q: first('q'),
-    status: params.status as string | string[] | undefined,
-    source: params.source as string | string[] | undefined,
-    productInterest: params.productInterest as string | string[] | undefined,
-    priority: first('priority'),
-    ownerId: first('ownerId'),
-    // The unowned pile. Not an id, so it needs its own parameter.
-    owned: first('owned'),
-    eventId: first('eventId'),
-    attendedEventId: first('attendedEventId'),
-    /*
-      The event drill-downs.
+  /*
+    Built from the shared filter list rather than spelled out here.
 
-      Every count on an event — a rep's row, a dashboard tile — links here with
-      the filters it was counted from. Dropping any of them silently widens the
-      list: the reader clicks a four and lands on four hundred, with nothing on
-      screen admitting the filter was discarded. Anything the API's LeadQuery
-      accepts and a link can set has to be forwarded here.
-    */
-    capturedById: first('capturedById'),
-    captured: first('captured'),
-    returningAtEventId: first('returningAtEventId'),
-    mobileVerified: first('mobileVerified'),
-    // Same story from the other two places that link here: a campaign's "View
-    // leads" and a partner's "View all leads". The partner page makes it
-    // plainest — its own panel calls the API directly and counts correctly, so
-    // the reader sees "8 of 23", clicks through, and lands on the whole book.
-    campaignId: first('campaignId'),
-    partnerId: first('partnerId'),
-    overdueOnly: first('overdueOnly'),
-    // The performance drill-downs: "never contacted" and "no contact 2d+".
-    // Exactly the case the note above describes — without this the reader
-    // clicks 54 and lands on all 60.
-    contact: first('contact'),
-    minScore: first('minScore'),
-    sortBy: first('sortBy') ?? 'createdAt',
-    sortDir: first('sortDir') ?? 'desc',
-    page: first('page') ?? '1',
-    pageSize: '20',
-  });
+    Every count elsewhere — a rep's row on an event, a dashboard tile, a
+    campaign's "View leads" — links here with the filters it was counted under.
+    Dropping any of them silently widens the list: the reader clicks a four and
+    lands on four hundred, with nothing on screen admitting the filter was
+    discarded. The lead page now rebuilds this same query to work out which lead
+    comes next, so the two have to agree, and the only way to guarantee that is
+    for both to read one list of filters.
+  */
+  const query = leadListQuery(params);
 
   const [sources, products, owners] = await Promise.all([
     apiFetch<LeadSourceItem[]>('/masters/lead-sources').catch(() => [] as LeadSourceItem[]),
@@ -149,7 +112,7 @@ export default async function LeadsPage({
   const canBulkAssign = unownedView && can(user, 'lead:assign');
 
   const [data, assignees] = await Promise.all([
-    apiFetch<Paginated>(`/leads${query}`),
+    apiFetch<LeadListPage>(`/leads${query}`),
     // Who may receive work. Not the owner filter's list — that one is derived
     // from leads and answers "whose are these"; this answers "who may I hand
     // these to", which is a different question with a different answer.
@@ -355,10 +318,15 @@ export default async function LeadsPage({
           </div>
         ) : (
           <>
+            {/*
+              Rows carry the list they belong to, so the lead they open knows
+              what "next" means — this filter, this sort, this page.
+            */}
             <LeadTable
               leads={data.items}
               productLabels={productLabels}
               selectable={canBulkAssign}
+              listQuery={query}
             />
             <Pagination
               page={data.page}

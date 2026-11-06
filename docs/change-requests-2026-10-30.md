@@ -263,6 +263,51 @@ live per product only.
 
 ---
 
+### CR-31 — Next lead, without going back to the list
+**Change.** A **Next lead** button at the foot of the header on a lead,
+right-aligned, with the lead's position in the list beside it ("4 of 166").
+It opens the lead that follows this one *in the list it was opened from*,
+including across a page boundary, and **the filters count**: a list narrowed
+to high-priority converted leads walks those five and nothing else.
+
+**Why it is resolved against the list and not the lead.** "Next" has no
+meaning on a lead by itself — the same lead has a different neighbour under a
+different filter or a different sort. So each row on the leads list carries
+the query it belongs to, and the lead re-runs that query to find its own
+position. Re-running it, rather than carrying a snapshot of row ids, is also
+what makes a filter the reader set *after* opening the list count.
+
+**One filter list, read by both screens.** The list page and the lead page now
+build the query from the same allowlist. Spelling it out twice is how a filter
+gets added to one and forgotten in the other, and the failure is silent: the
+reader walks Next through leads that were never on their screen. That value
+also arrives off the address bar and is concatenated onto an API path, so
+rebuilding it through the allowlist is what keeps a crafted one from
+addressing a different endpoint.
+
+**Where it does not appear.** A lead opened from Tasks, Pipeline, Visits,
+Duplicates, search or a pasted link has no list to walk, so there is no
+button. Nor is there one if the lead has left the list since it was opened —
+somebody changed a status while it was on screen. A Next that quietly skipped
+to the wrong record would be worse than none.
+
+At the end of the list the button is replaced by "Last in this list" rather
+than disappearing, so the reader knows they have finished rather than
+wondering whether it broke. The breadcrumb now also returns to the list *as
+filtered*, which it did not before.
+
+**Not included:** a Previous button. Browser back already steps back through
+the leads walked, and the ask was for Next. Say if it is wanted.
+
+**Decision:** requested and built 6 November.
+
+*Files:* `apps/web/src/lib/lead-list.ts`,
+`apps/web/src/components/leads/{LeadCursorNav,LeadTable}.tsx`,
+`apps/web/src/app/(app)/leads/page.tsx`,
+`apps/web/src/app/(app)/leads/[id]/page.tsx`
+
+---
+
 ## Visits
 
 ### CR-7 — Default list, filters and search

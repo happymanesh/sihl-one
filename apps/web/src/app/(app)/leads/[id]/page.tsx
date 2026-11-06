@@ -20,6 +20,7 @@ import {
 import { DocumentPanel } from '@/components/documents/DocumentPanel';
 import { Icon } from '@/components/shell/Icon';
 import { LeadActions } from '@/components/leads/LeadActions';
+import { LeadCursorNav } from '@/components/leads/LeadCursorNav';
 import { Timeline } from '@/components/leads/Timeline';
 import { LeadProductOutcomes } from '@/components/leads/LeadProductOutcomes';
 import { RenameLead } from '@/components/leads/RenameLead';
@@ -30,6 +31,7 @@ import { MissingProductsPrompt } from '@/components/leads/MissingProductsPrompt'
 import { LeadProfilePanel } from '@/components/leads/LeadProfilePanel';
 import { VerifyMobile } from '@/components/leads/VerifyMobile';
 import { apiFetch } from '@/lib/api';
+import { resolveLeadCursor } from '@/lib/lead-list';
 import { BackLink } from '@/components/ui/BackLink';
 import { can, requireUser } from '@/lib/auth';
 import { formatCurrency, formatDate, formatDateTime, formatRelative, humanise } from '@/lib/format';
@@ -130,11 +132,29 @@ function voiceInputEnabled(): boolean {
   return process.env.VOICE_INPUT_ENABLED === 'true';
 }
 
-export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function LeadDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   const { id } = await params;
 
   const lead = await apiFetch<LeadDetail>(`/leads/${id}`);
+
+  /*
+    Which list this lead is being read from, if any.
+
+    Set by the leads list on every row it renders, and carried forward by Next,
+    so walking a filtered slice stays inside that slice. Absent for a lead
+    opened from Tasks, Pipeline, Visits, Duplicates, search or a pasted link —
+    there is no list to walk, and the control does not appear.
+  */
+  const listParam = (await searchParams).list;
+  const rawList = Array.isArray(listParam) ? listParam[0] : listParam;
+  const cursor = rawList ? await resolveLeadCursor(lead.id, rawList) : null;
 
   // The owner picker is only fetched for users who can actually assign — one
   // fewer API call for the majority of users, who cannot.
@@ -212,7 +232,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <BackLink fallback="/leads" />
         <nav className="text-xs text-[var(--color-text-muted)]">
-          <Link href="/leads" className="hover:underline">
+          {/* Back to the list as it was filtered, when this lead came from one.
+              Plain /leads otherwise — and plain /leads from a lead walked to by
+              Next would throw away the slice being worked. */}
+          <Link
+            href={(cursor ? `/leads${cursor.listQuery}` : '/leads') as Route}
+            className="hover:underline"
+          >
             Leads
           </Link>
           <span className="mx-1.5" aria-hidden>
@@ -309,16 +335,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </div>
         </div>
 
-        {can(user, 'visit:create') && !lead.customer ? (
-          <Link
-            href={`/visits/new?entityType=LEAD&entityId=${lead.id}` as Route}
-            className="btn btn-outline mt-4"
-          >
-            <Icon name="pin" size={16} />
-            Plan a field visit
-          </Link>
-        ) : null}
-
         {lead.customer ? (
           <div className="mt-4 rounded-lg border border-teal-500/40 bg-teal-50 px-4 py-2.5 text-sm dark:bg-teal-900/25">
             Converted to customer{' '}
@@ -326,6 +342,29 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               {lead.customer.reference}
             </Link>
             {lead.convertedAt ? ` on ${formatDate(lead.convertedAt)}` : ''}
+          </div>
+        ) : null}
+
+        {/*
+          The foot of the header: what to do with this lead on the left, where
+          to go next on the right. Rendered only when there is something to put
+          in it, so a converted lead reached by a pasted link does not carry an
+          empty band.
+        */}
+        {(can(user, 'visit:create') && !lead.customer) || cursor ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              {can(user, 'visit:create') && !lead.customer ? (
+                <Link
+                  href={`/visits/new?entityType=LEAD&entityId=${lead.id}` as Route}
+                  className="btn btn-outline"
+                >
+                  <Icon name="pin" size={16} />
+                  Plan a field visit
+                </Link>
+              ) : null}
+            </div>
+            {cursor ? <LeadCursorNav cursor={cursor} /> : null}
           </div>
         ) : null}
       </header>
