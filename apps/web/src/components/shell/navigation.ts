@@ -15,7 +15,7 @@ export interface NavItem {
    * that 404s. A dead menu item is worse than an absent one.
    */
   available?: boolean;
-  section: 'work' | 'grow' | 'learn' | 'admin';
+  section: 'work' | 'mis' | 'grow' | 'learn' | 'admin';
 }
 
 /**
@@ -88,6 +88,15 @@ export const NAV_ITEMS: NavItem[] = [
   // or an eligibility rule mid-call — so it reads better at the end of
   // Work than above the screens they live in all day.
   { label: 'Products', href: '/products', icon: 'grid', permissions: ['lead:read'], section: 'work' },
+
+  /*
+    Management information, for the one person who reads the firm from the top.
+
+    Its own section rather than another entry under Work: everything in Work is
+    something you *do*, and this is something you look at. Gated on `mis:read`,
+    which nobody holds by name — see the note on the permission.
+  */
+  { label: 'Team performance', href: '/mis/team', icon: 'users', permissions: ['mis:read'], section: 'mis' },
   { label: 'Campaigns', href: '/campaigns', icon: 'megaphone', permissions: ['campaign:read'], section: 'grow' },
   { label: 'Messaging', href: '/messaging', icon: 'bell', permissions: ['messaging:manage'], section: 'grow' },
   /*
@@ -137,6 +146,7 @@ export const NAV_ITEMS: NavItem[] = [
 
 export const SECTION_LABELS: Record<NavItem['section'], string> = {
   work: 'Work',
+  mis: 'MIS',
   grow: 'Grow',
   learn: 'Training & Test',
   admin: 'Administration',

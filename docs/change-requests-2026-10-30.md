@@ -349,6 +349,70 @@ against new on real data and circulate the comparison first.
 
 ---
 
+## MIS
+
+### CR-30 — An MIS section for the CEO
+**Change.** A fifth navigation section, `MIS`, holding two reports for
+SIHL-0044 (Tanmay Shah): **Team performance**, a per-person tree with counts
+and idleness, and **CEO overview**, the same picture as charts.
+
+**Team performance.** One row per vertical head — the CEO's direct reports —
+expandable to their reports and so on down the line. A manager's row carries
+the rollup of everyone beneath them; expanding adds their own book as a child
+row, so children always sum to the parent. Columns: Vertical / Person, Team,
+Idle, Untouched, In progress, Converted, Lost, Total leads, Last activity,
+Idle days. Totals at the foot, and a unique-lead reconciliation beneath the
+table. CSV exports fully expanded with Level and Reports-to columns.
+
+Two exception rows, shown only when they are not zero, because both mean
+something is wrong rather than something is happening:
+
+- **SIHL-0044's own book.** He should own no leads. If he does, he appears
+  with his own count alone and no expansion — rolling up his team would be the
+  whole firm.
+- **Unassigned.** Leads with no owner at all, which are otherwise invisible
+  and are the ones most at risk.
+
+**CEO overview.** Four headline numbers, week-on-week and month-on-month
+progress, a vertical comparison and the pipeline composition.
+
+**The colour decision is forced, and worth writing down.** The brand has three
+usable hues and they are adjacent — navy, teal, brand-green, blue through to
+green. Every three-colour set fails the normal-vision separation floor
+(ΔE 9.5–13.7 against a floor of 15), meaning a reader with full colour vision
+cannot reliably tell two verticals apart. So **colour never carries vertical
+identity**: a vertical is named on the axis or in the row, comparison bars use
+one hue, the ordered pipeline stages use one hue light-to-dark, and the only
+two-series charts are created-versus-converted on the validated navy/teal
+pair the app already ships. If verticals ever need to be lines over time, the
+answer is small multiples, not five colours.
+
+**Defaults taken where no answer was given.** Each is a constant, easy to
+change once somebody decides:
+
+- **Idle = 7 calendar days** with no activity.
+- **Activity** means any of: logged an interaction, checked into a visit,
+  created or updated a lead, or converted one.
+- **A vertical head is a direct report of SIHL-0044** — structural, and it
+  maintains itself as people join and leave. Note that `verticalHeadOf` uses a
+  different rule (designation `NATIONAL_HEAD`, excluding SIHL-0044), so the
+  Performance report may group people differently if the data disagrees.
+- Weeks are **calendar weeks, Monday to Sunday**, so two printouts of the same
+  week always match.
+
+**Decision:** approved 6 November. Team performance first — it names people
+and surfaces idle reps — then the overview.
+
+**Access:** Super Admin and the CEO. With Performance withdrawn by CR-27 this
+is the only per-person view in the product, which is a deliberate position
+rather than an accident.
+
+*Files:* `packages/contracts/src/mis.ts`,
+`apps/api/src/modules/mis/`, `apps/web/src/app/(app)/mis/`,
+`apps/web/src/components/shell/navigation.ts`
+
+---
+
 ## Navigation and access
 
 ### CR-11 — Products below My business

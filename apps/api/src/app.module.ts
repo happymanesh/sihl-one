@@ -39,6 +39,7 @@ import { MessagingModule } from './modules/messaging/messaging.module';
 import { OrgUnitsModule } from './modules/org-units/org-units.module';
 import { ImportsModule } from './modules/imports/imports.module';
 import { OffboardingModule } from './modules/offboarding/offboarding.module';
+import { MisModule } from './modules/mis/mis.module';
 import { PerformanceModule } from './modules/performance/performance.module';
 import { TrainingModule } from './modules/training/training.module';
 import { QuestionsModule } from './modules/questions/questions.module';
@@ -83,6 +84,7 @@ import { MailModule } from './modules/mail/mail.module';
     PartnersModule,
     ImportsModule,
     OffboardingModule,
+    MisModule,
     PerformanceModule,
     TrainingModule,
     QuestionsModule,
