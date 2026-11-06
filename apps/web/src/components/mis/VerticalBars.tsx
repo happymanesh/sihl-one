@@ -140,7 +140,9 @@ export function VerticalBars({ verticals }: { verticals: MisVerticalSummary[] })
                   {STAGES.map((stage) => (
                     <span key={stage.key} className="inline-flex items-center gap-1">
                       <span
-                        className="h-2 w-2 shrink-0 rounded-sm"
+                        className={`h-2 w-2 shrink-0 rounded-sm ${
+                          stage.textured ? 'stage-textured' : ''
+                        }`}
                         style={{ backgroundColor: stage.color }}
                         aria-hidden
                       />
@@ -165,32 +167,33 @@ export function VerticalBars({ verticals }: { verticals: MisVerticalSummary[] })
 }
 
 /**
- * One hue, four steps, light to dark — and the numbers written out beside it.
+ * Blue untouched, orange in progress, green converted, red lost.
  *
- * Two things were tried first and rejected on measurement rather than taste.
+ * Chosen by the business, and the same four the lead status badges already
+ * use — so a stage reads the same here as it does on a lead. One set serves
+ * both themes: every step clears 3:1 against the light surface and the dark
+ * one, and all four sit inside each theme's lightness band.
  *
- * The status colours the rest of the product uses — green for converted, red
- * for lost — put those two segments next to each other at ΔE 4.6 under
- * deuteranopia. A colour-blind reader could not separate the two numbers a
- * chief executive most needs to tell apart. Amber instead of red was no better
- * at 5.4.
+ * The cost, measured rather than guessed: green and red are adjacent in the
+ * bar and separate by only ΔE 4.6 under deuteranopia. For the commonest form
+ * of colour blindness those two segments look the same, and they are the two
+ * a chief executive most needs to tell apart.
  *
- * The obvious navy steps, 400 through 700, are compressed at the dark end:
- * 500, 600 and 700 differ by so little that three of the four stages read as
- * one block. 300/400/600/800 clears the ordinal checks — monotone lightness,
- * every adjacent gap at or above 0.06, and a light end that still shows
- * against white.
- *
- * A sequential ramp is also the honest *form*: these are positions along one
- * path, not four unrelated categories. It is CVD-safe by construction,
- * because a reader who cannot separate hues still reads lightness — and the
- * direct labels mean nobody has to.
+ * So the pair does not rely on hue. Every segment's number is written out
+ * beside its own swatch, and Lost carries a diagonal hatch as well as its
+ * colour — which also survives a black-and-white printout and forced-colours
+ * mode. A sequential navy ramp was built first and would have been CVD-safe
+ * by construction; this is the deliberate trade of that property for colours
+ * the business reads instantly.
  */
 const STAGES = [
-  { key: 'untouched', color: 'var(--color-stage-1)' },
-  { key: 'inProgress', color: 'var(--color-stage-2)' },
-  { key: 'converted', color: 'var(--color-stage-3)' },
-  { key: 'lost', color: 'var(--color-stage-4)' },
+  { key: 'untouched', color: 'var(--color-stage-1)', textured: false },
+  { key: 'inProgress', color: 'var(--color-stage-2)', textured: false },
+  { key: 'converted', color: 'var(--color-stage-3)', textured: false },
+  // Lost carries a hatch as well as its colour. Green and red are adjacent
+  // here and separate by only ΔE 4.6 under deuteranopia, so hue alone cannot
+  // be trusted to tell converted from lost — the one pair that matters most.
+  { key: 'lost', color: 'var(--color-stage-4)', textured: true },
 ] as const;
 
 function Composition({ counts }: { counts: MisVerticalSummary['counts'] }) {
@@ -202,6 +205,7 @@ function Composition({ counts }: { counts: MisVerticalSummary['counts'] }) {
       {segments.map((stage, index) => (
         <span
           key={stage.key}
+          className={stage.textured ? 'stage-textured' : undefined}
           title={`${MIS_LEAD_GROUP_LABELS[stage.key]}: ${counts[stage.key]}`}
           style={{
             width: `${(counts[stage.key] / counts.total) * 100}%`,
