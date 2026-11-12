@@ -88,8 +88,28 @@ export class UsersService {
         designation: { select: { name: true } },
         productGroups: true,
       },
-      orderBy: [{ firstName: 'asc' }],
-      take: 100,
+      /*
+        Complete, not capped.
+
+        This was `take: 100` ordered by first name, which silently dropped
+        everybody from the hundred-and-first name onward — and the pickers it
+        feeds are plain selects with no search, so there was no way to reach a
+        missing person. The symptom is cruel: a list that ends partway down the
+        alphabet looks exactly like a list of everyone you are allowed to
+        assign to, so the reader concludes the person may not be assigned
+        rather than that the list stopped. Reported from production, where the
+        directory is in the hundreds; invisible in development, where it is
+        eighteen.
+
+        A cap is wrong here in principle, not just badly sized. The list is
+        already bounded by `assignableUserScope` — every name in it is somebody
+        this caller may hand work to, and every name left out is somebody they
+        may hand work to but cannot see. Omission has to mean "not permitted"
+        for the control to be readable at all. If the directory ever grows past
+        what a select can hold, the answer is a searchable picker, not a
+        quieter cut.
+      */
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });
 
     return users.map((row) => ({
@@ -167,8 +187,10 @@ export class UsersService {
         employeeCode: true,
         orgUnit: { select: { name: true } },
       },
+      // Uncapped, for the reason given in `assignable`: this picker is also a
+      // pre-fetched select with no search, so a cut here hides a colleague
+      // with no way to reach them. 200 was higher than 100 and no more honest.
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
-      take: 200,
     });
 
     return users.map((row) => ({
